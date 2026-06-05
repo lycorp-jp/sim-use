@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Explicit data-extraction policy for API 31+ (Android 12+). Belt-
+  and-suspenders alongside `android:allowBackup="false"` in the
+  manifest. The bridge persists exactly one piece of data on the
+  device — the bearer token in SharedPreferences — and that token
+  is regenerable via `sim-use android init`, so opting out of
+  cloud-backup and device-to-device transfer entirely is the
+  right call.
+-->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <exclude domain="root" />
+        <exclude domain="sharedpref" />
+        <exclude domain="database" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="sharedpref" />
+        <exclude domain="database" />
+    </device-transfer>
+</data-extraction-rules>

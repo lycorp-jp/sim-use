@@ -1,0 +1,40 @@
+[
+  {
+    "type": "Application",
+    "AXLabel": "LINE Dev",
+    "frame": { "x": 0, "y": 0, "width": 402, "height": 874 },
+    "children": [
+      {
+        "type": "Group",
+        "AXLabel": "Banner",
+        "frame": { "x": 0, "y": 100, "width": 402, "height": 200 },
+        "children": [
+          { "type": "Button", "AXLabel": "banner ch mute", "frame": { "x": 372, "y": 160, "width": 17, "height": 17 } },
+          { "type": "Button", "AXLabel": "banner ch more", "frame": { "x": 372, "y": 232, "width": 17, "height": 17 } },
+          { "type": "Button", "AXLabel": "IAS検証-複数AD-SmartCH", "frame": { "x": 18, "y": 185, "width": 166, "height": 18 } },
+          { "type": "StaticText", "AXLabel": "トークタブが新しくなりました！", "frame": { "x": 132, "y": 684, "width": 183, "height": 16 } },
+          { "type": "StaticText", "AXLabel": "後で見る", "frame": { "x": 225, "y": 707, "width": 49, "height": 16 } }
+        ]
+      },
+      {
+        "type": "Group",
+        "AXLabel": "FriendsList",
+        "frame": { "x": 0, "y": 321, "width": 402, "height": 204 },
+        "children": [
+          { "type": "GenericElement", "AXLabel": "友だち追加,友だちを追加してトークを始めよう。", "frame": { "x": 0, "y": 321, "width": 402, "height": 68 } },
+          { "type": "Button", "AXLabel": "ccc", "frame": { "x": 0, "y": 389, "width": 402, "height": 68 } },
+          { "type": "Button", "AXLabel": "one dog", "frame": { "x": 0, "y": 457, "width": 402, "height": 68 } }
+        ]
+      },
+      {
+        "type": "Group",
+        "AXLabel": "ScatteredCTAs",
+        "frame": { "x": 0, "y": 580, "width": 402, "height": 240 },
+        "children": [
+          { "type": "Button", "AXLabel": "カレンダーを見る", "frame": { "x": 289, "y": 580, "width": 97, "height": 16 } },
+          { "type": "StaticText", "AXLabel": "アルバムをまとめて見る", "frame": { "x": 137, "y": 817, "width": 134, "height": 16 } }
+        ]
+      }
+    ]
+  }
+]

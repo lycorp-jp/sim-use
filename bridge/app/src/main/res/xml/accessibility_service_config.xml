@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Event types: we subscribe to both `typeWindowStateChanged` and
+  `typeWindowContentChanged`. The earlier "pull-only, subscribe to
+  the minimum" stance turned out to be wrong: the framework's
+  internal AX node cache that backs `rootInActiveWindow` is
+  invalidated by events the service subscribes to. Subscribing only
+  to `typeWindowStateChanged` left the cache stuck whenever in-app
+  changes (tab switches, fragment swaps inside the same Activity)
+  emitted `typeWindowContentChanged` events that we silently dropped
+  — resulting in `describe-ui` returning a stale Home-tab tree
+  while the screen was on Chats / News. Matches the configuration
+  shipped by both `csat` and upstream `droidrun-portal`.
+
+  Timeout: `notificationTimeout="100"` matches the same upstreams.
+  Higher values further damp the cache-refresh cadence and are not
+  worth the savings for a pull-only service.
+
+  `description` / `summary` point at the existing `strings.xml` so
+  the Accessibility settings page shows a human-readable label.
+-->
+<accessibility-service
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagIncludeNotImportantViews|flagReportViewIds|flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:canPerformGestures="true"
+    android:canTakeScreenshot="true"
+    android:isAccessibilityTool="true"
+    android:description="@string/accessibility_service_description"
+    android:summary="@string/accessibility_service_summary"
+    android:notificationTimeout="100" />

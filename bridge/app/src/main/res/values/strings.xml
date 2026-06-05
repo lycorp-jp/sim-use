@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">sim-use device bridge</string>
+    <string name="accessibility_service_description">Exposes the accessibility tree and dispatches gestures for sim-use CLI automation.</string>
+    <string name="accessibility_service_summary">sim-use automation bridge</string>
+</resources>

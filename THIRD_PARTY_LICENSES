@@ -1,0 +1,75 @@
+sim-use is distributed under the Apache License, Version 2.0 (see LICENSE and
+NOTICE). It includes or depends on the third-party open source software listed
+below, grouped by license to mirror the FossID source-scan Notice report.
+
+Note on Facebook idb: sim-use links against XCFrameworks built from Meta's idb
+and ships them in its release artifacts. The idb source is not vendored in this
+repository — it is fetched and patched at build time (see patches/idb/) — so it
+does not appear in the source-level scan, but it is a real dependency and is
+attributed below.
+
+
+================================================================================
+Apache License, Version 2.0
+================================================================================
+The full text of the Apache License 2.0 is in the LICENSE file at the root of
+this repository, and at http://www.apache.org/licenses/LICENSE-2.0.
+
+The following components are licensed under Apache-2.0:
+
+  - swift-argument-parser 1.5.0
+      Copyright (c) Apple Inc. and the Swift project authors
+      https://github.com/apple/swift-argument-parser
+  - androidx.core:core 1.13.1
+      Copyright (c) The Android Open Source Project
+  - androidx.core:core-ktx 1.13.1
+      Copyright (c) The Android Open Source Project
+  - androidx.annotation:annotation 1.1.0
+      Copyright (c) The Android Open Source Project
+  - org.jetbrains.kotlin:kotlin-stdlib 1.8.22
+      Copyright (c) JetBrains s.r.o. and Kotlin Programming Language contributors
+      https://github.com/JetBrains/kotlin
+
+
+================================================================================
+MIT License
+================================================================================
+The following components are licensed under the MIT License (full text below):
+
+  - AXe
+      Copyright (c) 2025 Cameron Cooke
+      https://github.com/cameroncooke/AXe
+      sim-use was forked from AXe v1.6.0 and substantially modified.
+  - Facebook idb
+      Copyright (c) Meta Platforms, Inc. and affiliates.
+      https://github.com/facebook/idb
+      Linked as XCFrameworks; source fetched and patched at build time.
+  - react 18.3.1
+  - react-dom 18.3.1
+  - scheduler 0.23.2
+      Copyright (c) Meta Platforms, Inc. and affiliates.
+      (bundled inside the Viewer SPA, Tools/Viewer)
+  - js-tokens 4.0.0
+      Copyright (c) Simon Lydell
+  - loose-envify 1.4.0
+      Copyright (c) Andres Suarez
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
