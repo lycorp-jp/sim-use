@@ -47,48 +47,31 @@ Plan, code, **verify**, ship — teach this CLI to your agent and close the last
 
 ## The observe → act loop
 
-sim-use is designed around a single loop pattern an agent can execute in ~300 ms per round trip:
+Every interaction follows the same cycle — observe, act, verify:
 
-1. `sim-use ui --device $UDID` — dumps the current screen as a compact outline (`@N` aliases per element, region banding, state tags) and writes a cache at `~/.sim-use/<UDID>/last-outline.json`.
-2. `sim-use tap @<N> --device $UDID` — taps the Nth element from that snapshot, resolving through the cache without re-walking the AX tree.
-3. `sim-use ui` again to verify the new state.
-
-A worked round trip:
-
-```text
-$ sim-use ui --device $UDID
-App: Settings  402x874
-
-[Top  y<120]
-  @1  StaticText  "Settings"
-[Content  y=120..754]
-  @5  SearchField  "Search"
-  @7  Button  "Sign in to your iPhone"
-  @9  Button  "General"
-  @10 Button  "Display & Brightness"
-  @11 Button  "Wallpaper"
-  ...
-[Bottom  y>754]
-  @43 TabBar
-
-$ sim-use tap @9 --device $UDID          # open General
-$ sim-use ui --device $UDID     # confirm the new screen
+```bash
+sim-use ui                  # 1. read the screen
+sim-use tap @9              # 2. act on what you see
+sim-use ui                  # 3. verify the result
 ```
 
-Four selector styles sit on top of the same cache:
+Multiple selector styles for different needs:
 
-| Form | Resolves via | When to prefer |
+| Selector | Example | Best for |
 |---|---|---|
-| `tap @N` | alias cache from last `ui` | Fastest; use right after `ui`, no drift detection |
-| `tap #N` / `tap #N@M` | alias cache (list cluster detector) | Cell N of the dominant list (`#N`) or scoped to the M-th list (`#N@M`); same speed as `@N` |
-| `tap #<id>` | live AX tree by `AXUniqueId` | Paste `#settingsButton` straight out of the outline; survives minor layout changes |
-| `tap --id` / `--label` / `--value` | live AX tree lookup | Scripted flows; combine with `--wait-timeout` in `batch` to tolerate navigation animations |
+| `@N` alias | `tap @9` | Speed — cached from last `ui` |
+| `#<id>` | `tap #settingsButton` | Stability — survives layout changes |
+| `--label` | `tap --label "General"` | Scripted flows with `--wait-timeout` |
+| `-x -y` | `tap -x 100 -y 200` | Last resort — no AX data |
 
-`@N`, `#N`, `#N@M`, and `#<id>` are mutually exclusive with `-x/-y` and `--id/--label/--value`. Coordinate taps are the last resort for elements that expose no AX data.
 
-The `#` prefix dispatches on its payload: a positive integer (optionally followed by `@<positive int>`) is a list-cell selector; anything else is treated as an `AXUniqueId`, so identifiers containing `@` (e.g. `#feed@home`) keep id semantics. `#3` and `#3@1` are exact synonyms for the dominant list.
+## Why sim-use
 
-The `--json` form of `ui` returns the same information as a structured envelope (`raw` tree + `outline` text + `entries` array) so an agent can parse aliases and entry metadata without re-parsing the text.
+- **Token-efficient.** The outline representation is ~16x more compact than a raw JSON accessibility tree. An LLM can read and reason about an entire screen in a few hundred tokens.
+- **Nothing hidden.** sim-use walks the full accessibility tree including WebViews, system overlays, and embedded content — no elements are silently skipped.
+- **AI-native.** Designed from day one for agent loops, not human testers. Alias-cached taps (`@N`), structured `--json` envelopes with actionable `hint` fields on errors, and a bundled agent skill (`sim-use init --client claude`) that teaches your AI client the full command surface.
+- **Fast.** A per-device background daemon amortises init cost across calls. After the first command, each observe-act round trip completes in ~300 ms.
+- **Cross-platform.** One command surface drives both iOS Simulator and Android emulator/device. Same verbs, same flags, same `--json` shape — write one agent loop that works on both.
 
 
 ## Install
