@@ -101,7 +101,7 @@ sim-use is a Swift package targeting **macOS 14+**, built with the latest Xcode 
 git clone https://github.com/lycorp-jp/sim-use.git
 cd sim-use
 
-# Build the required XCFrameworks (~30 minutes the first time)
+# Build the required XCFrameworks (first time only)
 ./scripts/build.sh dev
 
 # Build sim-use itself
