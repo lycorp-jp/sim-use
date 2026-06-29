@@ -40,7 +40,7 @@ Plan, code, **verify**, ship — teach this CLI to your agent and close the last
 - [Platforms](#platforms)
 - [Commands](#commands)
 - [Architecture](#architecture)
-- [Tools/Viewer](#toolsviewer)
+- [Viewer](#viewer)
 - [Contributing](#contributing)
 - [Licence](#licence)
 
@@ -349,24 +349,15 @@ sim-use drives iOS Simulators through the lower-level XCFrameworks of Facebook's
 - **Scriptable from day one.** Every command supports `--json` for machine consumption; `batch` collapses multi-step flows into a single invocation.
 
 
-## Tools/Viewer
+## Viewer
 
 A local web app that renders `sim-use ui --json` onto a scaled SVG canvas — see which elements the accessibility tree exposes, spot blind spots, and tap directly from the browser.
 
 ```bash
-cd Tools/Viewer && npm install
-SIM_USE_BIN="$(pwd)/../../.build/debug/sim-use" npm run dev
-# open http://127.0.0.1:5173
+sim-use viewer
 ```
 
-| Visual | Meaning |
-|---|---|
-| solid green stroke | element has `AXUniqueId` |
-| dashed blue stroke | no `AXUniqueId` |
-| red diagonal hatch | blind spot (no actionable element) |
-| purple fill | user-selected element |
-
-See [`Tools/Viewer/README.md`](Tools/Viewer/README.md) for details.
+No Node or npm needed — the SPA is bundled into the binary. Opens your browser automatically. For front-end development on the Viewer itself, see [`Tools/Viewer/README.md`](Tools/Viewer/README.md).
 
 
 ## Contributing
