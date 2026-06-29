@@ -155,7 +155,7 @@ def shared_checks() -> list[Check]:
             description="sim-use is on PATH",
             run=check_sim_use_installed,
             on_fail="abort",
-            fix_hint="Install sim-use: see README.md",
+            fix_hint="Install sim-use: brew tap lycorp-jp/tap && brew install lycorp-jp/tap/sim-use",
         ),
         Check(
             id="device_listed",
