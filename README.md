@@ -93,6 +93,15 @@ The `--json` form of `ui` returns the same information as a structured envelope 
 
 ## Install
 
+### Homebrew (recommended)
+
+```bash
+brew tap lycorp-jp/tap
+brew install lycorp-jp/tap/sim-use
+```
+
+On Homebrew 6.0.5+, if you see an "untrusted tap" error, run `brew trust lycorp-jp/tap` first.
+
 ### Build from source
 
 sim-use is a Swift package targeting **macOS 14+**, built with the latest Xcode toolchain. It links against XCFrameworks built from [Meta's idb](https://github.com/facebook/idb), which are produced locally by the build script (they are large and not checked into the repository).
@@ -112,10 +121,6 @@ make build
 make test    # run tests
 make clean
 ```
-
-### Homebrew
-
-Homebrew tap is on the way. For now, build from source.
 
 ### Agent skill
 
