@@ -93,7 +93,10 @@ def check_sim_use_installed(ctx: Ctx) -> bool:
 
 
 def check_device_listed(ctx: Ctx) -> bool:
-    result = ctx.run_sim_use("devices", "--json")
+    result = subprocess.run(
+        [ctx.sim_use_bin, "devices", "--json"],
+        capture_output=True, text=True,
+    )
     if result.returncode != 0:
         return False
     try:
@@ -108,6 +111,10 @@ def check_device_listed(ctx: Ctx) -> bool:
             ctx.device = booted[0].get("udid") or booted[0].get("deviceId")
             ctx.platform = booted[0].get("platform")
             return True
+        if len(booted) > 1:
+            names = [f"{d.get('name')} ({d.get('udid') or d.get('deviceId')})" for d in booted]
+            print(f"        Multiple devices found: {', '.join(names)}")
+            print("        Re-run with --device <UDID> to pick one.")
         return False
 
     for d in devices:
