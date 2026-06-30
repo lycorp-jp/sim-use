@@ -310,7 +310,7 @@ struct TestHelpers {
 
     static func requireE2EEnabled() throws {
         if !isE2EEnabled {
-            throw TestError.commandError("E2E simulator tests are disabled. Run via ./test-runner.sh or set SIM_USE_E2E=1.")
+            throw TestError.commandError("E2E simulator tests are disabled. Run via ./scripts/test-runner.sh or set SIM_USE_E2E=1.")
         }
     }
 

@@ -70,7 +70,7 @@ make e2e        # end-to-end tests against a booted simulator
 ```
 
 For the full build-and-test harness (simulator setup, the SimUsePlayground app,
-test-plan execution), use `./test-runner.sh` (run with `--help` for options
+test-plan execution), use `./scripts/test-runner.sh` (run with `--help` for options
 such as build-only / test-only modes and verbose output).
 
 Please add or update tests for any behavior change, and make sure the suite
