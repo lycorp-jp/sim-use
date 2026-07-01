@@ -144,7 +144,13 @@ def check_ui_responds(ctx: Ctx) -> bool:
 
 
 def autofix_daemon_restart(ctx: Ctx) -> bool:
-    ctx.run_sim_use("daemon", "stop", "--all")
+    # `daemon stop --all` is mutually exclusive with `--device`, so bypass
+    # run_sim_use (which appends --device when a device is set and would make
+    # the command fail with "Specify either --device <id> or --all").
+    subprocess.run(
+        [ctx.sim_use_bin, "daemon", "stop", "--all"],
+        capture_output=True, text=True,
+    )
     return True
 
 
