@@ -27,6 +27,13 @@ Git can add this automatically with the `-s` flag:
 git commit -s -m "Fix tap selector disambiguation"
 ```
 
+Alternatively, enable the bundled git hook so every commit is signed off
+automatically — no need to remember `-s`:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 Pull requests are checked by a DCO bot; commits missing a valid sign-off will
 be flagged and must be amended (`git commit --amend -s`, or `git rebase
 --signoff` for a series) before they can be merged.

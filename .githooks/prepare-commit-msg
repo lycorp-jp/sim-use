@@ -1,0 +1,19 @@
+#!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
+#
+# Automatically append a Signed-off-by line (DCO) if one is not already
+# present. Equivalent to `git commit -s` without having to remember the flag.
+
+# Only act on regular commits (not merges, squashes, or template messages).
+case "$2" in
+  merge|squash) exit 0 ;;
+esac
+
+SOB="Signed-off-by: $(git config user.name) <$(git config user.email)>"
+
+# Do nothing if the sign-off is already there.
+grep -qF "$SOB" "$1" && exit 0
+
+# Append a blank line + sign-off at the end of the message.
+echo "" >> "$1"
+echo "$SOB" >> "$1"
