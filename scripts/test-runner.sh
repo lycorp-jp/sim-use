@@ -141,6 +141,12 @@ check_prerequisites() {
         exit 1
     fi
 
+    # Check if xcodegen is available (needed to generate the playground project)
+    if ! command -v xcodegen &> /dev/null; then
+        print_error "xcodegen not found. Install with: brew install xcodegen"
+        exit 1
+    fi
+
     print_success "All prerequisites satisfied"
 }
 
@@ -209,6 +215,20 @@ build_sim_use() {
         print_error "Failed to build sim-use executable"
         exit 1
     fi
+}
+
+# Function to generate the Xcode project for the playground app
+generate_playground_project() {
+    print_header "Generating Playground Xcode Project"
+
+    if [[ ! -f "SimUsePlaygroundApp/project.yml" ]]; then
+        print_error "SimUsePlaygroundApp/project.yml not found."
+        exit 1
+    fi
+
+    print_info "Running xcodegen..."
+    (cd SimUsePlaygroundApp && xcodegen generate)
+    print_success "Xcode project generated"
 }
 
 # Function to build and install playground app
@@ -384,6 +404,7 @@ main() {
     if [[ "$TESTS_ONLY" != true ]]; then
         clean_build
         build_sim_use
+        generate_playground_project
         build_playground_app
     fi
 

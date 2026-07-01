@@ -1,10 +1,11 @@
-.PHONY: help build test clean viewer
+.PHONY: help build test e2e clean viewer
 
 help:
 	@echo "Common sim-use commands"
 	@echo "  make build   Build sim-use"
 	@echo "  make viewer  Rebuild the Viewer SPA into Sources/SimUse/Resources/viewer/"
-	@echo "  make test    Run default tests"
+	@echo "  make test    Run unit tests (no simulator needed)"
+	@echo "  make e2e     Run end-to-end tests on a booted simulator"
 	@echo "  make clean   Clean Swift build artifacts"
 
 build:
@@ -20,6 +21,9 @@ viewer:
 
 test:
 	swift test
+
+e2e:
+	./scripts/test-runner.sh
 
 clean:
 	swift package clean

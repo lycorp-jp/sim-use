@@ -1,0 +1,25 @@
+name: SimUsePlayground
+options:
+  bundleIdPrefix: com.cameroncooke
+  deploymentTarget:
+    iOS: "18.0"
+
+targets:
+  SimUsePlayground:
+    type: application
+    platform: iOS
+    sources:
+      - SimUsePlayground
+    info:
+      path: SimUsePlayground/Info.plist
+      properties:
+        CFBundleDisplayName: SimUsePlayground
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cameroncooke.SimUsePlayground
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: "NO"
+        GENERATE_INFOPLIST_FILE: "YES"
