@@ -272,7 +272,7 @@ Key semantics:
 - Exactly one step source per run: `--step`, `--file`, or `--stdin`.
 - Fail-fast by default; `--continue-on-error` switches to best-effort.
 - `--wait-timeout <seconds>` makes selector taps poll for the element to appear — primary mechanism for multi-screen flows.
-- `--ax-cache perBatch` (default) reuses one AX snapshot for the whole run; `--ax-cache perStep` refreshes between steps when the UI changes.
+- `--ax-cache perBatch` (default) reuses one AX snapshot for the whole run; `--ax-cache perStep` refreshes between steps when the UI changes; `--ax-cache none` disables snapshot reuse entirely. `--wait-timeout` polling always refetches.
 
 ### Screenshot
 
