@@ -167,10 +167,15 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
 
         logger.info().log("Performing HID event sequence for text typing")
 
+        // One session for the whole string: the per-UDID overload runs
+        // makeSession (framework load + FBSimulatorControl set
+        // construction) on every call, which multiplies per character
+        // typed. Only the HID connection inside is cached.
+        let session = try await HIDInteractor.makeSession(for: device.resolved, logger: logger)
         for event in hidEvents {
             try await HIDInteractor.performHIDEvent(
                 event,
-                for: device.resolved,
+                in: session,
                 logger: logger
             )
         }
