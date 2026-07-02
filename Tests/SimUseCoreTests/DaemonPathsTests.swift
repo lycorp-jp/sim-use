@@ -188,14 +188,14 @@ struct DaemonPathsEnumerateTests {
         let tmp = try makeTempDirectory()
         defer { removeTempDirectory(tmp) }
 
-        #expect(DaemonPaths.enumerateLiveDaemons(baseDirectory: tmp).isEmpty)
+        #expect(try DaemonPaths.enumerateLiveDaemons(baseDirectory: tmp).isEmpty)
     }
 
     @Test("Missing directory returns no discovered daemons")
-    func missingDirectory() {
+    func missingDirectory() throws {
         let ghost = FileManager.default.temporaryDirectory
             .appendingPathComponent("sim-use-daemon-missing-\(UUID().uuidString)", isDirectory: true)
-        #expect(DaemonPaths.enumerateLiveDaemons(baseDirectory: ghost).isEmpty)
+        #expect(try DaemonPaths.enumerateLiveDaemons(baseDirectory: ghost).isEmpty)
     }
 
     @Test("Non-.pid files are ignored")
@@ -207,7 +207,7 @@ struct DaemonPathsEnumerateTests {
         try writeFile(tmp.appendingPathComponent("another.txt"), "noise")
         try writeFile(tmp.appendingPathComponent("bare"), "noise")
 
-        #expect(DaemonPaths.enumerateLiveDaemons(baseDirectory: tmp).isEmpty)
+        #expect(try DaemonPaths.enumerateLiveDaemons(baseDirectory: tmp).isEmpty)
     }
 
     @Test("Live and dead daemons: dead is skipped and cleaned, live is returned")
@@ -223,7 +223,7 @@ struct DaemonPathsEnumerateTests {
         try writeFile(dead.socketURL)
         try writeFile(dead.pidfileURL, "\(implausiblePid)\n")
 
-        let discovered = DaemonPaths.enumerateLiveDaemons(baseDirectory: tmp)
+        let discovered = try DaemonPaths.enumerateLiveDaemons(baseDirectory: tmp)
         #expect(discovered.count == 1)
         #expect(discovered.first?.udid == "B-alive")
         #expect(discovered.first?.pid == getpid())
@@ -243,7 +243,127 @@ struct DaemonPathsEnumerateTests {
             try writeFile(paths.pidfileURL, "\(getpid())\n")
         }
 
-        let discovered = DaemonPaths.enumerateLiveDaemons(baseDirectory: tmp)
+        let discovered = try DaemonPaths.enumerateLiveDaemons(baseDirectory: tmp)
         #expect(discovered.map(\.udid) == ["AAA", "MMM", "ZZZ"])
+    }
+}
+// MARK: - Base directory hardening
+
+// The base directory lives under world-writable /tmp, so its 0700 mode
+// is only meaningful if we verify it on every run: `createDirectory`
+// applies the permission attribute solely on first creation and
+// silently accepts a pre-existing directory — including one another
+// local user pre-created (with their ownership and mode) to swap
+// sockets/pidfiles under us, or a symlink planted at the path.
+@Suite("DaemonPaths.ensureBaseDirectory hardening")
+struct DaemonPathsEnsureBaseDirectoryTests {
+    private func mode(of url: URL) throws -> mode_t {
+        var st = stat()
+        try #require(lstat(url.path, &st) == 0)
+        return st.st_mode & 0o777
+    }
+
+    @Test("Fresh creation applies mode 0700")
+    func freshCreationIs0700() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let base = tmp.appendingPathComponent("fresh-base", isDirectory: true)
+        let paths = DaemonPaths(udid: "U", baseDirectory: base)
+        try paths.ensureBaseDirectory()
+        #expect(try mode(of: base) == 0o700)
+    }
+
+    @Test("Pre-existing directory with loose permissions is tightened to 0700")
+    func looseExistingDirectoryIsTightened() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let base = tmp.appendingPathComponent("loose-base", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        try #require(chmod(base.path, 0o777) == 0)
+
+        let paths = DaemonPaths(udid: "U", baseDirectory: base)
+        try paths.ensureBaseDirectory()
+        #expect(try mode(of: base) == 0o700)
+    }
+
+    @Test("A symlink planted at the base path is rejected")
+    func symlinkAtBasePathThrows() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let target = tmp.appendingPathComponent("real-dir", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let base = tmp.appendingPathComponent("link-base", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: base, withDestinationURL: target)
+
+        let paths = DaemonPaths(udid: "U", baseDirectory: base)
+        #expect(throws: (any Error).self) {
+            try paths.ensureBaseDirectory()
+        }
+    }
+}
+
+// MARK: - enumerateLiveDaemons base-directory security
+
+// `stop --all` SIGTERMs the pids it enumerates and `status` connects to
+// the sockets it finds, so enumeration must apply the same base-directory
+// gate as `ensureBaseDirectory`: a pre-planted directory/symlink under
+// world-writable /tmp would otherwise let another local user steer those
+// management commands (e.g. a forged pidfile pointing at an arbitrary
+// process the victim owns).
+@Suite("DaemonPaths.enumerateLiveDaemons base directory security")
+struct DaemonPathsEnumerateSecurityTests {
+    private func mode(of url: URL) throws -> mode_t {
+        var st = stat()
+        try #require(lstat(url.path, &st) == 0)
+        return st.st_mode & 0o777
+    }
+
+    @Test("A symlink planted at the base path is rejected")
+    func symlinkRejected() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let target = tmp.appendingPathComponent("real-dir", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let base = tmp.appendingPathComponent("link-base", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: base, withDestinationURL: target)
+
+        #expect(throws: (any Error).self) {
+            _ = try DaemonPaths.enumerateLiveDaemons(baseDirectory: base)
+        }
+    }
+
+    @Test("A regular file planted at the base path is rejected")
+    func regularFileRejected() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let base = tmp.appendingPathComponent("file-base")
+        try Data("not a dir".utf8).write(to: base)
+
+        #expect(throws: (any Error).self) {
+            _ = try DaemonPaths.enumerateLiveDaemons(baseDirectory: base)
+        }
+    }
+
+    @Test("Loose permissions are tightened to 0700 before enumeration proceeds")
+    func loosePermissionsTightened() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let base = tmp.appendingPathComponent("loose-base", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        // One live entry: our own pid is alive by definition.
+        let live = DaemonPaths(udid: "LIVE", baseDirectory: base)
+        try writeFile(live.socketURL)
+        try live.writePidfile(getpid())
+        try #require(chmod(base.path, 0o777) == 0)
+
+        let discovered = try DaemonPaths.enumerateLiveDaemons(baseDirectory: base)
+        #expect(discovered.map(\.udid) == ["LIVE"])
+        #expect(try mode(of: base) == 0o700)
     }
 }
