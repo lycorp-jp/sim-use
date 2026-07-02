@@ -135,19 +135,6 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         logger.info().log("Performing swipe from (\(startX), \(startY)) to (\(endX), \(endY))")
         logger.info().log("Duration: \(swipeDuration)s, Delta: \(swipeDelta)px")
 
-        NotificationCenter.default.post(
-            name: .hidSwipePerformed,
-            object: nil,
-            userInfo: [
-                "startX": startX,
-                "startY": startY,
-                "endX": endX,
-                "endY": endY,
-                "duration": swipeDuration,
-                "delta": swipeDelta
-            ]
-        )
-
         var events: [FBSimulatorHIDEvent] = []
 
         if let preDelay, preDelay > 0 {
@@ -181,8 +168,4 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         logger.info().log("Swipe gesture completed successfully")
         return ExecutionResult()
     }
-}
-
-extension Notification.Name {
-    public static let hidSwipePerformed = Notification.Name("hidSwipePerformed")
 }
