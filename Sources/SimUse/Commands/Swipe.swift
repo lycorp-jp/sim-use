@@ -19,17 +19,29 @@ struct Swipe: SimUseExecutableCommand {
         abstract: "Perform a swipe gesture from one point to another on the screen."
     )
 
+    @Argument(help: ArgumentHelp(
+        "Optional positional coordinate pairs: <from x,y> <to x,y>. Exclusive with --from/--to and --start-x/--start-y/--end-x/--end-y.",
+        valueName: "x,y"
+    ))
+    var coordinatePairs: [CoordinatePair] = []
+
+    @Option(name: .customLong("from"), help: ArgumentHelp("Starting coordinate pair.", valueName: "x,y"))
+    var from: CoordinatePair?
+
+    @Option(name: .customLong("to"), help: ArgumentHelp("Ending coordinate pair.", valueName: "x,y"))
+    var to: CoordinatePair?
+
     @Option(name: .customLong("start-x"), help: "The X coordinate of the starting point.")
-    var startX: Double
+    var startX: Double?
 
     @Option(name: .customLong("start-y"), help: "The Y coordinate of the starting point.")
-    var startY: Double
+    var startY: Double?
 
     @Option(name: .customLong("end-x"), help: "The X coordinate of the ending point.")
-    var endX: Double
+    var endX: Double?
 
     @Option(name: .customLong("end-y"), help: "The Y coordinate of the ending point.")
-    var endY: Double
+    var endY: Double?
 
     @Option(name: .customLong("duration"), help: "Duration of the swipe in seconds.")
     var duration: Double?
@@ -63,17 +75,35 @@ struct Swipe: SimUseExecutableCommand {
     /// happens to consume them as Doubles but the user-facing
     /// numbers stay readable.
     func format(_ result: ExecutionResult) -> CommandOutput {
-        let sx = Int(startX.rounded())
-        let sy = Int(startY.rounded())
-        let ex = Int(endX.rounded())
-        let ey = Int(endY.rounded())
+        guard let coords = try? resolvedCoordinates() else {
+            return .line("✓ Swipe completed successfully")
+        }
+        let sx = Int(coords.startX.rounded())
+        let sy = Int(coords.startY.rounded())
+        let ex = Int(coords.endX.rounded())
+        let ey = Int(coords.endY.rounded())
         return .line("✓ Swipe (\(sx),\(sy)) → (\(ex),\(ey)) completed successfully")
     }
 
     func validate() throws {
+        _ = try IOSSimSwipeCommand.validateOptions(
+            startX: startX, startY: startY,
+            endX: endX, endY: endY,
+            from: from, to: to,
+            positionalPairs: coordinatePairs,
+            duration: duration,
+            delta: delta,
+            preDelay: preDelay,
+            postDelay: postDelay
+        )
+    }
+
+    func resolvedCoordinates() throws -> SwipeCoordinates {
         try IOSSimSwipeCommand.validateOptions(
             startX: startX, startY: startY,
             endX: endX, endY: endY,
+            from: from, to: to,
+            positionalPairs: coordinatePairs,
             duration: duration,
             delta: delta,
             preDelay: preDelay,
@@ -91,18 +121,42 @@ struct Swipe: SimUseExecutableCommand {
     }
 
     private func executeIOSSim() async throws -> ExecutionResult {
-        var sub = IOSSimSwipeCommand()
-        sub.startX = startX
-        sub.startY = startY
-        sub.endX = endX
-        sub.endY = endY
-        sub.duration = duration
-        sub.delta = delta
-        sub.preDelay = preDelay
-        sub.postDelay = postDelay
-        sub.device = device
-        sub.json = json
+        let coords = try resolvedCoordinates()
+        var sub = try makeIOSSimForwarder(coords: coords)
+        try sub.resolveDeferredArguments()
         return try await sub.execute()
+    }
+
+    func makeIOSSimForwarder(coords: SwipeCoordinates) throws -> IOSSimSwipeCommand {
+        var argv = [
+            "--start-x", Self.formatArgument(coords.startX),
+            "--start-y", Self.formatArgument(coords.startY),
+            "--end-x", Self.formatArgument(coords.endX),
+            "--end-y", Self.formatArgument(coords.endY)
+        ]
+        if let duration {
+            argv += ["--duration", Self.formatArgument(duration)]
+        }
+        if let delta {
+            argv += ["--delta", Self.formatArgument(delta)]
+        }
+        if let preDelay {
+            argv += ["--pre-delay", Self.formatArgument(preDelay)]
+        }
+        if let postDelay {
+            argv += ["--post-delay", Self.formatArgument(postDelay)]
+        }
+        if !device.resolved.isEmpty {
+            argv += ["--device", device.resolved]
+        }
+        if json.enabled {
+            argv.append("--json")
+        }
+        return try IOSSimSwipeCommand.parse(argv)
+    }
+
+    private static func formatArgument(_ value: Double) -> String {
+        value.rounded() == value ? String(Int(value)) : String(value)
     }
 
     /// Android dispatch. `duration` (iOS seconds) is re-mapped to
@@ -112,16 +166,17 @@ struct Swipe: SimUseExecutableCommand {
     /// `pre-delay` / `post-delay` honored via `Task.sleep` around
     /// the bridge call — mirrors `Gesture.swift`'s `executeAndroid`.
     private func executeAndroid() async throws -> ExecutionResult {
+        let coords = try resolvedCoordinates()
         let durationMs = max(1, Int((duration ?? 0.3) * 1000))
         if let preDelay, preDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
         }
         try AndroidSwipeCommand.performSwipe(
             udid: device.resolved,
-            startX: Int(startX),
-            startY: Int(startY),
-            endX: Int(endX),
-            endY: Int(endY),
+            startX: Int(coords.startX),
+            startY: Int(coords.startY),
+            endX: Int(coords.endX),
+            endY: Int(coords.endY),
             durationMs: durationMs
         )
         if let postDelay, postDelay > 0 {

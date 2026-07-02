@@ -4,7 +4,7 @@ Use this reference when generating or reviewing `sim-use ios batch` commands.
 
 ## Supported step commands
 - `tap`
-- `swipe`
+- `swipe` (`--from x,y --to x,y`, positional `x,y x,y`, or legacy `--start-x/--start-y/--end-x/--end-y`)
 - `gesture`
 - `touch`
 - `type`

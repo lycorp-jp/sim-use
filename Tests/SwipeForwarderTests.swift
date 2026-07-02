@@ -18,7 +18,7 @@ struct SwipeForwarderTests {
     @Test("Top-level Swipe validation delegates to IOSSimSwipeCommand (negative coords)")
     func negativeCoordsRejected() {
         do {
-            try IOSSimSwipeCommand.validateOptions(
+            _ = try IOSSimSwipeCommand.validateOptions(
                 startX: -1, startY: 0, endX: 10, endY: 10,
                 duration: nil, delta: nil,
                 preDelay: nil, postDelay: nil
@@ -34,7 +34,7 @@ struct SwipeForwarderTests {
     @Test("Same start and end is rejected")
     func samePointRejected() {
         do {
-            try IOSSimSwipeCommand.validateOptions(
+            _ = try IOSSimSwipeCommand.validateOptions(
                 startX: 100, startY: 100, endX: 100, endY: 100,
                 duration: nil, delta: nil,
                 preDelay: nil, postDelay: nil
@@ -50,7 +50,7 @@ struct SwipeForwarderTests {
     @Test("Non-positive duration is rejected")
     func nonPositiveDurationRejected() {
         do {
-            try IOSSimSwipeCommand.validateOptions(
+            _ = try IOSSimSwipeCommand.validateOptions(
                 startX: 100, startY: 100, endX: 200, endY: 200,
                 duration: 0, delta: nil,
                 preDelay: nil, postDelay: nil
@@ -66,7 +66,7 @@ struct SwipeForwarderTests {
     @Test("Out-of-range pre-delay is rejected")
     func preDelayOutOfRangeRejected() {
         do {
-            try IOSSimSwipeCommand.validateOptions(
+            _ = try IOSSimSwipeCommand.validateOptions(
                 startX: 100, startY: 100, endX: 200, endY: 200,
                 duration: nil, delta: nil,
                 preDelay: 11, postDelay: nil
@@ -112,15 +112,85 @@ struct SwipeForwarderTests {
         let topLevel = try Swipe.parse(argv)
         let subCmd = try IOSSimSwipeCommand.parse(argv)
 
-        #expect(topLevel.startX == 100)
-        #expect(subCmd.startX == 100)
-        #expect(topLevel.endY == 400)
-        #expect(subCmd.endY == 400)
+        #expect(try topLevel.resolvedCoordinates().startX == 100)
+        #expect(try subCmd.resolvedCoordinates().startX == 100)
+        #expect(try topLevel.resolvedCoordinates().endY == 400)
+        #expect(try subCmd.resolvedCoordinates().endY == 400)
         #expect(topLevel.duration == 0.5)
         #expect(subCmd.duration == 0.5)
         #expect(topLevel.delta == 20)
         #expect(subCmd.delta == 20)
         #expect(topLevel.jsonOutput == true)
         #expect(subCmd.jsonOutput == true)
+    }
+
+    @Test("ArgumentParser parses --from/--to on top-level, iOS, and Android swipe")
+    func pairFlagsParseAcrossSurfaces() throws {
+        let argv = ["--from", "100,200", "--to", "300,400", "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0"]
+        let topLevel = try Swipe.parse(argv)
+        let subCmd = try IOSSimSwipeCommand.parse(argv)
+        let android = try AndroidSwipeCommand.parse(["--from", "100,200", "--to", "300,400", "--device", "emulator-5554"])
+
+        #expect(try topLevel.resolvedCoordinates() == SwipeCoordinates(startX: 100, startY: 200, endX: 300, endY: 400))
+        #expect(try subCmd.resolvedCoordinates() == SwipeCoordinates(startX: 100, startY: 200, endX: 300, endY: 400))
+        #expect(try android.resolvedCoordinates() == SwipeCoordinates(startX: 100, startY: 200, endX: 300, endY: 400))
+    }
+
+    @Test("ArgumentParser parses positional coordinate pairs")
+    func positionalPairsParse() throws {
+        let topLevel = try Swipe.parse(["100,200", "300,400", "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0"])
+        let subCmd = try IOSSimSwipeCommand.parse(["100,200", "300,400", "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0"])
+
+        #expect(try topLevel.resolvedCoordinates() == SwipeCoordinates(startX: 100, startY: 200, endX: 300, endY: 400))
+        #expect(try subCmd.resolvedCoordinates() == SwipeCoordinates(startX: 100, startY: 200, endX: 300, endY: 400))
+    }
+
+    @Test("Top-level iOS forwarder builds a parser-backed subcommand")
+    func topLevelIOSForwarderBuildsParserBackedSubcommand() throws {
+        var topLevel = try Swipe.parse([
+            "--from", "100,200",
+            "--to", "300,400",
+            "--duration", "0.5",
+            "--delta", "20",
+            "--pre-delay", "0.1",
+            "--post-delay", "0.1",
+            "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0",
+            "--json"
+        ])
+        topLevel.device.resolved = "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0"
+        let expected = SwipeCoordinates(startX: 100, startY: 200, endX: 300, endY: 400)
+        let subCmd = try topLevel.makeIOSSimForwarder(coords: expected)
+
+        #expect(try subCmd.resolvedCoordinates() == expected)
+        #expect(subCmd.duration == 0.5)
+        #expect(subCmd.delta == 20)
+        #expect(subCmd.preDelay == 0.1)
+        #expect(subCmd.postDelay == 0.1)
+        #expect(subCmd.jsonOutput == true)
+    }
+
+    @Test("Swipe coordinate forms cannot be mixed or partial")
+    func coordinateFormsRejectMixes() throws {
+        #expect(throws: ValidationError.self) {
+            _ = try SwipeCoordinateResolver.resolve(
+                startX: 100, startY: nil, endX: nil, endY: nil,
+                from: nil, to: nil,
+                positional: []
+            )
+        }
+        #expect(throws: ValidationError.self) {
+            _ = try SwipeCoordinateResolver.resolve(
+                startX: 100, startY: 200, endX: 300, endY: 400,
+                from: CoordinatePair(x: 100, y: 200), to: CoordinatePair(x: 300, y: 400),
+                positional: []
+            )
+        }
+        #expect(throws: ValidationError.self) {
+            _ = try SwipeCoordinateResolver.resolve(
+                startX: nil, startY: nil, endX: nil, endY: nil,
+                from: nil, to: nil,
+                positional: []
+            )
+        }
     }
 }

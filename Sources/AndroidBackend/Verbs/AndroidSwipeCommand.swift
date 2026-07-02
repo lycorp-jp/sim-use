@@ -11,9 +11,6 @@ import SimUseCore
 /// already speaks the top-level form can drop `android` in front
 /// without re-learning the argument shape.
 ///
-/// The legacy `--from x,y` / `--to x,y` / millisecond `--duration`
-/// shape that 0.5.x shipped is rejected at validate time with a
-/// pointer to the new flags.
 public struct AndroidSwipeCommand: SimUseExecutableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "swipe",
@@ -22,17 +19,29 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
 
     @OptionGroup public var device: AndroidDeviceOptions
 
+    @Argument(help: ArgumentHelp(
+        "Optional positional coordinate pairs: <from x,y> <to x,y>. Exclusive with --from/--to and --start-x/--start-y/--end-x/--end-y.",
+        valueName: "x,y"
+    ))
+    public var coordinatePairs: [CoordinatePair] = []
+
+    @Option(name: .customLong("from"), help: ArgumentHelp("Starting coordinate pair.", valueName: "x,y"))
+    public var from: CoordinatePair?
+
+    @Option(name: .customLong("to"), help: ArgumentHelp("Ending coordinate pair.", valueName: "x,y"))
+    public var to: CoordinatePair?
+
     @Option(name: .customLong("start-x"), help: "The X coordinate of the starting point (pixels).")
-    public var startX: Double
+    public var startX: Double?
 
     @Option(name: .customLong("start-y"), help: "The Y coordinate of the starting point (pixels).")
-    public var startY: Double
+    public var startY: Double?
 
     @Option(name: .customLong("end-x"), help: "The X coordinate of the end point (pixels).")
-    public var endX: Double
+    public var endX: Double?
 
     @Option(name: .customLong("end-y"), help: "The Y coordinate of the end point (pixels).")
-    public var endY: Double
+    public var endY: Double?
 
     @Option(name: .customLong("duration"), help: "Duration of the swipe in seconds (default 0.3).")
     public var duration: Double = 0.3
@@ -55,6 +64,7 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
     public var simulatorUDIDForDaemon: String? { device.resolved }
 
     public func validate() throws {
+        _ = try resolvedCoordinates()
         guard duration >= 0 else {
             throw ValidationError("--duration must be non-negative.")
         }
@@ -66,18 +76,28 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
         }
     }
 
+    public func resolvedCoordinates() throws -> SwipeCoordinates {
+        try SwipeCoordinateResolver.resolve(
+            startX: startX, startY: startY,
+            endX: endX, endY: endY,
+            from: from, to: to,
+            positional: coordinatePairs
+        )
+    }
+
     public mutating func resolveDeferredArguments() throws {
         try device.resolve()
     }
 
     public func execute() async throws -> ExecutionResult {
+        let coords = try resolvedCoordinates()
         if let preDelay, preDelay > 0 {
-            Thread.sleep(forTimeInterval: preDelay)
+            try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
         }
-        let sx = Int(startX.rounded())
-        let sy = Int(startY.rounded())
-        let ex = Int(endX.rounded())
-        let ey = Int(endY.rounded())
+        let sx = Int(coords.startX.rounded())
+        let sy = Int(coords.startY.rounded())
+        let ex = Int(coords.endX.rounded())
+        let ey = Int(coords.endY.rounded())
         let durationMs = max(1, Int((duration * 1000).rounded()))
         try Self.performSwipe(
             udid: device.resolved,
@@ -86,16 +106,19 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
             durationMs: durationMs
         )
         if let postDelay, postDelay > 0 {
-            Thread.sleep(forTimeInterval: postDelay)
+            try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
         }
         return ExecutionResult()
     }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
-        let sx = Int(startX.rounded())
-        let sy = Int(startY.rounded())
-        let ex = Int(endX.rounded())
-        let ey = Int(endY.rounded())
+        guard let coords = try? resolvedCoordinates() else {
+            return CommandOutput(stdout: "✓ Swipe completed successfully\n")
+        }
+        let sx = Int(coords.startX.rounded())
+        let sy = Int(coords.startY.rounded())
+        let ex = Int(coords.endX.rounded())
+        let ey = Int(coords.endY.rounded())
         let durationMs = max(1, Int((duration * 1000).rounded()))
         return CommandOutput(
             stdout: "✓ Swipe (\(sx),\(sy)) → (\(ex),\(ey)) completed successfully\n",

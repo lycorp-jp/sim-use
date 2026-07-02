@@ -60,7 +60,7 @@ sim-use paste 'text' --via-menu --target-id <id>  # iOS edit menu (soft keyboard
 ```bash
 sim-use gesture scroll-up           # scroll-up = content moves up = page down
 sim-use gesture scroll-down         # page up
-sim-use swipe --start-x 50 --start-y 500 --end-x 350 --end-y 500
+sim-use swipe --from 50,500 --to 350,500
 sim-use long-press @5               # default 0.8s hold
 sim-use long-press --label "Photos" # selector targeting
 sim-use long-press @5 --duration 1.2  # custom hold time
