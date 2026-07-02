@@ -119,6 +119,18 @@ struct KeyboardStateDaemonRoutingTests {
             allowFailure: true
         )
 
+        // Assert the precondition explicitly. Without it a stale or
+        // pre-existing daemon for this UDID (stop failed, or the box
+        // already had one) would make the post-call `status` contain the
+        // UDID even under the inline-execution regression — a false pass.
+        // The post-call check is only meaningful if we start from empty.
+        let preStatus = try await CommandRunner.run(
+            "\"\(simUsePath)\" daemon status --json",
+            allowFailure: true
+        )
+        #expect(!preStatus.output.contains(udid),
+                "precondition: no daemon for \(udid) should exist before the call (stop may have failed); status: \(preStatus.output)")
+
         // On a freshly booted simulator the frontmost app is SpringBoard,
         // which has no software keyboard: expect a clean `hidden`, exit 0.
         let result = try await CommandRunner.run("\"\(simUsePath)\" keyboard-state --udid \(udid)")
