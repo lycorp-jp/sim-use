@@ -109,14 +109,14 @@ struct DaemonClientInvokeErrorRoutingTests {
 
     enum TestError: Error { case daemonNeverReady }
 
+    // Delegates to the shared gate so this suite's parser window can't
+    // overlap another suite's (they all mutate the process-global
+    // `DaemonDispatch.commandParser` across `await`s).
     private func withParser(
         _ parser: ((@MainActor ([String]) throws -> ParsableCommand))?,
         body: () async throws -> Void
-    ) async rethrows {
-        let saved = DaemonDispatch.commandParser
-        DaemonDispatch.commandParser = parser
-        defer { DaemonDispatch.commandParser = saved }
-        try await body()
+    ) async throws {
+        try await withExclusiveCommandParser(parser, body: body)
     }
 
     private struct SuccessEnvelope: Decodable {
@@ -217,10 +217,10 @@ struct DaemonClientInvokeErrorRoutingTests {
             message: "Simulator is unavailable as it is not booted"
         )
 
-        // No `try`: this closure handles every error itself (invoke runs
-        // in an unstructured Task whose result is consumed by do/catch),
-        // so `withParser`'s rethrows resolves to non-throwing here.
-        await withParser({ _ in FakeFlakyCommand() }) {
+        // The closure handles every error itself (invoke runs in an
+        // unstructured Task whose result is consumed by do/catch); the
+        // `try` is for `withParser` acquiring the shared parser gate.
+        try await withParser({ _ in FakeFlakyCommand() }) {
             // Long retry delay so the cancel lands inside the retry
             // sleep — the only suspension point on the fast path.
             let invokeTask = Task {

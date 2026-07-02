@@ -256,8 +256,21 @@ public final class DaemonServer {
         timer.schedule(deadline: .now() + idleTimeout, repeating: .never)
         timer.setEventHandler { [weak self] in
             Task { @MainActor in
-                self?.logInfo("sim-use-daemon: idle timeout reached, stopping")
-                self?.triggerShutdown()
+                guard let self else { return }
+                // "Idle" means no request in flight. The timer counts from
+                // the last reset (request start / response end), so a
+                // single request that runs longer than idleTimeout — e.g.
+                // `tap --wait-timeout 700` or a long `batch` — would
+                // otherwise trip it mid-execution and tear the daemon down
+                // while the command is still running. Reschedule instead;
+                // the reset after the response goes out starts the real
+                // idle countdown.
+                guard self.activeRequests == 0 else {
+                    self.resetIdleTimer()
+                    return
+                }
+                self.logInfo("sim-use-daemon: idle timeout reached, stopping")
+                self.triggerShutdown()
             }
         }
         timer.resume()
