@@ -176,3 +176,81 @@ struct DaemonProtocolVersionTests {
         #expect(DaemonProtocol.version >= 1)
     }
 }
+
+// MARK: - daemon stop --json entry (device-id key Phase 2)
+
+@Suite("Daemon.Stop.StopEntry codable")
+struct DaemonStopEntryCodableTests {
+    @Test("Encoding emits deviceId and omits the legacy udid key")
+    func encodeEmitsDeviceIdOnly() throws {
+        let entry = Daemon.Stop.StopEntry(
+            udid: "UDID-1", pid: 42, method: "stop", stopped: true, error: nil
+        )
+        let text = jsonString(try encoderStable().encode(entry))
+        #expect(text == #"{"deviceId":"UDID-1","method":"stop","pid":42,"stopped":true}"#)
+        #expect(!text.contains(#""udid""#))
+    }
+
+    @Test("Decoding accepts legacy udid-only payloads")
+    func decodeLegacyUDIDOnly() throws {
+        let payload = #"{"udid":"legacy","pid":7,"method":"sigterm","stopped":false,"error":"boom"}"#
+        let entry = try JSONDecoder().decode(Daemon.Stop.StopEntry.self, from: Data(payload.utf8))
+        #expect(entry.udid == "legacy")
+        #expect(entry.pid == 7)
+        #expect(entry.method == "sigterm")
+        #expect(entry.stopped == false)
+        #expect(entry.error == "boom")
+    }
+
+    @Test("Decoding prefers deviceId when both keys are present")
+    func decodePrefersDeviceId() throws {
+        let payload = #"{"deviceId":"new","udid":"old","pid":1,"method":"none","stopped":true}"#
+        let entry = try JSONDecoder().decode(Daemon.Stop.StopEntry.self, from: Data(payload.utf8))
+        #expect(entry.udid == "new")
+    }
+}
+
+// MARK: - daemon status --json entry (device-id key Phase 2)
+
+@Suite("Daemon.Status.StatusEntry codable")
+struct DaemonStatusEntryCodableTests {
+    @Test("Encoding emits deviceId and omits the legacy udid key")
+    func encodeEmitsDeviceIdOnly() throws {
+        let entry = Daemon.Status.StatusEntry(
+            udid: "UDID-9",
+            pid: 9,
+            uptimeSeconds: 12.5,
+            simUseVersion: "1.0.0",
+            protocolVersion: 3,
+            socketPath: "/s",
+            logPath: "/l",
+            reachable: true,
+            error: nil
+        )
+        let text = jsonString(try encoderStable().encode(entry))
+        #expect(text == #"{"deviceId":"UDID-9","logPath":"/l","pid":9,"protocolVersion":3,"reachable":true,"simUseVersion":"1.0.0","socketPath":"/s","uptimeSeconds":12.5}"#)
+        #expect(!text.contains(#""udid""#))
+    }
+
+    @Test("Decoding accepts legacy udid-only payloads")
+    func decodeLegacyUDIDOnly() throws {
+        let payload = #"""
+        {"udid":"legacy","pid":3,"uptimeSeconds":0,"simUseVersion":"","protocolVersion":0,
+         "socketPath":"/sock","logPath":"/log","reachable":false,"error":"unreachable"}
+        """#
+        let entry = try JSONDecoder().decode(Daemon.Status.StatusEntry.self, from: Data(payload.utf8))
+        #expect(entry.udid == "legacy")
+        #expect(entry.reachable == false)
+        #expect(entry.error == "unreachable")
+    }
+
+    @Test("Decoding prefers deviceId when both keys are present")
+    func decodePrefersDeviceId() throws {
+        let payload = #"""
+        {"deviceId":"new","udid":"old","pid":3,"uptimeSeconds":1,"simUseVersion":"v",
+         "protocolVersion":1,"socketPath":"/sock","logPath":"/log","reachable":true}
+        """#
+        let entry = try JSONDecoder().decode(Daemon.Status.StatusEntry.self, from: Data(payload.utf8))
+        #expect(entry.udid == "new")
+    }
+}
