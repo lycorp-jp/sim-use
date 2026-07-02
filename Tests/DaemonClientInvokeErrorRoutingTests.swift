@@ -217,7 +217,10 @@ struct DaemonClientInvokeErrorRoutingTests {
             message: "Simulator is unavailable as it is not booted"
         )
 
-        try await withParser({ _ in FakeFlakyCommand() }) {
+        // No `try`: this closure handles every error itself (invoke runs
+        // in an unstructured Task whose result is consumed by do/catch),
+        // so `withParser`'s rethrows resolves to non-throwing here.
+        await withParser({ _ in FakeFlakyCommand() }) {
             // Long retry delay so the cancel lands inside the retry
             // sleep — the only suspension point on the fast path.
             let invokeTask = Task {
