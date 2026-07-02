@@ -202,6 +202,10 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
                 } else {
                     FileHandle.standardError.write(Data("Unable to decode screenshot frame\n".utf8))
                 }
+            } catch let error as VideoWriterStallError {
+                // A stalled writer does not recover; abort the recording
+                // instead of re-logging the stall once per timeout forever.
+                throw error
             } catch {
                 FileHandle.standardError.write(Data("Error capturing frame: \(error.localizedDescription)\n".utf8))
             }
