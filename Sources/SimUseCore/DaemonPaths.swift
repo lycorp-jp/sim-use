@@ -60,25 +60,36 @@ public struct DaemonPaths {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: NSNumber(value: 0o700)]
         )
+        try Self.validateBaseDirectory(at: baseDirectory)
+    }
 
+    /// Security gate for every consumer of the base directory — the
+    /// spawn/connect paths (via `ensureBaseDirectory`) AND the
+    /// management paths (`enumerateLiveDaemons`, `daemon stop/status`),
+    /// which act on the pids and sockets they find and must not trust a
+    /// pre-planted tree. An absent path is fine (nothing to validate);
+    /// a symlink, non-directory, or foreign owner throws; loose
+    /// group/other permission bits are tightened back to 0700.
+    public static func validateBaseDirectory(at url: URL) throws {
         var st = stat()
-        guard lstat(baseDirectory.path, &st) == 0 else {
+        guard lstat(url.path, &st) == 0 else {
+            if errno == ENOENT { return }
             throw DaemonSocketError(op: "lstat", errno: errno)
         }
         guard (st.st_mode & S_IFMT) == S_IFDIR else {
             throw DaemonPathsError.insecureBaseDirectory(
-                path: baseDirectory.path,
+                path: url.path,
                 reason: "it is not a real directory (symlink or special file)"
             )
         }
         guard st.st_uid == getuid() else {
             throw DaemonPathsError.insecureBaseDirectory(
-                path: baseDirectory.path,
+                path: url.path,
                 reason: "it is owned by uid \(st.st_uid), not the current user (uid \(getuid()))"
             )
         }
         if st.st_mode & 0o077 != 0 {
-            guard chmod(baseDirectory.path, 0o700) == 0 else {
+            guard chmod(url.path, 0o700) == 0 else {
                 throw DaemonSocketError(op: "chmod", errno: errno)
             }
         }
@@ -181,8 +192,14 @@ public struct DaemonPaths {
     /// `filesystemLiveness`'s existing behaviour), so callers only see
     /// daemons that are at least probably reachable. `baseDirectory`
     /// defaults to `/tmp/sim-use-<uid>/`; tests pass an isolated directory.
-    public static func enumerateLiveDaemons(baseDirectory: URL? = nil) -> [DiscoveredDaemon] {
+    ///
+    /// Throws when the base directory fails `validateBaseDirectory` —
+    /// callers act on what they find here (`stop --all` SIGTERMs the
+    /// pids, `status` connects to the sockets), so a pre-planted tree
+    /// must surface as an error, not as forged entries.
+    public static func enumerateLiveDaemons(baseDirectory: URL? = nil) throws -> [DiscoveredDaemon] {
         let baseDir = baseDirectory ?? Self.defaultBaseDirectory
+        try validateBaseDirectory(at: baseDir)
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: baseDir,
             includingPropertiesForKeys: nil,

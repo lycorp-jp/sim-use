@@ -292,11 +292,13 @@ public final class DaemonServer {
         // overwritten — while this instance idled toward shutdown. An
         // orphan wiping the live daemon's files makes the successor
         // invisible to clients, which then spawn yet another daemon
-        // and chain more orphans. Missing/unparseable pidfile keeps
-        // the old stale-cleanup behaviour.
+        // and chain more orphans. Ownership is only honoured while the
+        // owner is still alive: a dead owner's files are stale garbage
+        // (and its recycled pid could fake a live daemon later), so
+        // they are cleaned like the missing/unparseable-pidfile case.
         let owner = paths.readPidfile()
-        if let owner, owner != getpid() {
-            logInfo("sim-use-daemon: cleanup complete (paths taken over by pid \(owner); files left in place)")
+        if let owner, owner != getpid(), DaemonPaths.isProcessAlive(pid: owner) {
+            logInfo("sim-use-daemon: cleanup complete (paths taken over by live pid \(owner); files left in place)")
             return
         }
         paths.removeSocket()

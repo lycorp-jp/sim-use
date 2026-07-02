@@ -67,8 +67,16 @@ struct DaemonServerCleanupOwnershipTests {
         let fd = try DaemonSocket.connect(path: paths.socketURL.path)
         defer { Darwin.close(fd) }
 
-        // Simulate the successor daemon taking over both paths.
-        let foreignPid: pid_t = 99999
+        // Simulate the successor daemon taking over both paths. The
+        // successor must be a LIVE process we own — ownership is only
+        // honoured while the owner is alive (a dead owner's files are
+        // stale garbage; see the dead-pid test below).
+        let successor = Process()
+        successor.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        successor.arguments = ["30"]
+        try successor.run()
+        defer { successor.terminate() }
+        let foreignPid: pid_t = successor.processIdentifier
         try Data("\(foreignPid)\n".utf8).write(to: paths.pidfileURL)
         try FileManager.default.removeItem(at: paths.socketURL)
         FileManager.default.createFile(
@@ -96,5 +104,46 @@ struct DaemonServerCleanupOwnershipTests {
         #expect(paths.readPidfile() == foreignPid)
         let socketData = FileManager.default.contents(atPath: paths.socketURL.path)
         #expect(socketData == Data("successor-socket".utf8))
+    }
+
+    @Test("Takeover by a dead pid is cleaned up as stale on shutdown")
+    func takeoverByDeadPidIsCleanedUp() async throws {
+        let tmp = try makeTempDirectory()
+        defer { try? FileManager.default.removeItem(at: tmp) }
+
+        let udid = "TEST-DEADOWNER-\(UUID().uuidString.prefix(8))"
+        let (paths, task) = try await startTestDaemon(udid: udid, baseDirectory: tmp)
+        defer { task.cancel() }
+
+        let fd = try DaemonSocket.connect(path: paths.socketURL.path)
+        defer { Darwin.close(fd) }
+
+        // Pidfile points at a pid that is certainly dead (above macOS
+        // pid_max). Deferring to a dead "owner" would strand stale
+        // files that the next client only clears via its liveness
+        // probe — and a recycled pid could even fake a live daemon.
+        let deadPid: pid_t = 9_999_997
+        try Data("\(deadPid)\n".utf8).write(to: paths.pidfileURL)
+        try FileManager.default.removeItem(at: paths.socketURL)
+        FileManager.default.createFile(
+            atPath: paths.socketURL.path,
+            contents: Data("stale-socket".utf8)
+        )
+
+        var request = try JSONEncoder().encode(DaemonRequest(cmd: "_stop"))
+        request.append(0x0A)
+        let stopRequest = request
+        let ack: Data? = await Task.detached {
+            let writeResult = DaemonSocket.writeAll(fd: fd, data: stopRequest)
+            guard writeResult.ok else { return nil }
+            return DaemonSocket.readLine(fd: fd)
+        }.value
+        #expect(ack != nil)
+
+        _ = try? await task.value
+
+        // Dead owner → stale files; the shutting-down daemon removes them.
+        #expect(paths.readPidfile() == nil)
+        #expect(!FileManager.default.fileExists(atPath: paths.socketURL.path))
     }
 }

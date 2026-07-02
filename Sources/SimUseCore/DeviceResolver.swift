@@ -107,7 +107,9 @@ public struct DeviceResolver {
 
         // 3. Single live daemon — steady-state fast path. After the first
         // command in an agent session this hits and avoids the simctl fork.
-        let daemons = DaemonPaths.enumerateLiveDaemons(baseDirectory: baseDirectory)
+        // A base directory that fails validation throws here: resolution
+        // must not be steered by forged pidfiles in a pre-planted tree.
+        let daemons = try DaemonPaths.enumerateLiveDaemons(baseDirectory: baseDirectory)
         if daemons.count == 1 {
             return daemons[0].udid
         }
