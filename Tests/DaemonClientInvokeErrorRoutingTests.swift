@@ -202,6 +202,91 @@ struct DaemonClientInvokeErrorRoutingTests {
         _ = try? await task.value
     }
 
+    @Test("Cancellation during the retry delay propagates without killing the daemon")
+    func cancellationDuringRetryDelayPropagates() async throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let udid = "TEST-CANCEL-\(UUID().uuidString.prefix(8))"
+        let (paths, task) = try await startTestDaemon(udid: udid, baseDirectory: tmp)
+        defer { task.cancel() }
+        let pidBefore = paths.readPidfile()
+
+        FakeCommandState.reset(
+            failures: .max,
+            message: "Simulator is unavailable as it is not booted"
+        )
+
+        try await withParser({ _ in FakeFlakyCommand() }) {
+            // Long retry delay so the cancel lands inside the retry
+            // sleep — the only suspension point on the fast path.
+            let invokeTask = Task {
+                try await DaemonClient.invoke(
+                    command: "fake-flaky",
+                    args: [],
+                    udid: udid,
+                    baseDirectory: tmp,
+                    transientRetryDelay: 30
+                )
+            }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            invokeTask.cancel()
+
+            do {
+                _ = try await invokeTask.value
+                Issue.record("invoke should have thrown CancellationError")
+            } catch is CancellationError {
+                // Expected: cancellation is the caller's signal, not a
+                // stale daemon.
+            } catch {
+                Issue.record("expected CancellationError, got \(error)")
+            }
+        }
+
+        // A cancelled call must not be misread as a stale daemon: no
+        // file cleanup, no respawn, no re-execution.
+        #expect(FileManager.default.fileExists(atPath: paths.socketURL.path))
+        #expect(paths.readPidfile() == pidBefore)
+        #expect(FakeCommandState.executeCount == 1)
+
+        await DaemonClient.stopDaemon(paths: paths, timeout: 2.0)
+        _ = try? await task.value
+    }
+
+    @Test("Non-finite retry delay is tolerated instead of trapping")
+    func nonFiniteRetryDelayIsTolerated() async throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let udid = "TEST-INF-\(UUID().uuidString.prefix(8))"
+        let (paths, task) = try await startTestDaemon(udid: udid, baseDirectory: tmp)
+        defer { task.cancel() }
+
+        FakeCommandState.reset(
+            failures: 1,
+            message: "Simulator is unavailable as it is not booted"
+        )
+
+        // `transientRetryDelay` is public API: a non-finite value must
+        // not trap in the nanosecond conversion. Semantics: skip the
+        // pause and retry immediately.
+        try await withParser({ _ in FakeFlakyCommand() }) {
+            let responseData = try await DaemonClient.invoke(
+                command: "fake-flaky",
+                args: [],
+                udid: udid,
+                baseDirectory: tmp,
+                transientRetryDelay: .infinity
+            )
+            let envelope = try JSONDecoder().decode(SuccessEnvelope.self, from: responseData)
+            #expect(envelope.ok == true)
+        }
+        #expect(FakeCommandState.executeCount == 2)
+
+        await DaemonClient.stopDaemon(paths: paths, timeout: 2.0)
+        _ = try? await task.value
+    }
+
     @Test("transient_booting persisting past one retry propagates without further attempts")
     func transientBootingRetryIsBounded() async throws {
         let tmp = try makeTempDirectory()

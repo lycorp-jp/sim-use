@@ -63,6 +63,13 @@ public enum DaemonClient {
                     transientRetryDelay: transientRetryDelay
                 )
             } catch {
+                // Cooperative cancellation is the caller's signal, not
+                // a stale daemon — the retry delay below is a
+                // suspension point, so it can surface here. Rethrow
+                // before any cleanup/respawn.
+                if error is CancellationError {
+                    throw error
+                }
                 // A `remote` error means the daemon is alive and
                 // answered `ok=false` — that IS the command's outcome.
                 // Tearing the daemon down here would orphan a healthy
@@ -113,7 +120,15 @@ public enum DaemonClient {
         } catch let error as DaemonClientError {
             guard case .remote(_, .transientBooting, _) = error else { throw error }
             trace("transient_booting; retrying once after \(transientRetryDelay)s")
-            try await Task.sleep(nanoseconds: UInt64(max(0, transientRetryDelay) * 1_000_000_000))
+            // `transientRetryDelay` is public API: guard the nanosecond
+            // conversion against non-finite/overflowing values (skip the
+            // pause, retry immediately) instead of trapping. The cap only
+            // bounds the conversion; sane callers stay well below it.
+            if transientRetryDelay.isFinite, transientRetryDelay > 0 {
+                let cappedSeconds = min(transientRetryDelay, 60)
+                try await Task.sleep(nanoseconds: UInt64(cappedSeconds * 1_000_000_000))
+            }
+            try Task.checkCancellation()
             let response = try sendRequest(command: command, args: args, to: paths.socketURL.path)
             trace("retry sendRequest OK \(response.count) bytes, classifying")
             return try classify(response: response)
