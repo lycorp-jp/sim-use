@@ -172,7 +172,7 @@ struct Daemon: AsyncParsableCommand {
         }
 
         func execute() async throws -> ExecutionResult {
-            let targets = resolveTargets()
+            let targets = try resolveTargets()
             var entries: [StopEntry] = []
             for target in targets {
                 entries.append(await stopOne(target))
@@ -206,12 +206,17 @@ struct Daemon: AsyncParsableCommand {
         // `--udid` with no live daemon yields an empty list so both the
         // CLI and `--json` path produce a "nothing to do" outcome rather
         // than an error; scripts wrapping this stay zero-exit.
-        private func resolveTargets() -> [DaemonPaths.DiscoveredDaemon] {
+        //
+        // Throws on a base directory that fails the security gate: the
+        // pids found here get SIGTERMed on the fallback path, so a
+        // pre-planted tree must be an error, never a target list.
+        private func resolveTargets() throws -> [DaemonPaths.DiscoveredDaemon] {
             if all {
-                return DaemonPaths.enumerateLiveDaemons()
+                return try DaemonPaths.enumerateLiveDaemons()
             }
             guard let target = simulatorUDID else { return [] }
             let paths = DaemonPaths(udid: target)
+            try DaemonPaths.validateBaseDirectory(at: paths.baseDirectory)
             if case .probablyAlive(let pid) = paths.filesystemLiveness() {
                 return [DaemonPaths.DiscoveredDaemon(udid: target, pid: pid, paths: paths)]
             }
@@ -365,7 +370,7 @@ struct Daemon: AsyncParsableCommand {
         }
 
         func execute() async throws -> ExecutionResult {
-            let discovered = DaemonPaths.enumerateLiveDaemons()
+            let discovered = try DaemonPaths.enumerateLiveDaemons()
             var entries: [StatusEntry] = []
             for daemon in discovered {
                 entries.append(pingOne(daemon))
