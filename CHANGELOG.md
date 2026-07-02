@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bridge `/a11y_tree_full` no longer reads the active root's `windowId` after the node was recycled, which silently dropped popup/dialog secondary windows on Android 11–12.
 - Bridge `/keyboard/input` no longer leaks the borrowed root `AccessibilityNodeInfo` on every call.
 - `record-video` no longer hot-spins without frame pacing when screenshot frames persistently fail to decode.
+- `keyboard-state` now routes through the per-UDID daemon like every other verb (amortised init) and surfaces crash advisories and error `Hint:` lines; a vestigial `run()` override had silently opted it out. The `soft`/`hidden`/failure exit codes are unchanged.
 
 ## [0.9.0] - 2026-06-29
 
