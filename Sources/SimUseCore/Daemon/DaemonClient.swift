@@ -63,27 +63,24 @@ public enum DaemonClient {
                     transientRetryDelay: transientRetryDelay
                 )
             } catch {
-                // Cooperative cancellation is the caller's signal, not
-                // a stale daemon — the retry delay below is a
-                // suspension point, so it can surface here. Rethrow
-                // before any cleanup/respawn.
-                if error is CancellationError {
-                    throw error
+                switch classifyFastPathFailure(error) {
+                case .surface(let surfaced):
+                    // Cancellation, a `remote` ok=false answer, or a
+                    // post-write ambiguity — surface as-is. Crucially we
+                    // do NOT respawn+resend on ambiguity: the daemon may
+                    // have executed the command before dropping the
+                    // response, so a blind resend could run a
+                    // side-effecting verb twice. Leave the files for the
+                    // next call's liveness probe to reconcile.
+                    throw surfaced
+                case .respawn:
+                    // The command provably never reached the daemon
+                    // (connect/write failed) — this is the stale-daemon
+                    // case. Clean up and fall through to respawn+resend.
+                    trace("fast-path pre-delivery failure: \(error). Removing stale files.")
+                    paths.removeSocket()
+                    paths.removePidfile()
                 }
-                // A `remote` error means the daemon is alive and
-                // answered `ok=false` — that IS the command's outcome.
-                // Tearing the daemon down here would orphan a healthy
-                // server and re-executing the request would double any
-                // side effects it already performed. Only transport-
-                // level failures (connect/write/read, empty or garbage
-                // response) indicate a stale daemon worth respawning.
-                if let clientError = error as? DaemonClientError,
-                   case .remote = clientError {
-                    throw clientError
-                }
-                trace("fast-path transport failure: \(error). Removing stale files.")
-                paths.removeSocket()
-                paths.removePidfile()
             }
         }
 
@@ -93,12 +90,91 @@ public enum DaemonClient {
         try await waitForSocket(paths: paths, timeout: 5.0)
         trace("socket ready after spawn")
 
-        return try await sendClassifiedRequest(
-            command: command,
-            args: args,
-            paths: paths,
-            transientRetryDelay: transientRetryDelay
-        )
+        do {
+            return try await sendClassifiedRequest(
+                command: command,
+                args: args,
+                paths: paths,
+                transientRetryDelay: transientRetryDelay
+            )
+        } catch {
+            // The fresh daemon can also drop the connection after
+            // receiving the request. Re-tag that post-write ambiguity so
+            // the agent hears "unknown outcome" rather than a bare
+            // transport error; there is no second respawn to attempt.
+            throw surfacedError(error)
+        }
+    }
+
+    /// What the fast-path catch should do with a `sendClassifiedRequest`
+    /// failure.
+    enum FastPathFailureDecision {
+        /// Surface this error to the caller unchanged — no respawn.
+        case surface(Error)
+        /// The request provably never reached the daemon; clean up the
+        /// stale files and respawn a fresh one.
+        case respawn
+    }
+
+    /// Decide the fast-path response to a failure. Extracted for unit
+    /// testing — the daemon-vs-inline resend policy is the load-bearing
+    /// at-most-once guarantee and must not silently regress.
+    static func classifyFastPathFailure(_ error: Error) -> FastPathFailureDecision {
+        // Cancellation and `remote` answers are always surfaced as-is.
+        if error is CancellationError {
+            return .surface(error)
+        }
+        if let clientError = error as? DaemonClientError, case .remote = clientError {
+            return .surface(clientError)
+        }
+        // Post-write ambiguity: the bytes reached the daemon, so the
+        // command may have executed. Surface a typed ambiguity error
+        // instead of respawning.
+        if requestReachedDaemon(error) {
+            return .surface(DaemonClientError.ambiguousExecution(underlying: error))
+        }
+        // Everything else is a pre-delivery transport failure (connect or
+        // write) — the command never ran, so respawning is safe.
+        return .respawn
+    }
+
+    /// Map a spawn-path failure for surfacing: same rules as the fast
+    /// path minus the respawn option (there is no second daemon to spawn).
+    static func surfacedError(_ error: Error) -> Error {
+        switch classifyFastPathFailure(error) {
+        case .surface(let surfaced):
+            return surfaced
+        case .respawn:
+            // A connect/write failure against the daemon we just spawned
+            // is a genuine transport problem, not an ambiguity — surface
+            // it verbatim.
+            return error
+        }
+    }
+
+    /// True when the failure happened AFTER the request bytes were handed
+    /// to the daemon — i.e. the command may already have executed.
+    /// `connect` failures (`DaemonSocketError`) and `write` failures mean
+    /// the request never landed, so the command provably did not run.
+    /// Empty / malformed / post-write read failures are ambiguous.
+    static func requestReachedDaemon(_ error: Error) -> Bool {
+        switch error {
+        case is DaemonSocketError:
+            return false
+        case let clientError as DaemonClientError:
+            switch clientError {
+            case .transportFailure(let op, _, _):
+                // `write` fails before delivery; `read`/`read-wait` fail
+                // after the request is already on the wire.
+                return op != "write"
+            case .emptyResponse, .malformedResponse:
+                return true
+            default:
+                return false
+            }
+        default:
+            return false
+        }
     }
 
     /// Send + classify one business request, retrying exactly once when
@@ -390,6 +466,11 @@ public enum DaemonClientError: Error, CustomStringConvertible, HintProviding {
     case emptyResponse
     case malformedResponse(underlying: Error)
     case remote(message: String, kind: DaemonErrorKind, hint: String?)
+    /// The request was delivered to the daemon, but no valid response
+    /// came back (the connection dropped or the reply was unparseable).
+    /// The command may or may not have executed, so the client did not
+    /// resend it — the caller decides.
+    case ambiguousExecution(underlying: Error)
 
     public var description: String {
         switch self {
@@ -407,6 +488,10 @@ public enum DaemonClientError: Error, CustomStringConvertible, HintProviding {
             return "Daemon response could not be parsed: \(err.localizedDescription)"
         case .remote(let message, _, _):
             return message
+        case .ambiguousExecution(let err):
+            return "The command reached the sim-use daemon but no valid response came back "
+                + "(\(err.localizedDescription)). It may or may not have executed; "
+                + "sim-use did not resend it to avoid running a side-effecting command twice."
         }
     }
 
@@ -416,8 +501,16 @@ public enum DaemonClientError: Error, CustomStringConvertible, HintProviding {
     }
 
     public var hint: String? {
-        if case .remote(_, _, let hint) = self { return hint }
-        return nil
+        switch self {
+        case .remote(_, _, let hint):
+            return hint
+        case .ambiguousExecution:
+            return "Re-observe the screen with `sim-use ui` to check whether the command took "
+                + "effect, then retry only if it did not. sim-use avoids automatic retries here "
+                + "so a tap/type/swipe is never applied twice."
+        default:
+            return nil
+        }
     }
 }
 
