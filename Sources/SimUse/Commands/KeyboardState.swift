@@ -11,10 +11,10 @@ import iOSSimBackend
 /// Simulator UDIDs, `AndroidKeyboardStateCommand.performKeyboardState`
 /// for adb serials).
 ///
-/// Overrides `run()` so the JSON envelope shape (`{ok, data}` /
-/// `{ok, error}`) and the soft-vs-hidden exit-code semantics stay
-/// stable across the migration — both `soft` and `hidden` exit 0;
-/// non-zero is reserved for genuine probe failure.
+/// Uses the protocol-default `run()`: the soft-vs-hidden exit-code
+/// semantics (both exit 0; non-zero reserved for genuine probe failure)
+/// come from `execute()` returning a result rather than throwing, so no
+/// custom `run()` is needed. See the note above `format(_:)`.
 struct KeyboardState: SimUseExecutableCommand {
     typealias ExecutionResult = IOSSimKeyboardStateCommand.ExecutionResult
 
@@ -90,37 +90,18 @@ struct KeyboardState: SimUseExecutableCommand {
         .line(result.visible ? "soft" : "hidden")
     }
 
-    // `hidden` is a valid probe result, not a failure: until 0.5.x this
-    // path threw `ExitCode(1)` on hidden so shell pipelines could branch
-    // with `if sim-use keyboard-state --udid X; then ...`. That shape
-    // conflated "keyboard is hidden" (an expected steady state on
-    // Android, and on iOS whenever no field is focused) with genuine
-    // failure (device unreachable, AX fetch error), making non-zero
-    // unusable as a real error signal — every wrapper script had to
-    // distinguish the two by parsing stderr. Both `soft` and `hidden`
-    // now exit 0; callers branch on stdout (`[[ $(sim-use keyboard-state
-    // --udid X) == soft ]]`) or on `data.visible` in the JSON envelope.
+    // No custom `run()`: the exit-code contract this command needs —
+    // both `soft` and `hidden` exit 0, non-zero reserved for genuine
+    // failure (device unreachable, AX fetch error) — falls out of the
+    // protocol default. `execute()` returns a result for both keyboard
+    // states rather than throwing, so the default `run()` renders it and
+    // exits 0; only a thrown error exits non-zero. Callers branch on
+    // stdout (`[[ $(sim-use keyboard-state --udid X) == soft ]]`) or on
+    // `data.visible` in the JSON envelope.
     //
-    // The override still skips the protocol-default `run()` (which is
-    // what wires `resolveDeferredArguments()` for every other command),
-    // so we call the resolver explicitly. Without this the
-    // `simulatorUDID` stays empty and every dispatch fails with
-    // `"Simulator with UDID  not found in set."`.
-    mutating func run() async throws {
-        if jsonOutput {
-            do {
-                try resolveDeferredArguments()
-                let result = try await execute()
-                try JSONEnvelopeWriter.writeSuccess(result)
-            } catch {
-                JSONEnvelopeWriter.writeError(error)
-                throw ExitCode(1)
-            }
-            return
-        }
-
-        try resolveDeferredArguments()
-        let result = try await execute()
-        format(result).emit()
-    }
+    // A pre-0.5.x override threw `ExitCode(1)` on `hidden`; when that was
+    // dropped the override lingered and quietly opted the verb out of
+    // daemon routing, the crash-advisory banner, and `Hint:` formatting.
+    // Using the default `run()` restores all three and keeps the exit
+    // codes identical.
 }
