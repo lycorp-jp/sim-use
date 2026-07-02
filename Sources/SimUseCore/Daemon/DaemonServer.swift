@@ -286,6 +286,19 @@ public final class DaemonServer {
             Darwin.close(listenFd)
             listenFd = -1
         }
+        // Only remove the socket/pidfile while this process still owns
+        // them. A successor daemon may have taken the paths over —
+        // `listen()` unlinks + rebinds the socket and the pidfile gets
+        // overwritten — while this instance idled toward shutdown. An
+        // orphan wiping the live daemon's files makes the successor
+        // invisible to clients, which then spawn yet another daemon
+        // and chain more orphans. Missing/unparseable pidfile keeps
+        // the old stale-cleanup behaviour.
+        let owner = paths.readPidfile()
+        if let owner, owner != getpid() {
+            logInfo("sim-use-daemon: cleanup complete (paths taken over by pid \(owner); files left in place)")
+            return
+        }
         paths.removeSocket()
         paths.removePidfile()
         logInfo("sim-use-daemon: cleanup complete")

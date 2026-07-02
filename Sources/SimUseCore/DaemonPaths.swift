@@ -45,6 +45,14 @@ public struct DaemonPaths {
     /// Create the base directory with mode 0700 if missing. Idempotent;
     /// safe to call from both the client (before probing) and the server
     /// (before binding) on every invocation.
+    ///
+    /// `createDirectory` applies the 0700 attribute only on first
+    /// creation and silently accepts a pre-existing path. The base
+    /// directory lives under world-writable /tmp, so re-validate on
+    /// every run: reject symlinks/non-directories and foreign owners
+    /// outright (a pre-planted path would let another local user swap
+    /// sockets and pidfiles under us), and tighten loose permissions
+    /// back to 0700.
     public func ensureBaseDirectory() throws {
         let fm = FileManager.default
         try fm.createDirectory(
@@ -52,6 +60,28 @@ public struct DaemonPaths {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: NSNumber(value: 0o700)]
         )
+
+        var st = stat()
+        guard lstat(baseDirectory.path, &st) == 0 else {
+            throw DaemonSocketError(op: "lstat", errno: errno)
+        }
+        guard (st.st_mode & S_IFMT) == S_IFDIR else {
+            throw DaemonPathsError.insecureBaseDirectory(
+                path: baseDirectory.path,
+                reason: "it is not a real directory (symlink or special file)"
+            )
+        }
+        guard st.st_uid == getuid() else {
+            throw DaemonPathsError.insecureBaseDirectory(
+                path: baseDirectory.path,
+                reason: "it is owned by uid \(st.st_uid), not the current user (uid \(getuid()))"
+            )
+        }
+        if st.st_mode & 0o077 != 0 {
+            guard chmod(baseDirectory.path, 0o700) == 0 else {
+                throw DaemonSocketError(op: "chmod", errno: errno)
+            }
+        }
     }
 
     /// Read the pid text written by the daemon on startup. Returns nil
@@ -116,6 +146,19 @@ public struct DaemonPaths {
     public enum FilesystemLiveness {
         case noDaemon
         case probablyAlive(pid: pid_t)
+    }
+
+    public enum DaemonPathsError: Error, CustomStringConvertible, LocalizedError {
+        case insecureBaseDirectory(path: String, reason: String)
+
+        public var description: String {
+            switch self {
+            case .insecureBaseDirectory(let path, let reason):
+                return "Daemon base directory \(path) is not safe to use: \(reason). Remove it and retry."
+            }
+        }
+
+        public var errorDescription: String? { description }
     }
 
     /// A daemon discovered during a directory scan: its UDID, live pid,

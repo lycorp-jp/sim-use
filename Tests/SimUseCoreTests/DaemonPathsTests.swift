@@ -247,3 +247,60 @@ struct DaemonPathsEnumerateTests {
         #expect(discovered.map(\.udid) == ["AAA", "MMM", "ZZZ"])
     }
 }
+// MARK: - Base directory hardening
+
+// The base directory lives under world-writable /tmp, so its 0700 mode
+// is only meaningful if we verify it on every run: `createDirectory`
+// applies the permission attribute solely on first creation and
+// silently accepts a pre-existing directory — including one another
+// local user pre-created (with their ownership and mode) to swap
+// sockets/pidfiles under us, or a symlink planted at the path.
+@Suite("DaemonPaths.ensureBaseDirectory hardening")
+struct DaemonPathsEnsureBaseDirectoryTests {
+    private func mode(of url: URL) throws -> mode_t {
+        var st = stat()
+        try #require(lstat(url.path, &st) == 0)
+        return st.st_mode & 0o777
+    }
+
+    @Test("Fresh creation applies mode 0700")
+    func freshCreationIs0700() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let base = tmp.appendingPathComponent("fresh-base", isDirectory: true)
+        let paths = DaemonPaths(udid: "U", baseDirectory: base)
+        try paths.ensureBaseDirectory()
+        #expect(try mode(of: base) == 0o700)
+    }
+
+    @Test("Pre-existing directory with loose permissions is tightened to 0700")
+    func looseExistingDirectoryIsTightened() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let base = tmp.appendingPathComponent("loose-base", isDirectory: true)
+        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        try #require(chmod(base.path, 0o777) == 0)
+
+        let paths = DaemonPaths(udid: "U", baseDirectory: base)
+        try paths.ensureBaseDirectory()
+        #expect(try mode(of: base) == 0o700)
+    }
+
+    @Test("A symlink planted at the base path is rejected")
+    func symlinkAtBasePathThrows() throws {
+        let tmp = try makeTempDirectory()
+        defer { removeTempDirectory(tmp) }
+
+        let target = tmp.appendingPathComponent("real-dir", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        let base = tmp.appendingPathComponent("link-base", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: base, withDestinationURL: target)
+
+        let paths = DaemonPaths(udid: "U", baseDirectory: base)
+        #expect(throws: (any Error).self) {
+            try paths.ensureBaseDirectory()
+        }
+    }
+}
