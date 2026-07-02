@@ -60,7 +60,7 @@ export interface Screen {
 
 export interface Snapshot {
   capturedAt: string;
-  udid: string;
+  deviceId: string;
   /// `"ios"` and `"android"` are the only values sim-use emits
   /// today; treat anything else as a forward-compat hint and
   /// fall back to iOS-style rendering in the UI (the geometric
@@ -74,7 +74,7 @@ export interface Snapshot {
 }
 
 export interface Device {
-  udid: string;
+  deviceId: string;
   name: string;
   // Widened to allow future platforms (web, etc.); the strict
   // union was forcing every consumer to `unknown`-cast on

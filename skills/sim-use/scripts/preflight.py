@@ -108,17 +108,19 @@ def check_device_listed(ctx: Ctx) -> bool:
     if not ctx.device:
         booted = [d for d in devices if d.get("state", "").lower() in ("booted", "device")]
         if len(booted) == 1:
-            ctx.device = booted[0].get("udid") or booted[0].get("deviceId")
+            ctx.device = booted[0].get("deviceId") or booted[0].get("udid")
             ctx.platform = booted[0].get("platform")
             return True
         if len(booted) > 1:
-            names = [f"{d.get('name')} ({d.get('udid') or d.get('deviceId')})" for d in booted]
+            names = [f"{d.get('name')} ({d.get('deviceId') or d.get('udid')})" for d in booted]
             print(f"        Multiple devices found: {', '.join(names)}")
             print("        Re-run with --device <UDID> to pick one.")
         return False
 
     for d in devices:
-        did = d.get("udid") or d.get("deviceId", "")
+        # `deviceId` is the canonical key; `udid` covers older sim-use
+        # binaries that predate the rename.
+        did = d.get("deviceId") or d.get("udid", "")
         if did == ctx.device:
             ctx.platform = d.get("platform")
             return True
