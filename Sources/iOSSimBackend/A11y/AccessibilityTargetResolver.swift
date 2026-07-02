@@ -8,6 +8,16 @@ public enum AccessibilityQuery {
     case value(String)
     case labelContains(String)
     case labelRegex(pattern: String)
+
+    /// The user-supplied string behind the query, for diagnostics.
+    public var displayValue: String {
+        switch self {
+        case .id(let v), .label(let v), .value(let v), .labelContains(let v):
+            return v
+        case .labelRegex(let pattern):
+            return pattern
+        }
+    }
 }
 
 public enum ElementResolutionError: LocalizedError, HintProviding {
@@ -276,6 +286,14 @@ public struct AccessibilityTargetResolver {
             throw ElementResolutionError.invalidFrame(reason: "Matched element has an invalid frame size (\(frame.width)x\(frame.height)).")
         }
 
+        if let advisory = FullScreenTapAdvisory.message(
+            matched: frame,
+            screen: roots.first?.frame,
+            query: query.displayValue
+        ) {
+            FileHandle.standardError.write(Data((advisory + "\n").utf8))
+        }
+
         let centerX = frame.x + (frame.width / 2.0)
         let centerY = frame.y + (frame.height / 2.0)
         return (x: centerX, y: centerY)
@@ -321,7 +339,15 @@ public struct AccessibilityTargetResolver {
             )
         case .label(let rawValue):
             let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let matches = allElements.filter { $0.normalizedLabel == value }
+            var matches = allElements.filter { $0.normalizedLabel == value }
+            if matches.isEmpty, let collapsedQuery = AccessibilityElement.collapseWhitespace(rawValue) {
+                // Whitespace-tolerant fallback: a multi-line AXLabel renders
+                // space-joined in the compact outline, so the exact query the
+                // agent copies back never equals the newline-bearing label.
+                // Only runs when the exact pass found nothing, so existing
+                // exact matches are never altered.
+                matches = allElements.filter { $0.collapsedLabel == collapsedQuery }
+            }
             return try selectBestLabelMatch(
                 matches,
                 kind: "--label",
@@ -330,7 +356,10 @@ public struct AccessibilityTargetResolver {
             )
         case .value(let rawValue):
             let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let matches = allElements.filter { $0.normalizedValue == value }
+            var matches = allElements.filter { $0.normalizedValue == value }
+            if matches.isEmpty, let collapsedQuery = AccessibilityElement.collapseWhitespace(rawValue) {
+                matches = allElements.filter { $0.collapsedValue == collapsedQuery }
+            }
             return try selectBestLabelMatch(
                 matches,
                 kind: "--value",
@@ -339,7 +368,12 @@ public struct AccessibilityTargetResolver {
             )
         case .labelContains(let rawValue):
             let needle = rawValue
-            let matches = allElements.filter { ($0.normalizedLabel ?? "").contains(needle) }
+            var matches = allElements.filter { ($0.normalizedLabel ?? "").contains(needle) }
+            if matches.isEmpty,
+               let collapsedNeedle = AccessibilityElement.collapseWhitespace(rawValue),
+               !collapsedNeedle.isEmpty {
+                matches = allElements.filter { ($0.collapsedLabel ?? "").contains(collapsedNeedle) }
+            }
             return try selectBestLabelMatch(
                 matches,
                 kind: "--label-contains",

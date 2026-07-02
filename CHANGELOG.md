@@ -10,9 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `swipe` now accepts `--from x,y --to x,y` and positional `x,y x,y` coordinates on top-level, iOS, Android, and iOS batch surfaces while keeping the existing four coordinate flags.
+- `tap`/`long-press` now print a non-fatal `[i]` advisory to stderr when a `--label`/`--value`/`--label-contains` selector resolves to an element covering ≥90% of the screen — a common footgun on canvas-rendered UIs (e.g. Flutter) where a full-screen wrapper element makes the tap land on the screen centre instead of the intended control. The tap still fires; the advisory recommends a positional `@N`/`#N` alias or explicit coordinates.
 
 ### Changed
 
+- `--label`/`--value` exact matching and `--label-contains` now fall back to whitespace-collapsed comparison when the exact pass finds nothing, so a multi-line `AXLabel` (which the compact `describe-ui` outline renders space-joined) matches the space-joined string an agent copies back. Existing exact matches are unaffected — the fallback only runs when the exact pass matched zero elements.
 - Daemon client now retries a command once against the same daemon when the simulator reports the post-boot `transient_booting` readiness gap, matching the long-documented behaviour.
 - Bridge `/swipe` now accepts durations up to 10 s (previously silently clamped to 5 s), covering the full `--duration` range the CLI validates for long-press holds. Bridge `versionCode` bumped to 16.
 - `ios type` builds one HID session for the whole string instead of re-initialising FBSimulatorControl per character.
