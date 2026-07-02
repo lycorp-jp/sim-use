@@ -44,6 +44,24 @@ struct TypeForwarderTests {
         try IOSSimTypeCommand.validateOptions(text: "hello", useStdin: false, inputFile: nil)
     }
 
+    // MARK: - Empty input short-circuit
+
+    // Empty input produces zero HID events and must stay a strict
+    // no-op: no HID session is created, so `type ""` neither pays
+    // framework/simulator-set initialisation nor fails against a
+    // device that is not booted — the behaviour an agent's
+    // `type "$VAR"` with an empty variable relies on.
+    @Test("Empty input succeeds without touching the HID session path")
+    func emptyInputShortCircuits() async throws {
+        // iOS-shaped UDID that matches no simulator on this host:
+        // reaching makeSession would throw "not found in set".
+        var cmd = try IOSSimTypeCommand.parse([
+            "", "--udid", "00000000-DEAD-BEEF-0000-000000000000",
+        ])
+        try cmd.resolveDeferredArguments()
+        _ = try await cmd.execute()
+    }
+
     // MARK: - Symmetric forwarder contract
 
     @Test("AndroidTypeCommand.performType is callable with the forwarder's argument shape")

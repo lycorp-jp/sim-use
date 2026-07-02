@@ -165,12 +165,27 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
             throw error
         }
 
+        // Empty input yields zero HID events. Return before building a
+        // session so `type ""` stays a strict no-op — it must not pay
+        // framework/simulator-set initialisation or fail against a
+        // device that is not booted (an agent's `type "$VAR"` with an
+        // empty variable relied on the pre-session-reuse behaviour).
+        guard !hidEvents.isEmpty else {
+            logger.info().log("No HID events to perform (empty input); skipping session.")
+            return ExecutionResult()
+        }
+
         logger.info().log("Performing HID event sequence for text typing")
 
+        // One session for the whole string: the per-UDID overload runs
+        // makeSession (framework load + FBSimulatorControl set
+        // construction) on every call, which multiplies per character
+        // typed. Only the HID connection inside is cached.
+        let session = try await HIDInteractor.makeSession(for: device.resolved, logger: logger)
         for event in hidEvents {
             try await HIDInteractor.performHIDEvent(
                 event,
-                for: device.resolved,
+                in: session,
                 logger: logger
             )
         }

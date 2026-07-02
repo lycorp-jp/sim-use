@@ -178,26 +178,29 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
 
             do {
                 let frameData = try await VideoFrameUtilities.captureScreenshotData(from: simulator)
-                guard let cgImage = VideoFrameUtilities.makeCGImage(from: frameData) else {
+                // A decode failure must still fall through to the
+                // frame-pacing sleep below — `continue` here would
+                // hot-spin the loop for as long as decoding keeps
+                // failing.
+                if let cgImage = VideoFrameUtilities.makeCGImage(from: frameData) {
+                    let now = Date()
+                    var presentationTime = CMTime(seconds: now.timeIntervalSince(writerStartTime), preferredTimescale: 600)
+                    if presentationTime <= lastPresentationTime {
+                        presentationTime = CMTimeAdd(lastPresentationTime, CMTime(value: 1, timescale: 600))
+                    }
+
+                    try recorder.append(image: cgImage, presentationTime: presentationTime)
+                    lastPresentationTime = presentationTime
+                    frameCount += 1
+
+                    if frameCount - lastLogFrame >= Int64(fps) {
+                        lastLogFrame = frameCount
+                        let elapsed = Date().timeIntervalSince(startTime)
+                        let actualFPS = Double(frameCount) / max(elapsed, 0.0001)
+                        FileHandle.standardError.write(Data(String(format: "Captured %lld frames (%.1f FPS actual)\n", frameCount, actualFPS).utf8))
+                    }
+                } else {
                     FileHandle.standardError.write(Data("Unable to decode screenshot frame\n".utf8))
-                    continue
-                }
-
-                let now = Date()
-                var presentationTime = CMTime(seconds: now.timeIntervalSince(writerStartTime), preferredTimescale: 600)
-                if presentationTime <= lastPresentationTime {
-                    presentationTime = CMTimeAdd(lastPresentationTime, CMTime(value: 1, timescale: 600))
-                }
-
-                try recorder.append(image: cgImage, presentationTime: presentationTime)
-                lastPresentationTime = presentationTime
-                frameCount += 1
-
-                if frameCount - lastLogFrame >= Int64(fps) {
-                    lastLogFrame = frameCount
-                    let elapsed = Date().timeIntervalSince(startTime)
-                    let actualFPS = Double(frameCount) / max(elapsed, 0.0001)
-                    FileHandle.standardError.write(Data(String(format: "Captured %lld frames (%.1f FPS actual)\n", frameCount, actualFPS).utf8))
                 }
             } catch {
                 FileHandle.standardError.write(Data("Error capturing frame: \(error.localizedDescription)\n".utf8))
