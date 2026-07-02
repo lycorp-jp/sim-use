@@ -2,8 +2,8 @@
 import Foundation
 import SimUseCore
 
-/// Common response envelope emitted by every bridge endpoint, per
-/// `ai-doc/ANDROID_WIRE_SPEC.md`. Inline JSON `result` (NOT csat's
+/// Common response envelope emitted by every bridge endpoint (built in
+/// the bridge's `server/ActionRouter.kt`). Inline JSON `result` (NOT csat's
 /// double-encoded string form). On success: `status="success"`, `result`
 /// is endpoint-specific. On failure: `status="error"`, `error` is a
 /// human message, `code` is a machine-readable token.

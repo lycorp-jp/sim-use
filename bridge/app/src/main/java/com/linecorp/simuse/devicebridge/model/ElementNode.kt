@@ -6,10 +6,11 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Wire schema for an accessibility tree node. Conforms to
- * `ai-doc/ANDROID_WIRE_SPEC.md` §`ElementNode` — full **P0+P1** field
- * set (csat ships only 10 fields; we ship 22 so V2/V3 verbs don't have
- * to bump `protocol_version` to read additional fields).
+ * Wire schema for an accessibility tree node. Mirrors the Swift
+ * decoder `Sources/AndroidBackend/Bridge/ElementNode.swift` — keep the
+ * two field sets in sync. Full **P0+P1** field set (csat ships only 10
+ * fields; we ship 22 so V2/V3 verbs don't have to bump
+ * `protocol_version` to read additional fields).
  *
  * Fields that may be absent on older Android versions (`uniqueId` on
  * pre-API-33, `hintText` on pre-API-26, `stateDescription` on pre-API-30)
