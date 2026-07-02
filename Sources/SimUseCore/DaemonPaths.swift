@@ -45,6 +45,14 @@ public struct DaemonPaths {
     /// Create the base directory with mode 0700 if missing. Idempotent;
     /// safe to call from both the client (before probing) and the server
     /// (before binding) on every invocation.
+    ///
+    /// `createDirectory` applies the 0700 attribute only on first
+    /// creation and silently accepts a pre-existing path. The base
+    /// directory lives under world-writable /tmp, so re-validate on
+    /// every run: reject symlinks/non-directories and foreign owners
+    /// outright (a pre-planted path would let another local user swap
+    /// sockets and pidfiles under us), and tighten loose permissions
+    /// back to 0700.
     public func ensureBaseDirectory() throws {
         let fm = FileManager.default
         try fm.createDirectory(
@@ -52,6 +60,39 @@ public struct DaemonPaths {
             withIntermediateDirectories: true,
             attributes: [.posixPermissions: NSNumber(value: 0o700)]
         )
+        try Self.validateBaseDirectory(at: baseDirectory)
+    }
+
+    /// Security gate for every consumer of the base directory — the
+    /// spawn/connect paths (via `ensureBaseDirectory`) AND the
+    /// management paths (`enumerateLiveDaemons`, `daemon stop/status`),
+    /// which act on the pids and sockets they find and must not trust a
+    /// pre-planted tree. An absent path is fine (nothing to validate);
+    /// a symlink, non-directory, or foreign owner throws; loose
+    /// group/other permission bits are tightened back to 0700.
+    public static func validateBaseDirectory(at url: URL) throws {
+        var st = stat()
+        guard lstat(url.path, &st) == 0 else {
+            if errno == ENOENT { return }
+            throw DaemonSocketError(op: "lstat", errno: errno)
+        }
+        guard (st.st_mode & S_IFMT) == S_IFDIR else {
+            throw DaemonPathsError.insecureBaseDirectory(
+                path: url.path,
+                reason: "it is not a real directory (symlink or special file)"
+            )
+        }
+        guard st.st_uid == getuid() else {
+            throw DaemonPathsError.insecureBaseDirectory(
+                path: url.path,
+                reason: "it is owned by uid \(st.st_uid), not the current user (uid \(getuid()))"
+            )
+        }
+        if st.st_mode & 0o077 != 0 {
+            guard chmod(url.path, 0o700) == 0 else {
+                throw DaemonSocketError(op: "chmod", errno: errno)
+            }
+        }
     }
 
     /// Read the pid text written by the daemon on startup. Returns nil
@@ -118,6 +159,19 @@ public struct DaemonPaths {
         case probablyAlive(pid: pid_t)
     }
 
+    public enum DaemonPathsError: Error, CustomStringConvertible, LocalizedError {
+        case insecureBaseDirectory(path: String, reason: String)
+
+        public var description: String {
+            switch self {
+            case .insecureBaseDirectory(let path, let reason):
+                return "Daemon base directory \(path) is not safe to use: \(reason). Remove it and retry."
+            }
+        }
+
+        public var errorDescription: String? { description }
+    }
+
     /// A daemon discovered during a directory scan: its UDID, live pid,
     /// and a `DaemonPaths` handle for socket/pidfile/log access.
     public struct DiscoveredDaemon {
@@ -138,8 +192,14 @@ public struct DaemonPaths {
     /// `filesystemLiveness`'s existing behaviour), so callers only see
     /// daemons that are at least probably reachable. `baseDirectory`
     /// defaults to `/tmp/sim-use-<uid>/`; tests pass an isolated directory.
-    public static func enumerateLiveDaemons(baseDirectory: URL? = nil) -> [DiscoveredDaemon] {
+    ///
+    /// Throws when the base directory fails `validateBaseDirectory` —
+    /// callers act on what they find here (`stop --all` SIGTERMs the
+    /// pids, `status` connects to the sockets), so a pre-planted tree
+    /// must surface as an error, not as forged entries.
+    public static func enumerateLiveDaemons(baseDirectory: URL? = nil) throws -> [DiscoveredDaemon] {
         let baseDir = baseDirectory ?? Self.defaultBaseDirectory
+        try validateBaseDirectory(at: baseDir)
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: baseDir,
             includingPropertiesForKeys: nil,

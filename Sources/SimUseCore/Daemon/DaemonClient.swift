@@ -15,10 +15,17 @@ import Foundation
 public enum DaemonClient {
     /// Top-level entry: send a command to the right daemon and return
     /// the response line (without trailing newline).
+    ///
+    /// `baseDirectory` overrides the default `/tmp/sim-use-<uid>/` tree;
+    /// production callers leave it nil, tests pass an isolated directory.
+    /// `transientRetryDelay` is the pause before the single
+    /// `transient_booting` re-send (see `sendClassifiedRequest`).
     public static func invoke(
         command: String,
         args: [String],
-        udid: String
+        udid: String,
+        baseDirectory: URL? = nil,
+        transientRetryDelay: TimeInterval = 1.0
     ) async throws -> Data {
         // Ignore SIGPIPE for the remainder of the process. Without it,
         // any write() on a socket whose peer has closed its read side
@@ -26,7 +33,7 @@ public enum DaemonClient {
         // code in writeAll gets to run. Cheap and idempotent.
         signal(SIGPIPE, SIG_IGN)
 
-        let paths = DaemonPaths(udid: udid)
+        let paths = DaemonPaths(udid: udid, baseDirectory: baseDirectory)
         try paths.ensureBaseDirectory()
 
         var liveness = paths.filesystemLiveness()
@@ -49,11 +56,32 @@ public enum DaemonClient {
         // Fast path: a daemon already appears to be live.
         if case .probablyAlive = liveness {
             do {
-                let response = try sendRequest(command: command, args: args, to: paths.socketURL.path)
-                trace("sendRequest OK \(response.count) bytes, classifying")
-                return try classify(response: response)
+                return try await sendClassifiedRequest(
+                    command: command,
+                    args: args,
+                    paths: paths,
+                    transientRetryDelay: transientRetryDelay
+                )
             } catch {
-                trace("fast-path sendRequest/classify failed: \(error). Removing stale files.")
+                // Cooperative cancellation is the caller's signal, not
+                // a stale daemon — the retry delay below is a
+                // suspension point, so it can surface here. Rethrow
+                // before any cleanup/respawn.
+                if error is CancellationError {
+                    throw error
+                }
+                // A `remote` error means the daemon is alive and
+                // answered `ok=false` — that IS the command's outcome.
+                // Tearing the daemon down here would orphan a healthy
+                // server and re-executing the request would double any
+                // side effects it already performed. Only transport-
+                // level failures (connect/write/read, empty or garbage
+                // response) indicate a stale daemon worth respawning.
+                if let clientError = error as? DaemonClientError,
+                   case .remote = clientError {
+                    throw clientError
+                }
+                trace("fast-path transport failure: \(error). Removing stale files.")
                 paths.removeSocket()
                 paths.removePidfile()
             }
@@ -65,9 +93,46 @@ public enum DaemonClient {
         try await waitForSocket(paths: paths, timeout: 5.0)
         trace("socket ready after spawn")
 
-        let response = try sendRequest(command: command, args: args, to: paths.socketURL.path)
-        trace("post-spawn sendRequest OK \(response.count) bytes, classifying")
-        return try classify(response: response)
+        return try await sendClassifiedRequest(
+            command: command,
+            args: args,
+            paths: paths,
+            transientRetryDelay: transientRetryDelay
+        )
+    }
+
+    /// Send + classify one business request, retrying exactly once when
+    /// the daemon reports `transient_booting` (the post-`simctl boot`
+    /// accessibility-readiness gap). The retry targets the SAME daemon:
+    /// booting is the simulator's condition, not the server's, so a
+    /// respawn would only add latency. Any other failure — including a
+    /// second `transient_booting` — propagates to the caller.
+    private static func sendClassifiedRequest(
+        command: String,
+        args: [String],
+        paths: DaemonPaths,
+        transientRetryDelay: TimeInterval
+    ) async throws -> Data {
+        do {
+            let response = try sendRequest(command: command, args: args, to: paths.socketURL.path)
+            trace("sendRequest OK \(response.count) bytes, classifying")
+            return try classify(response: response)
+        } catch let error as DaemonClientError {
+            guard case .remote(_, .transientBooting, _) = error else { throw error }
+            trace("transient_booting; retrying once after \(transientRetryDelay)s")
+            // `transientRetryDelay` is public API: guard the nanosecond
+            // conversion against non-finite/overflowing values (skip the
+            // pause, retry immediately) instead of trapping. The cap only
+            // bounds the conversion; sane callers stay well below it.
+            if transientRetryDelay.isFinite, transientRetryDelay > 0 {
+                let cappedSeconds = min(transientRetryDelay, 60)
+                try await Task.sleep(nanoseconds: UInt64(cappedSeconds * 1_000_000_000))
+            }
+            try Task.checkCancellation()
+            let response = try sendRequest(command: command, args: args, to: paths.socketURL.path)
+            trace("retry sendRequest OK \(response.count) bytes, classifying")
+            return try classify(response: response)
+        }
     }
 
     /// Probe a live daemon with `_ping`, compare its `simUseVersion`
