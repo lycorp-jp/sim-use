@@ -2,8 +2,9 @@
 import Foundation
 import SimUseCore
 
-/// HTTP client that speaks the bridge wire protocol described in
-/// `ai-doc/ANDROID_WIRE_SPEC.md`.
+/// HTTP client that speaks the bridge wire protocol served by the
+/// bridge's `server/ActionRouter.kt` ((method, path) dispatch + auth)
+/// and its `handler/` classes.
 ///
 /// Lifecycle: a client is created with a known device serial; it lazily
 /// establishes an `adb forward` and fetches the auth token on first
