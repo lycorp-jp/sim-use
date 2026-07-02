@@ -54,6 +54,39 @@ public func cancellableSleep(seconds: TimeInterval, flag: CancellationFlag) asyn
     }
 }
 
+/// Stop-path watchdog for the `record-video` command.
+///
+/// After a stop signal arrives, the frame loop breaks and
+/// `H264StreamRecorder.finish()` (`AVAssetWriter.finishWriting`) writes the
+/// mp4 trailer (moov atom). If finalization hangs past `gracePeriod`, the
+/// process must not exit 0 — the file is likely truncated and unplayable —
+/// so the watchdog warns on stderr and exits `EX_SOFTWARE` instead of
+/// leaving a supervisor to SIGKILL us or, worse, reporting success.
+public enum RecordingFinishWatchdog {
+    /// Grace window granted to `finish()` after the stop signal. Wide
+    /// enough for a normal trailer flush (typically well under 1 s) while
+    /// still bounding a hung `finishWriting`.
+    public static let gracePeriod: TimeInterval = 3.0
+
+    /// `EX_SOFTWARE` (sysexits.h). Distinct from the exit codes the CLI
+    /// already produces: 0 (success), 1 (runtime error), 64 (usage error).
+    public static let exitCode: Int32 = 70
+
+    public static let warningMessage =
+        "warning: video finalization did not complete within \(Int(gracePeriod))s — output file may be truncated or unplayable\n"
+
+    /// Arm the watchdog from the signal handler. `recordingFinished` must
+    /// be cancelled once `finish()` has returned (success or failure).
+    public static func arm(recordingFinished: CancellationFlag) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + gracePeriod) {
+            if !recordingFinished.isCancelled() {
+                FileHandle.standardError.write(Data(warningMessage.utf8))
+                _exit(exitCode)
+            }
+        }
+    }
+}
+
 public final class SignalObserver {
     private var sources: [DispatchSourceSignal] = []
     private let signals: [Int32]

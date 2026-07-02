@@ -112,11 +112,7 @@ struct RecordVideo: SimUseExecutableCommand {
         let recordingFinished = CancellationFlag()
         let signalObserver = SignalObserver(signals: [SIGINT, SIGTERM]) {
             cancellationFlag.cancel()
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
-                if !recordingFinished.isCancelled() {
-                    _exit(0)
-                }
-            }
+            RecordingFinishWatchdog.arm(recordingFinished: recordingFinished)
         }
         defer { signalObserver.invalidate() }
 

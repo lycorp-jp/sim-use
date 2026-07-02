@@ -104,16 +104,9 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
 
         let cancellationFlag = CancellationFlag()
         let recordingFinished = CancellationFlag()
-        // Watchdog: if `recorder.finish()` has not returned 1.5 s after the
-        // signal arrives, exit cleanly so the supervisor sees status 0
-        // instead of being forced to SIGKILL us mid-flush.
         let signalObserver = SignalObserver(signals: [SIGINT, SIGTERM]) {
             cancellationFlag.cancel()
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
-                if !recordingFinished.isCancelled() {
-                    _exit(0)
-                }
-            }
+            RecordingFinishWatchdog.arm(recordingFinished: recordingFinished)
         }
         defer { signalObserver.invalidate() }
 
