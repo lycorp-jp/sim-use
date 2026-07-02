@@ -42,7 +42,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
     @OptionGroup public var device: DeviceOptions
 
-    @Option(help: "Output format: mjpeg, raw, ffmpeg, bgra (default: mjpeg)")
+    @Option(help: "Output format: mjpeg, raw, ffmpeg, bgra (default: mjpeg; bgra is experimental: no frame count is reported)")
     public var format: OutputFormat = .mjpeg
 
     @Option(help: "Frames per second (1-30, default: 10)")
@@ -249,13 +249,30 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             let videoStream = try await FutureBridge.value(videoStreamFuture)
             let startFuture = videoStream.startStreaming(stdoutConsumer)
 
+            // The private startStreaming future can resolve with an error at
+            // any point (attach failure during startup, or later), and the
+            // operation's `completed` future is the mid-stream termination
+            // channel. Neither has a continuation to resume — box the first
+            // error and let the wait loop below pick it up, so failures
+            // surface as a non-zero exit instead of a stderr line.
+            let streamError = FirstErrorBox()
             startFuture.onQueue(BridgeQueues.videoStreamQueue, notifyOfCompletion: { future in
                 if let error = future.error {
                     FileHandle.standardError.write(Data("Stream initialization error: \(error)\n".utf8))
+                    streamError.set(error)
+                }
+            })
+            videoStream.completed.onQueue(BridgeQueues.videoStreamQueue, notifyOfCompletion: { future in
+                if let error = future.error {
+                    FileHandle.standardError.write(Data("Stream terminated with error: \(error)\n".utf8))
+                    streamError.set(error)
                 }
             })
 
             try await Task.sleep(nanoseconds: 1_000_000_000)
+            if let error = streamError.first {
+                throw error
+            }
             FileHandle.standardError.write(Data("BGRA stream is now running...\n".utf8))
 
             while true {
@@ -265,7 +282,16 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
                 if cancellationFlag.isCancelled() {
                     break
                 }
+                if streamError.first != nil {
+                    break
+                }
                 try? await cancellableSleep(seconds: 0.1, flag: cancellationFlag)
+            }
+
+            // A dead stream cannot be stopped gracefully — stopStreaming on
+            // it fails with a secondary error that would mask the original.
+            if let error = streamError.first {
+                throw error
             }
 
             FileHandle.standardError.write(Data("\nStopping BGRA stream...\n".utf8))

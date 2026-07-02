@@ -36,6 +36,36 @@ public final class CancellationFlag: @unchecked Sendable {
     }
 }
 
+/// Thread-safe, set-once error capture for callback-based FBFutures.
+///
+/// The BGRA stream reports failures through `FBFuture` completion
+/// callbacks on a background queue with no continuation to resume —
+/// the stream runs until a signal arrives. The command loop polls this
+/// box instead, so the first failure terminates streaming and surfaces
+/// as a thrown error rather than being lost to stderr.
+public final class FirstErrorBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _error: Error?
+
+    public init() {}
+
+    /// Records `error` unless one is already recorded; later calls are no-ops.
+    public func set(_ error: Error) {
+        lock.lock()
+        defer { lock.unlock() }
+        if _error == nil {
+            _error = error
+        }
+    }
+
+    /// The first error recorded, or nil if none has been.
+    public var first: Error? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _error
+    }
+}
+
 /// Sleep that wakes early when `flag` is cancelled.
 ///
 /// `Task.sleep` is not interruptible from a signal handler, so a vanilla
