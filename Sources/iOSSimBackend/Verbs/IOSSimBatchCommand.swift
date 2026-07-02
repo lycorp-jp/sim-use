@@ -54,7 +54,7 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
     @Flag(name: .customLong("stdin"), help: "Read steps from stdin (one step per line).")
     public var useStdin: Bool = false
 
-    @Option(name: .customLong("ax-cache"), help: "Accessibility snapshot cache policy for selector-based taps.")
+    @Option(name: .customLong("ax-cache"), help: "Accessibility snapshot cache policy for selector-based taps: perBatch reuses one snapshot for the whole run, perStep refetches at each step, none never caches. --wait-timeout polling always refetches.")
     public var axCachePolicy: AXCachePolicy = .perBatch
 
     @Option(name: .customLong("type-submission"), help: "Type step submission mode.")
@@ -196,6 +196,9 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
         for (index, line) in stepLines.enumerated() {
             var stepName = "<unparsed>"
             do {
+                // Step boundary: `--ax-cache perStep` invalidates its
+                // snapshot here so selector taps see the current UI.
+                await context.beginStep()
                 let tokens = try ShellTokenizer.tokenize(line)
                 stepName = tokens.first ?? "<empty>"
                 let primitives = try await BatchStepParser.parseStepTokens(

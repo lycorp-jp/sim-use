@@ -20,7 +20,7 @@ Use this reference when generating or reviewing `sim-use ios batch` commands.
 - `--file <path>`: read one step per line from file.
 - `--stdin`: read one step per line from stdin.
 - `--continue-on-error`: keep running after a failed step; report failures at end.
-- `--ax-cache perBatch|perStep|none`: selector tap AX snapshot reuse policy.
+- `--ax-cache perBatch|perStep|none`: selector tap AX snapshot reuse policy. `perBatch` (default) resolves every selector against one snapshot fetched at first use; `perStep` refetches at each step; `none` never caches. `--wait-timeout` polling always refetches (and updates the cache).
 - `--type-submission chunked|composite`: submission mode for `type` steps.
 - `--type-chunk-size <n>`: chunk size when using chunked submission.
 - `--wait-timeout <seconds>`: maximum seconds to poll for selector-based elements before failing (0 = no waiting, default).
