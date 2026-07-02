@@ -1,7 +1,65 @@
 // SPDX-License-Identifier: Apache-2.0
+import ArgumentParser
 import Darwin
 import Foundation
 import Testing
+@testable import SimUseCore
+
+// MARK: - Shared daemon command-parser gate
+
+/// `DaemonDispatch.commandParser` is process-global mutable state. Every
+/// suite that installs a fake parser and then `await`s (spinning up a
+/// real `DaemonServer`, driving a slow dispatch, running a full
+/// `invoke`) yields the main actor while holding it, so two such suites
+/// running concurrently clobber each other's parser — one sees the
+/// other's fake, or a `nil` from a sibling's `defer`. This actor
+/// serialises the whole set-use-restore window across suites regardless
+/// of swift-testing's parallelism. `.serialized` only orders tests
+/// within one suite, which is not enough here.
+actor CommandParserGate {
+    static let shared = CommandParserGate()
+    private var locked = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func acquire() async {
+        if !locked {
+            locked = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    func release() {
+        if waiters.isEmpty {
+            locked = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+}
+
+/// Install `parser` as `DaemonDispatch.commandParser` for the duration of
+/// `body`, holding the shared gate so no other suite's parser window
+/// overlaps. Restores the previous parser and releases the gate on the
+/// way out, including when `body` throws.
+@MainActor
+func withExclusiveCommandParser(
+    _ parser: (@MainActor ([String]) throws -> ParsableCommand)?,
+    body: () async throws -> Void
+) async throws {
+    await CommandParserGate.shared.acquire()
+    let saved = DaemonDispatch.commandParser
+    DaemonDispatch.commandParser = parser
+    do {
+        try await body()
+    } catch {
+        DaemonDispatch.commandParser = saved
+        await CommandParserGate.shared.release()
+        throw error
+    }
+    DaemonDispatch.commandParser = saved
+    await CommandParserGate.shared.release()
+}
 
 // MARK: - Command Execution
 

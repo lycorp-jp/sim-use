@@ -21,16 +21,14 @@ import Testing
 @MainActor
 struct DaemonCommandParserInjectionTests {
     /// Reset / restore around each test so a global-state hop in one
-    /// test can't leak into the next. We avoid stomping a parser that
-    /// some other test may already have set: snapshot, mutate, restore.
+    /// test can't leak into the next, and — via the shared gate — that
+    /// no other suite's parser window overlaps this one (they all mutate
+    /// the process-global `DaemonDispatch.commandParser` across `await`s).
     private func withParser(
         _ parser: ((@MainActor ([String]) throws -> ParsableCommand))?,
         body: () async throws -> Void
-    ) async rethrows {
-        let saved = DaemonDispatch.commandParser
-        DaemonDispatch.commandParser = parser
-        defer { DaemonDispatch.commandParser = saved }
-        try await body()
+    ) async throws {
+        try await withExclusiveCommandParser(parser, body: body)
     }
 
     /// When `commandParser` is unset, dispatch must return a permanent
