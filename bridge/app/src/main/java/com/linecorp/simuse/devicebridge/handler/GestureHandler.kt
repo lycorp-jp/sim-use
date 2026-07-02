@@ -36,7 +36,7 @@ class GestureHandler {
         endY: Float,
         duration: Long,
     ): Boolean {
-        val clamped = duration.coerceIn(MIN_SWIPE_DURATION, MAX_SWIPE_DURATION)
+        val clamped = clampSwipeDuration(duration)
         val path = Path().apply {
             moveTo(startX, startY)
             lineTo(endX, endY)
@@ -104,7 +104,16 @@ class GestureHandler {
     companion object {
         private const val TAG = "SimuseGesture"
         private const val TAP_DURATION = 50L
-        private const val MIN_SWIPE_DURATION = 10L
-        private const val MAX_SWIPE_DURATION = 5_000L
+        // The sim-use client validates `--duration` up to 10 s and
+        // delivers long-press holds as /swipe with start == end, so the
+        // ceiling must cover the full client range — a silently
+        // shortened hold breaks e.g. 10 s long-press flows. The bound
+        // exists only against runaway requests; GestureDescription
+        // itself accepts far longer strokes.
+        internal const val MIN_SWIPE_DURATION = 10L
+        internal const val MAX_SWIPE_DURATION = 10_000L
+
+        internal fun clampSwipeDuration(duration: Long): Long =
+            duration.coerceIn(MIN_SWIPE_DURATION, MAX_SWIPE_DURATION)
     }
 }

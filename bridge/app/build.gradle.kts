@@ -11,7 +11,7 @@ android {
         applicationId = "com.linecorp.simuse.devicebridge"
         minSdk = 30
         targetSdk = 35
-        versionCode = 15
+        versionCode = 16
         versionName = "0.9.0"
 
         // protocol_version aligns with the wire spec at
