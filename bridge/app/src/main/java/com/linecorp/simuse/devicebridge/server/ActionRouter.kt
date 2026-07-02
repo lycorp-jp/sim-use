@@ -124,6 +124,12 @@ class ActionRouter(
     private fun handleTree(params: Map<String, String>): HttpResponse {
         val service = requireService() ?: return serviceUnavailable()
         val activeRoot = getRootWithTimeout(service) ?: return rootWindowTimeout()
+        // buildTree recycles activeRoot in its finally — read everything
+        // we still need from the node BEFORE handing it over. On API
+        // 30-32 recycle() clears the fields, so a post-recycle windowId
+        // read comes back UNDEFINED and every popup/dialog window would
+        // silently vanish from the merged tree.
+        val activeWindowId = activeRoot.windowId
         val filter = params["filter"]?.lowercase() == "true"
         val activeTree = treeHandler.buildTree(activeRoot, filter)
             ?: return HttpResponse(500, errorJson("tree_build_failed"))
@@ -137,7 +143,7 @@ class ActionRouter(
         // filter rationale.
         val display = computeDisplay(service)
         val displayBounds = Rect(0, 0, display.optInt("width"), display.optInt("height"))
-        val secondaries = collectSecondaryAppWindowTrees(service, activeRoot, filter)
+        val secondaries = collectSecondaryAppWindowTrees(service, activeWindowId, filter)
 
         val resultTree = if (secondaries.isEmpty()) {
             activeTree
@@ -186,12 +192,11 @@ class ActionRouter(
      */
     private fun collectSecondaryAppWindowTrees(
         service: AccessibilityService,
-        activeRoot: AccessibilityNodeInfo,
+        activeWindowId: Int,
         filter: Boolean,
     ): List<ElementNode> {
         val windows = service.windows ?: return emptyList()
         try {
-            val activeWindowId = activeRoot.windowId
             // Sort by layer ascending so the bottom-most popup (closest
             // to active) appears first in the outline. Agent-side this
             // matches the visual stacking when there's more than one
@@ -343,8 +348,16 @@ class ActionRouter(
             return badRequest("invalid_base64")
         }
         val root = getRootWithTimeout(service) ?: return rootWindowTimeout()
-        val ok = inputHandler.inputText(root, text, clear)
-        return if (ok) HttpResponse(200, successJson()) else badRequest("no_focused_input")
+        // The InputHandler only recycles the *focused* child it finds —
+        // the root we just borrowed is on us to recycle, same
+        // Binder-reference leak class handlePaste was fixed for.
+        return try {
+            val ok = inputHandler.inputText(root, text, clear)
+            if (ok) HttpResponse(200, successJson()) else badRequest("no_focused_input")
+        } finally {
+            @Suppress("DEPRECATION")
+            try { root.recycle() } catch (_: Exception) {}
+        }
     }
 
     private fun handleKey(params: Map<String, String>): HttpResponse {
