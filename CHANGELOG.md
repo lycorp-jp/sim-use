@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `ios type` builds one HID session for the whole string instead of re-initialising FBSimulatorControl per character.
+
+### Fixed
+
+- `record-video` no longer hot-spins without frame pacing when screenshot frames persistently fail to decode.
+
 ## [0.9.0] - 2026-06-29
 
 Initial public release.
