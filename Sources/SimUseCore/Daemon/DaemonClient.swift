@@ -280,7 +280,12 @@ public enum DaemonClient {
             command: DaemonProtocol.ManagementCommand.stop.rawValue,
             readTimeout: timeout
         )
-        if let pid = paths.readPidfile() {
+        // A pidfile naming our own process is never a daemon we can
+        // wait out or SIGTERM: a stale pidfile can hold a recycled pid,
+        // and in-process daemons (tests) write getpid(). Signalling
+        // ourselves fans out through every live DaemonServer's SIGTERM
+        // dispatch source and tears down unrelated daemons.
+        if let pid = paths.readPidfile(), pid != getpid() {
             await awaitExit(pid: pid, timeout: timeout)
             if DaemonPaths.isProcessAlive(pid: pid) {
                 _ = Darwin.kill(pid, SIGTERM)

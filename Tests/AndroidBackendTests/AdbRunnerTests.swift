@@ -62,24 +62,30 @@ final class AdbRunnerTests: XCTestCase {
 
     /// A burst of fast children must not be paced by the wait loop.
     /// The old runner had a 20 ms `Thread.sleep` floor per call, so
-    /// 20 invocations took ≥ 400 ms even when each child exited in
+    /// every invocation took ≥ 20 ms even when the child exited in
     /// microseconds. The terminationHandler + semaphore replacement
-    /// is woken by the kernel and wall time collapses to the cost
-    /// of `Process.run()` itself.
+    /// is woken by the kernel, so an unloaded call completes in a
+    /// few ms. Assert on the fastest of 20 calls: scheduler noise
+    /// under parallel-suite load inflates individual calls and any
+    /// summed budget (observed 0.42–0.53 s for 20 calls on loaded
+    /// CI/dev machines — the same order as the floor), but only a
+    /// real per-call floor lifts the minimum of 20 samples above
+    /// 20 ms.
     func testRunFastChildHasLowLatency() throws {
         let adb = Adb(binaryPath: "/bin/sh", defaultTimeout: 5)
         // Warm up the dyld / fork+exec path so the timed loop below
         // measures steady-state cost rather than first-spawn outliers.
         _ = try adb.run(args: ["-c", ":"])
-        let start = Date()
+        var fastest = TimeInterval.infinity
         for _ in 0..<20 {
+            let start = Date()
             _ = try adb.run(args: ["-c", ":"])
+            fastest = min(fastest, Date().timeIntervalSince(start))
         }
-        let elapsed = Date().timeIntervalSince(start)
         XCTAssertLessThan(
-            elapsed,
-            0.3,
-            "20 fast adb invocations should not be paced by polling; got \(elapsed)s"
+            fastest,
+            0.02,
+            "the fastest of 20 adb invocations should undercut the 20 ms polling floor; got \(fastest)s"
         )
     }
 

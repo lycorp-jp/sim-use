@@ -1,0 +1,165 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Unit-test gate for pushes and PRs to main.
+#
+# Package.swift declares binary targets under build_products/XCFrameworks,
+# so the idb-derived FB* XCFrameworks must exist before any swift build /
+# swift test. Building them (scripts/build.sh dev: idb clone + four
+# xcodebuild passes) measures ~2 min on hosted runners; caching the output
+# still halves warm-run wall time and avoids the network clone. Keyed on
+# everything that shapes it: the build script (pins IDB_GIT_REF), the
+# local idb patches, and the selected Xcode version.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # Kotlin bridge and Swift client must agree on the wire
+  # protocol_version; scripts/check-protocol-parity.sh was written to
+  # run in CI and needs nothing beyond a POSIX shell.
+  protocol-parity:
+    name: Bridge protocol parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Check Kotlin/Swift protocol version parity
+        run: ./scripts/check-protocol-parity.sh
+
+  # JVM unit tests for the Kotlin bridge (bridge/app/src/test). No
+  # emulator involved; ubuntu keeps this off the macOS critical path.
+  bridge-unit-tests:
+    name: Bridge unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Gradle 8.7 rejects JDK 22+; pin 17 (project floor).
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run bridge JVM unit tests
+        working-directory: bridge
+        run: ./gradlew --no-daemon testDebugUnitTest
+
+  unit-tests:
+    name: Unit tests (macOS)
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The FB* frameworks build against SimulatorKit, which Xcode 27
+      # removed. Pin the newest Xcode 26.x on the image rather than the
+      # image default, which will eventually move past 26.
+      - name: Select latest Xcode 26
+        id: xcode
+        run: |
+          XCODE_APP="$(ls -d /Applications/Xcode_26*.app | sort -V | tail -n 1)"
+          if [[ -z "${XCODE_APP}" ]]; then
+            echo "::error::No Xcode 26.x found on this runner image" >&2
+            exit 1
+          fi
+          sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
+          xcodebuild -version
+          swift --version
+          echo "version=$(xcodebuild -version | awk 'NR==1 {print $2}')" >> "${GITHUB_OUTPUT}"
+
+      # Separate restore/save so a red test run still persists the
+      # expensive framework build for the next attempt.
+      - name: Restore FB XCFrameworks cache
+        id: xcframeworks-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: build_products/XCFrameworks
+          key: fb-xcframeworks-${{ runner.arch }}-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('scripts/build.sh', 'patches/idb/**') }}
+
+      - name: Build FB XCFrameworks
+        if: steps.xcframeworks-cache.outputs.cache-hit != 'true'
+        run: ./scripts/build.sh dev
+
+      - name: Save FB XCFrameworks cache
+        if: steps.xcframeworks-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: build_products/XCFrameworks
+          key: ${{ steps.xcframeworks-cache.outputs.cache-primary-key }}
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v6
+        with:
+          path: .build
+          key: spm-${{ runner.arch }}-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.resolved', 'Package.swift') }}
+          restore-keys: |
+            spm-${{ runner.arch }}-xcode-${{ steps.xcode.outputs.version }}-
+
+      - name: Install xcsift
+        run: brew install xcsift
+
+      # make test is self-sufficient: it syncs the bundled skill
+      # resources and swift test builds every target the test bundle
+      # depends on, including the sim-use executable the smoke step
+      # runs. make picks xcsift up from PATH and condenses the output
+      # to a TOON summary itself; SIM_USE_RAW_LOG additionally saves
+      # the raw swift output, kept as a failure-only artifact for
+      # forensics the condensed view can't serve (e.g. grepping daemon
+      # log lines).
+      - name: Run unit tests
+        run: make test
+        env:
+          SIM_USE_RAW_LOG: ${{ runner.temp }}/test.log
+
+      # Mirror the condensed result into the job summary panel
+      # (gradle/actions does the same for the bridge job), regenerated
+      # from the raw log. always() so a red test run still gets its
+      # summary; the file guard covers failures before the test step
+      # ever ran.
+      - name: Publish test summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ -s "${RUNNER_TEMP}/test.log" ]]; then
+            {
+              echo "## Unit tests (macOS)"
+              echo '```yaml'
+              xcsift --coverage -w -f toon < "${RUNNER_TEMP}/test.log"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
+
+      - name: Upload raw logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: raw-swift-logs
+          path: ${{ runner.temp }}/*.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # Loads the FB* frameworks through dyld, catching link/rpath
+      # regressions that compilation alone would miss.
+      - name: Smoke-check built binary
+        run: .build/debug/sim-use --help

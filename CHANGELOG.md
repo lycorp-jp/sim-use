@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Actions CI (`.github/workflows/tests.yml`): Swift unit tests on macOS hosted runners (idb-derived FB XCFrameworks cached between runs), bridge Kotlin JVM unit tests on ubuntu, and a bridge protocol parity check — all for every push and pull request targeting `main`.
+- `make build` / `make test` condense swift output via [xcsift](https://github.com/ldomaradzki/xcsift) (TOON summary; test coverage report) when it is installed — strictly optional, plain swift output otherwise; `SIM_USE_XCSIFT=0` forces plain output.
+
 ### Changed
 
 - JSON output no longer emits the legacy `udid` key (dual-emitted since the `deviceId` transition); `deviceId` is the canonical key in `devices --json`, `daemon stop/status --json`, and Viewer API responses. Inputs (daemon wire decode, Viewer API requests) still accept `udid` as a deprecated alias, to be removed in a future release.
@@ -17,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `DaemonClient.stopDaemon` no longer waits on and SIGTERMs a pidfile pid that is the caller's own process (a stale pidfile can hold a recycled pid; in-process daemons in tests always do). Signalling ourselves fanned out through every live `DaemonServer`'s SIGTERM source and tore down unrelated daemons mid-request — the main source of daemon-test flakiness under parallel load.
 - Cached HID connection is now validated against the simulator's boot instance before reuse, so a simulator shut down and re-booted under the same UDID gets a fresh connection instead of hanging the daemon (or failing every command) on the dead one until restart. Additionally, any failed HID perform drops the cached connection, and failures that provably happened before delivery (dead mach port) are transparently retried once against a rebuilt session.
 - `ios batch --ax-cache` was a complete no-op: the default `perBatch` never cached and every selector-based step refetched the AX tree. `perBatch` now resolves all steps against one snapshot, `perStep` refetches at each step, `none` never caches, and `--wait-timeout` poll ticks bypass the cache (updating it) so delayed elements are still found.
 - Daemon client no longer tears down a healthy daemon and re-executes the command when the daemon answers with a command-level error (element not found, etc.). Failed commands now surface immediately instead of paying a full daemon respawn, and side-effecting commands are no longer executed twice.
