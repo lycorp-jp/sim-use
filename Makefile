@@ -7,13 +7,17 @@ SHELL := /bin/bash
 # Pipe a swift invocation through xcsift (condensed, agent-friendly
 # TOON output) when it is installed; fall back to swift's own output
 # otherwise, so contributors are never required to install it. $(2)
-# passes extra xcsift flags (e.g. --coverage). Set SIM_USE_XCSIFT=0
-# to force plain output even with xcsift present (CI does this to tee
-# the raw log before condensing). pipefail keeps swift's exit code
-# authoritative either way.
+# passes extra xcsift flags (e.g. --coverage). Knobs:
+#   SIM_USE_XCSIFT=0        force plain swift output even with xcsift
+#   SIM_USE_RAW_LOG=<path>  also save the raw swift output to <path>
+#                           before condensing (CI keeps it as a
+#                           failure artifact). Expanded unquoted on
+#                           purpose: empty means tee has no file
+#                           operand and acts as a plain passthrough.
+# pipefail keeps swift's exit code authoritative either way.
 define run_swift
 	if [ "$${SIM_USE_XCSIFT:-1}" != "0" ] && command -v xcsift >/dev/null 2>&1; then \
-		set -o pipefail; $(1) 2>&1 | xcsift $(2) -f toon; \
+		set -o pipefail; $(1) 2>&1 | tee $${SIM_USE_RAW_LOG} | xcsift $(2) -f toon; \
 	else \
 		$(1); \
 	fi

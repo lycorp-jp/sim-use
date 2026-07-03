@@ -119,25 +119,41 @@ jobs:
       - name: Install xcsift
         run: brew install xcsift
 
-      # Build/test output goes through xcsift (condensed TOON summary
-      # + GitHub inline annotations); the raw log is kept as a
-      # failure-only artifact for forensics the condensed view can't
-      # serve (e.g. grepping daemon log lines). SIM_USE_XCSIFT=0
-      # bypasses make's own xcsift pipe so the tee here captures raw
-      # swift output rather than an already-condensed stream. The
-      # explicit `shell: bash` matters: GitHub runs it with
-      # `-o pipefail`, so swift's exit code — not xcsift's — decides
-      # the step outcome.
+      # make picks xcsift up from PATH and condenses build/test output
+      # to a TOON summary itself; SIM_USE_RAW_LOG additionally saves
+      # the raw swift output, kept as a failure-only artifact for
+      # forensics the condensed view can't serve (e.g. grepping daemon
+      # log lines).
       #
       # make build also rsyncs skills/sim-use into the gitignored
       # Sources/SimUse/Resources/skills, which the test bundle requires.
       - name: Build
-        shell: bash
-        run: SIM_USE_XCSIFT=0 make build 2>&1 | tee "${RUNNER_TEMP}/build.log" | xcsift -f toon
+        run: make build
+        env:
+          SIM_USE_RAW_LOG: ${{ runner.temp }}/build.log
 
       - name: Run unit tests
+        run: make test
+        env:
+          SIM_USE_RAW_LOG: ${{ runner.temp }}/test.log
+
+      # Mirror the condensed result into the job summary panel
+      # (gradle/actions does the same for the bridge job), regenerated
+      # from the raw log. always() so a red test run still gets its
+      # summary; the file guard covers failures before the test step
+      # ever ran.
+      - name: Publish test summary
+        if: always()
         shell: bash
-        run: SIM_USE_XCSIFT=0 make test 2>&1 | tee "${RUNNER_TEMP}/test.log" | xcsift --coverage -f toon
+        run: |
+          if [[ -s "${RUNNER_TEMP}/test.log" ]]; then
+            {
+              echo "## Unit tests (macOS)"
+              echo '```yaml'
+              xcsift --coverage -f toon < "${RUNNER_TEMP}/test.log"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
 
       - name: Upload raw logs on failure
         if: failure()
