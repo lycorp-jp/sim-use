@@ -119,19 +119,14 @@ jobs:
       - name: Install xcsift
         run: brew install xcsift
 
-      # make picks xcsift up from PATH and condenses build/test output
+      # make test is self-sufficient: it syncs the bundled skill
+      # resources and swift test builds every target the test bundle
+      # depends on, including the sim-use executable the smoke step
+      # runs. make picks xcsift up from PATH and condenses the output
       # to a TOON summary itself; SIM_USE_RAW_LOG additionally saves
       # the raw swift output, kept as a failure-only artifact for
       # forensics the condensed view can't serve (e.g. grepping daemon
       # log lines).
-      #
-      # make build also rsyncs skills/sim-use into the gitignored
-      # Sources/SimUse/Resources/skills, which the test bundle requires.
-      - name: Build
-        run: make build
-        env:
-          SIM_USE_RAW_LOG: ${{ runner.temp }}/build.log
-
       - name: Run unit tests
         run: make test
         env:

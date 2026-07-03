@@ -1,4 +1,4 @@
-.PHONY: help build test e2e clean viewer
+.PHONY: help build test e2e clean viewer sync-skills
 
 # pipefail below needs bash; macOS /bin/sh is bash-in-posix-mode but
 # being explicit costs nothing.
@@ -31,8 +31,14 @@ help:
 	@echo "  make e2e     Run end-to-end tests on a booted simulator"
 	@echo "  make clean   Clean Swift build artifacts"
 
-build:
+# The bundled skill lives in skills/sim-use (source of truth) and is
+# synced into the gitignored SwiftPM resource path. Both build and
+# test need it — SwiftPM refuses to build the SimUse target when the
+# declared resource directory is missing.
+sync-skills:
 	@rsync -a --delete skills/sim-use/ Sources/SimUse/Resources/skills/sim-use/
+
+build: sync-skills
 	@$(call run_swift,swift build)
 
 # Refresh the Viewer SPA resource bundle. The output is committed so
@@ -45,7 +51,7 @@ viewer:
 # Coverage is always collected so the command behaves identically
 # with and without xcsift; the report only renders when xcsift is
 # there to read it.
-test:
+test: sync-skills
 	@$(call run_swift,swift test --enable-code-coverage,--coverage)
 
 e2e:
