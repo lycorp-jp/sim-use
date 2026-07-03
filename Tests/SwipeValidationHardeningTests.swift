@@ -111,6 +111,60 @@ struct SwipeValidationHardeningTests {
         )
     }
 
+    @Test("Android swipe rejects non-finite or out-of-range pre/post-delays")
+    func androidDelayBounds() throws {
+        let cmd = try AndroidSwipeCommand.parse(["--from", "1,1", "--to", "2,2", "--device", "emulator-5554"])
+        for bad in [Double.infinity, .nan, -1, 11] {
+            var pre = cmd
+            pre.preDelay = bad
+            #expect(throws: ValidationError.self, "pre-delay \(bad) must be rejected") {
+                try pre.validate()
+            }
+            var post = cmd
+            post.postDelay = bad
+            #expect(throws: ValidationError.self, "post-delay \(bad) must be rejected") {
+                try post.validate()
+            }
+        }
+        var ok = cmd
+        ok.preDelay = 10
+        ok.postDelay = 0
+        try ok.validate()
+    }
+
+    @Test("Timing validation rejects non-finite delays on iOS/top-level")
+    func timingRejectsNonFiniteDelays() {
+        for bad in [Double.infinity, .nan] {
+            #expect(throws: ValidationError.self) {
+                try IOSSimSwipeCommand.validateTimingOptions(
+                    duration: nil, delta: nil, preDelay: bad, postDelay: nil
+                )
+            }
+            #expect(throws: ValidationError.self) {
+                try IOSSimSwipeCommand.validateTimingOptions(
+                    duration: nil, delta: nil, preDelay: nil, postDelay: bad
+                )
+            }
+        }
+    }
+
+    @Test("Android rejects coordinate pairs that round to the same pixel")
+    func androidRejectsRoundedDegenerate() {
+        // Direct verb: caught at parse/validate time.
+        #expect(throws: (any Error).self) {
+            _ = try AndroidSwipeCommand.parse(["--from", "10.40,10.40", "--to", "10.49,10.49", "--device", "emulator-5554"])
+        }
+        // Top-level forwarder reaches Android through performSwipe,
+        // which guards the rounded ints before touching the bridge.
+        // CLIError so the daemon/execute path renders the message
+        // instead of the opaque ValidationError wrapper.
+        #expect(throws: CLIError.self) {
+            try AndroidSwipeCommand.performSwipe(
+                udid: "unused", startX: 10, startY: 10, endX: 10, endY: 10, durationMs: 100
+            )
+        }
+    }
+
     // MARK: - Surface parity via the shared OptionGroup
 
     @Test("Android swipe parses positional and legacy forms like the other surfaces")

@@ -50,7 +50,14 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
     public var simulatorUDIDForDaemon: String? { device.resolved }
 
     public func validate() throws {
-        _ = try coordinates.resolve()
+        let coords = try coordinates.resolve()
+        // Android dispatches integer pixels: a pair that differs only
+        // in the fractional part (e.g. 10.4,10.4 → 10.49,10.49) passes
+        // the resolver's Double comparison but degrades to a
+        // same-point gesture after rounding.
+        guard coords.roundedStartX != coords.roundedEndX || coords.roundedStartY != coords.roundedEndY else {
+            throw ValidationError("Start and end points must be different after rounding to integer pixels.")
+        }
         guard duration >= 0 else {
             throw ValidationError("--duration must be non-negative.")
         }
@@ -61,11 +68,18 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
         guard duration <= 10.0 else {
             throw ValidationError("--duration must be between 0 and 10 seconds (seconds, not milliseconds — pass 0.3 for a 300 ms swipe).")
         }
-        if let preDelay, preDelay < 0 {
-            throw ValidationError("--pre-delay must be non-negative.")
+        // 0...10 like every other surface. The upper bound also rejects
+        // inf/nan, which the sign-only check let through into the
+        // Double→UInt64 conversion in execute()'s Task.sleep — a trap.
+        if let preDelay {
+            guard preDelay >= 0 && preDelay <= 10.0 else {
+                throw ValidationError("--pre-delay must be between 0 and 10 seconds.")
+            }
         }
-        if let postDelay, postDelay < 0 {
-            throw ValidationError("--post-delay must be non-negative.")
+        if let postDelay {
+            guard postDelay >= 0 && postDelay <= 10.0 else {
+                throw ValidationError("--post-delay must be between 0 and 10 seconds.")
+            }
         }
     }
 
@@ -117,6 +131,16 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
         durationMs: Int,
         controller: AndroidDeviceController = AndroidDeviceController()
     ) throws {
+        // Choke point for both `android swipe` and the top-level
+        // forwarder: the top-level command validates coordinates as
+        // Doubles before it knows the target is Android, so the
+        // rounded-degenerate case is only catchable here. CLIError,
+        // not ValidationError — on the execute() path the latter
+        // renders as the opaque "(ArgumentParser.ValidationError
+        // error 1.)" wrapper (see IOSSimTypeCommand).
+        guard startX != endX || startY != endY else {
+            throw CLIError(errorDescription: "Start and end points must be different after rounding to integer pixels.")
+        }
         let client = controller.bridge(serial: udid)
         try client.swipe(startX: startX, startY: startY, endX: endX, endY: endY, durationMs: durationMs)
     }
