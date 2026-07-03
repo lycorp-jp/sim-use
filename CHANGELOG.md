@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- GitHub Actions CI (`.github/workflows/tests.yml`): unit tests run on macOS hosted runners for every push and pull request targeting `main`, with the idb-derived FB XCFrameworks cached between runs, plus a bridge protocol parity check.
+- GitHub Actions CI (`.github/workflows/tests.yml`): Swift unit tests on macOS hosted runners (idb-derived FB XCFrameworks cached between runs), bridge Kotlin JVM unit tests on ubuntu, and a bridge protocol parity check — all for every push and pull request targeting `main`.
 
 ### Changed
 

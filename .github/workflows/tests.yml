@@ -39,6 +39,30 @@ jobs:
       - name: Check Kotlin/Swift protocol version parity
         run: ./scripts/check-protocol-parity.sh
 
+  # JVM unit tests for the Kotlin bridge (bridge/app/src/test). No
+  # emulator involved; ubuntu keeps this off the macOS critical path.
+  bridge-unit-tests:
+    name: Bridge unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # Gradle 8.7 rejects JDK 22+; pin 17 (project floor).
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Run bridge JVM unit tests
+        working-directory: bridge
+        run: ./gradlew --no-daemon testDebugUnitTest
+
   unit-tests:
     name: Unit tests (macOS)
     runs-on: macos-26
