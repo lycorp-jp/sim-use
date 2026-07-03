@@ -150,7 +150,7 @@ jobs:
             {
               echo "## Unit tests (macOS)"
               echo '```yaml'
-              xcsift --coverage -f toon < "${RUNNER_TEMP}/test.log"
+              xcsift --coverage -w -f toon < "${RUNNER_TEMP}/test.log"
               echo '```'
             } >> "${GITHUB_STEP_SUMMARY}"
           fi

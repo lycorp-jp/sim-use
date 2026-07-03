@@ -17,7 +17,7 @@ SHELL := /bin/bash
 # pipefail keeps swift's exit code authoritative either way.
 define run_swift
 	if [ "$${SIM_USE_XCSIFT:-1}" != "0" ] && command -v xcsift >/dev/null 2>&1; then \
-		set -o pipefail; $(1) 2>&1 | tee $${SIM_USE_RAW_LOG} | xcsift $(2) -f toon; \
+		set -o pipefail; $(1) 2>&1 | tee $${SIM_USE_RAW_LOG} | xcsift $(2) -w -f toon; \
 	else \
 		$(1); \
 	fi
