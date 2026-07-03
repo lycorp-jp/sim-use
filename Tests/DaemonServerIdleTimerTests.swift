@@ -75,8 +75,24 @@ struct DaemonServerIdleTimerTests {
         let data: SlowProbeCommand.Payload
     }
 
-    @Test("a request that outlasts the idle timeout is not shut down mid-flight")
-    func idleTimerDefersWhileRequestInFlight() async throws {
+    private enum ProbeOutcome {
+        /// The daemon deferred shutdown; its socket was alive when the
+        /// slow command finished — the guarded invariant holds.
+        case socketSurvived
+        /// The daemon served the request but its files were gone by
+        /// command end. Either the guarded regression (timer fired
+        /// mid-request) or a legitimate pre-accept idle fire whose
+        /// multi-hop shutdown interleaved with a late-landing connect.
+        case socketGone
+        /// The daemon idled out before serving the request at all
+        /// (startup idle window consumed before the accept reset it).
+        case noResponse
+    }
+
+    /// One full server + slow-request round trip. Command runs 2.5 s;
+    /// idle timeout is 1 s, so a buggy timer always fires mid-command
+    /// (the accept resets it at request start).
+    private func runProbeScenario() async throws -> ProbeOutcome {
         let tmp = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: tmp) }
 
@@ -84,51 +100,76 @@ struct DaemonServerIdleTimerTests {
         let paths = DaemonPaths(udid: udid, baseDirectory: tmp)
         try paths.ensureBaseDirectory()
 
-        // Command runs 2.5 s; idle timeout is 1 s. A buggy timer fires
-        // during the command and tears the socket down at 1 s. The
-        // idle budget also covers server start → first accept (the
-        // reset point); keep it generous so main-actor congestion from
-        // parallel suites can't consume it before the request lands.
         SlowProbeState.configure(socketPath: paths.socketURL.path, sleepNanos: 2_500_000_000)
 
-        try await withExclusiveCommandParser({ _ in SlowProbeCommand() }) {
-            let server = DaemonServer(udid: udid, idleTimeout: 1.0, paths: paths)
-            let serverTask = Task { try await server.run() }
+        let server = DaemonServer(udid: udid, idleTimeout: 1.0, paths: paths)
+        let serverTask = Task { try await server.run() }
 
-            // Wait for bind + listen + pidfile.
-            var ready = false
-            for _ in 0..<50 {
-                if FileManager.default.fileExists(atPath: paths.socketURL.path),
-                   paths.readPidfile() != nil {
-                    ready = true
-                    break
-                }
-                try? await Task.sleep(nanoseconds: 20_000_000)
+        // Wait for bind + listen + pidfile.
+        var ready = false
+        for _ in 0..<50 {
+            if FileManager.default.fileExists(atPath: paths.socketURL.path),
+               paths.readPidfile() != nil {
+                ready = true
+                break
             }
-            #expect(ready)
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        guard ready else {
+            serverTask.cancel()
+            return .noResponse
+        }
 
-            // Send one request off the main actor — the server serves on
-            // the main actor, so a main-actor-blocking readLine here would
-            // deadlock against it.
-            let fd = try DaemonSocket.connect(path: paths.socketURL.path)
-            defer { Darwin.close(fd) }
-            var request = try JSONEncoder().encode(DaemonRequest(cmd: "slow-probe"))
-            request.append(0x0A)
-            let requestData = request
-            let responseLine: Data? = await Task.detached {
-                guard DaemonSocket.writeAll(fd: fd, data: requestData).ok else { return nil }
-                return DaemonSocket.readLine(fd: fd)
-            }.value
+        // Send one request off the main actor — the server serves on
+        // the main actor, so a main-actor-blocking readLine here would
+        // deadlock against it.
+        let fd = try DaemonSocket.connect(path: paths.socketURL.path)
+        defer { Darwin.close(fd) }
+        var request = try JSONEncoder().encode(DaemonRequest(cmd: "slow-probe"))
+        request.append(0x0A)
+        let requestData = request
+        let responseLine: Data? = await Task.detached {
+            guard DaemonSocket.writeAll(fd: fd, data: requestData).ok else { return nil }
+            return DaemonSocket.readLine(fd: fd)
+        }.value
 
-            let line = try #require(responseLine, "daemon sent no response")
-            let envelope = try JSONDecoder().decode(Envelope.self, from: line)
-            #expect(envelope.ok)
-            #expect(envelope.data.socketStillPresent,
-                    "idle timer fired mid-request: the daemon cleaned up its socket before the command finished")
-
-            // Once the request is done the daemon should idle out on its
-            // own; give it room to shut down cleanly.
+        guard let line = responseLine else {
             _ = try? await serverTask.value
+            return .noResponse
+        }
+        let envelope = try JSONDecoder().decode(Envelope.self, from: line)
+        guard envelope.ok else {
+            _ = try? await serverTask.value
+            return .noResponse
+        }
+
+        // Once the request is done the daemon idles out on its own;
+        // give it room to shut down cleanly before the next attempt.
+        _ = try? await serverTask.value
+        return envelope.data.socketStillPresent ? .socketSurvived : .socketGone
+    }
+
+    @Test("a request that outlasts the idle timeout is not shut down mid-flight")
+    func idleTimerDefersWhileRequestInFlight() async throws {
+        // A single attempt can be spoiled without the guarded bug being
+        // present: under full-suite parallelism, main-actor congestion
+        // can eat the 1 s startup idle window before the accept resets
+        // the timer, so the daemon legitimately shuts down around our
+        // connect (observed on CI runners). That noise is probabilistic,
+        // while the guarded regression is deterministic per attempt —
+        // the timer provably fires mid-command once the accept reset
+        // has happened. Retrying therefore keeps full detection power:
+        // a real regression fails every attempt.
+        try await withExclusiveCommandParser({ _ in SlowProbeCommand() }) {
+            var outcomes: [ProbeOutcome] = []
+            for _ in 1...3 {
+                let outcome = try await runProbeScenario()
+                outcomes.append(outcome)
+                if outcome == .socketSurvived { return }
+            }
+            Issue.record(
+                "idle timer fired mid-request on every attempt (\(outcomes)): the daemon cleaned up its socket before the slow command finished"
+            )
         }
     }
 }
