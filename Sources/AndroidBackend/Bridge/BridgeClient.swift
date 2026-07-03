@@ -70,9 +70,11 @@ public final class BridgeClient: @unchecked Sendable {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = readTimeout
         config.timeoutIntervalForResource = readTimeout
-        // Reuse a single TCP connection across requests — `adb forward`
-        // is a stream-multiplexer and benefits massively from keep-alive
-        // (saves the connect handshake on every call).
+        // No connection reuse in practice: the bridge answers every
+        // request with `Connection: close` (HttpServer.kt), so each
+        // call pays a fresh loopback connect — cheap through
+        // `adb forward`. The cap only bounds concurrent sockets should
+        // the server ever gain keep-alive.
         config.httpMaximumConnectionsPerHost = 4
         self.urlSession = urlSession ?? URLSession(configuration: config)
         self.connectionTimeout = connectionTimeout
