@@ -16,10 +16,10 @@ import java.util.concurrent.atomic.AtomicReference
  * wire envelope.
  *
  * Replicates csat's `CaptureHandler`. Pre-API-30 fallback (manual
- * `screencap` via shell) is intentionally absent — `minSdk=26` in our
- * Gradle config but `AccessibilityService.takeScreenshot` is API 30+,
- * so devices below 30 will get a `screenshot_failed` error. Decision
- * tracked in [`plan/IMPLEMENTATION_LOG.md`].
+ * `screencap` via shell) is intentionally absent — `minSdk=30` in our
+ * Gradle config already matches the API 30+ requirement of
+ * `AccessibilityService.takeScreenshot`, so no installable device
+ * needs the fallback.
  *
  * Memory profile: `hwBitmap.copy(ARGB_8888, false)` allocates
  * `width × height × 4` bytes (≈10 MB on 1080×2400, 40+ MB on tablets

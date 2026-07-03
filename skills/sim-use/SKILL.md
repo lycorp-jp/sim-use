@@ -31,6 +31,8 @@ sim-use ui --device <UDID>
 
 Read the outline. Each element has an `@N` alias and optionally a `#<id>` identifier. List cells carry `#N` (dominant list) or `#N@M` (scoped).
 
+Frames in the JSON output (`--json`: `entries[].frame`, `screen`) are in platform-native units — iOS **points**, Android **pixels**. Key off the envelope's `platform` field before doing math on coordinates across platforms.
+
 ### Act
 
 Pick a selector, in order of preference:

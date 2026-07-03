@@ -138,7 +138,9 @@ public final class AndroidDeviceController {
         public let portForward: Int
     }
 
-    /// Runs the 6-step bootstrap from `ai-doc/ANDROID_WIRE_SPEC.md`.
+    /// Runs the 6-step bridge bootstrap: install APK → register the
+    /// a11y service → enable a11y globally → toggle the HTTP server →
+    /// fetch the auth token → port-forward + ping.
     /// Idempotent: rerunning on an initialized device is a no-op for
     /// every step except APK install (`install -r`).
     public func initialize(serial: String, options: InitOptions = InitOptions()) throws -> InitReport {

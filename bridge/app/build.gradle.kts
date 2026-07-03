@@ -14,8 +14,9 @@ android {
         versionCode = 16
         versionName = "0.9.0"
 
-        // protocol_version aligns with the wire spec at
-        // ai-doc/ANDROID_WIRE_SPEC.md. Bumped to 2: `/a11y_tree_full`
+        // Must match `BridgeClient.expectedProtocolVersion` on the
+        // Swift side — bump both together on breaking wire changes
+        // only (see CLAUDE.md). Bumped to 2: `/a11y_tree_full`
         // may now return a synthetic root with `className =
         // "__simuse:multi_window__"` when the app has secondary
         // windows (PopupWindow / dialog / dropdown). Old clients would

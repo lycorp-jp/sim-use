@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
 
-/// Fetches the bridge's bearer token via the ContentProvider URI defined
-/// in `ai-doc/ANDROID_WIRE_SPEC.md` §Bootstrap sequence:
+/// Fetches the bridge's bearer token via the ContentProvider URI served
+/// by the bridge's `service/SimuseContentProvider.kt`, as part of the
+/// bootstrap sequence (`AndroidDeviceController.initialize`):
 ///
 /// ```
 /// adb -s <serial> shell content query \
@@ -16,7 +17,7 @@ import Foundation
 /// We extract `<uuid>` defensively — whitespace and exact line wording
 /// vary slightly across Android versions / shell variants.
 public enum AuthTokenFetcher {
-    /// Toggle URIs from the wire spec.
+    /// ContentProvider URIs exposed by `SimuseContentProvider.kt`.
     public static let authUri = "content://com.linecorp.simuse.devicebridge/auth_token"
     public static let toggleUri = "content://com.linecorp.simuse.devicebridge/toggle_socket_server"
 
