@@ -14,8 +14,17 @@ public struct HIDInteractor {
         public let hid: FBSimulatorHID
     }
 
-    // Cache for HID connections per simulator
-    private static var hidConnections: [String: FBSimulatorHID] = [:]
+    // Cache for HID connections per simulator. Each entry carries the
+    // boot token it was created against (see HIDBootIdentity): the
+    // connection's mach port dies with that boot, and a send through a
+    // dead port hangs on current SimulatorKit, so reuse must be gated
+    // on the token before anything is sent.
+    private struct CachedConnection {
+        let hid: FBSimulatorHID
+        let bootToken: Date?
+    }
+
+    private static var hidConnections: [String: CachedConnection] = [:]
 
     /// Configurable stabilization delay to ensure HID events are fully processed
     /// Can be set via SIM_USE_HID_STABILIZATION_MS environment variable
@@ -61,6 +70,31 @@ public struct HIDInteractor {
     }
 
     public static func performHIDEvent(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
+        do {
+            try await performHIDEventOnce(event, in: session, logger: logger)
+        } catch {
+            // Fail-invalidate + cautious retry-once: see HIDPerformRecovery
+            // for the decision rules and why only dead-transport errors
+            // are safe to re-perform.
+            try await HIDPerformRecovery.recover(from: error, invalidate: {
+                logger.error().log("HID event failed (\(error.localizedDescription)); dropping cached HID connection for \(session.simulatorUDID)")
+                clearHIDConnection(for: session.simulatorUDID)
+            }, rebuildAndRetry: {
+                logger.info().log("Dead HID transport for \(session.simulatorUDID); rebuilding session and retrying once...")
+                let freshSession = try await makeSession(for: session.simulatorUDID, logger: logger)
+                do {
+                    try await performHIDEventOnce(event, in: freshSession, logger: logger)
+                } catch {
+                    // Keep the "a failed perform never leaves its
+                    // connection cached" invariant on the retry path too.
+                    clearHIDConnection(for: session.simulatorUDID)
+                    throw error
+                }
+            })
+        }
+    }
+
+    private static func performHIDEventOnce(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
         logger.info().log("Performing HID event...")
         let eventFuture = event.perform(on: session.hid)
         _ = try await FutureBridge.value(eventFuture)
@@ -79,16 +113,24 @@ public struct HIDInteractor {
 
     // Get or create a cached HID connection (matching CompanionLib's connectToHID behavior)
     private static func getOrCreateHIDConnection(for simulator: FBSimulator, logger: SimUseLogger) async throws -> FBSimulatorHID {
-        if let existingHID = hidConnections[simulator.udid] {
-            logger.info().log("Using existing HID connection for simulator \(simulator.udid)")
-            return existingHID
+        let currentToken = HIDBootIdentity.token(dataDirectory: simulator.dataDirectory)
+        if let cached = hidConnections[simulator.udid] {
+            if HIDBootIdentity.isReusable(cachedToken: cached.bootToken, currentToken: currentToken) {
+                logger.info().log("Using existing HID connection for simulator \(simulator.udid)")
+                return cached.hid
+            }
+            // The simulator was re-booted (or the boot marker is
+            // unreadable) since the connection was made: the cached
+            // handle's mach port is dead and must not be sent through.
+            logger.info().log("Boot token changed for simulator \(simulator.udid); discarding cached HID connection")
+            hidConnections.removeValue(forKey: simulator.udid)
         }
 
         logger.info().log("Creating new HID connection for simulator \(simulator.udid)...")
         let hidFuture = simulator.connectToHID()
         let hid = try await FutureBridge.value(hidFuture)
 
-        hidConnections[simulator.udid] = hid
+        hidConnections[simulator.udid] = CachedConnection(hid: hid, bootToken: currentToken)
         logger.info().log("HID connection created and cached for simulator \(simulator.udid)")
 
         return hid
