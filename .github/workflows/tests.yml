@@ -116,13 +116,37 @@ jobs:
           restore-keys: |
             spm-${{ runner.arch }}-xcode-${{ steps.xcode.outputs.version }}-
 
+      - name: Install xcsift
+        run: brew install xcsift
+
+      # Build/test output goes through xcsift (condensed TOON summary
+      # + GitHub inline annotations); the raw log is kept as a
+      # failure-only artifact for forensics the condensed view can't
+      # serve (e.g. grepping daemon log lines). SIM_USE_XCSIFT=0
+      # bypasses make's own xcsift pipe so the tee here captures raw
+      # swift output rather than an already-condensed stream. The
+      # explicit `shell: bash` matters: GitHub runs it with
+      # `-o pipefail`, so swift's exit code — not xcsift's — decides
+      # the step outcome.
+      #
       # make build also rsyncs skills/sim-use into the gitignored
       # Sources/SimUse/Resources/skills, which the test bundle requires.
       - name: Build
-        run: make build
+        shell: bash
+        run: SIM_USE_XCSIFT=0 make build 2>&1 | tee "${RUNNER_TEMP}/build.log" | xcsift -f toon
 
       - name: Run unit tests
-        run: make test
+        shell: bash
+        run: SIM_USE_XCSIFT=0 make test 2>&1 | tee "${RUNNER_TEMP}/test.log" | xcsift --coverage -f toon
+
+      - name: Upload raw logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: raw-swift-logs
+          path: ${{ runner.temp }}/*.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       # Loads the FB* frameworks through dyld, catching link/rpath
       # regressions that compilation alone would miss.

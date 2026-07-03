@@ -31,7 +31,9 @@ make test                        # unit tests (no simulator needed)
 swift test --filter TapTests     # run a single test suite
 ```
 
-`make test` runs `swift test` — unit tests that exercise parsing, outline rendering, daemon protocol, and cross-platform dispatch without a live simulator.
+`make test` runs `swift test --enable-code-coverage` — unit tests that exercise parsing, outline rendering, daemon protocol, and cross-platform dispatch without a live simulator.
+
+When [xcsift](https://github.com/ldomaradzki/xcsift) is installed (`brew install xcsift` — optional, never required), `make build` / `make test` condense swift output into a TOON summary plus a coverage report. `SIM_USE_XCSIFT=0 make test` forces plain swift output.
 
 ### Verifying a change
 
