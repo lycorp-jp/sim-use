@@ -15,13 +15,12 @@ struct SwipeForwarderTests {
 
     // MARK: - Validation parity
 
-    @Test("Top-level Swipe validation delegates to IOSSimSwipeCommand (negative coords)")
+    @Test("Negative coordinates are rejected by the shared resolver")
     func negativeCoordsRejected() {
         do {
-            _ = try IOSSimSwipeCommand.validateOptions(
+            _ = try SwipeCoordinateResolver.resolve(
                 startX: -1, startY: 0, endX: 10, endY: 10,
-                duration: nil, delta: nil,
-                preDelay: nil, postDelay: nil
+                from: nil, to: nil, positional: []
             )
             Issue.record("expected a ValidationError")
         } catch let error as ValidationError {
@@ -31,13 +30,12 @@ struct SwipeForwarderTests {
         }
     }
 
-    @Test("Same start and end is rejected")
+    @Test("Same start and end is rejected by the shared resolver")
     func samePointRejected() {
         do {
-            _ = try IOSSimSwipeCommand.validateOptions(
+            _ = try SwipeCoordinateResolver.resolve(
                 startX: 100, startY: 100, endX: 100, endY: 100,
-                duration: nil, delta: nil,
-                preDelay: nil, postDelay: nil
+                from: nil, to: nil, positional: []
             )
             Issue.record("expected a ValidationError")
         } catch let error as ValidationError {
@@ -50,8 +48,7 @@ struct SwipeForwarderTests {
     @Test("Non-positive duration is rejected")
     func nonPositiveDurationRejected() {
         do {
-            _ = try IOSSimSwipeCommand.validateOptions(
-                startX: 100, startY: 100, endX: 200, endY: 200,
+            try IOSSimSwipeCommand.validateTimingOptions(
                 duration: 0, delta: nil,
                 preDelay: nil, postDelay: nil
             )
@@ -66,8 +63,7 @@ struct SwipeForwarderTests {
     @Test("Out-of-range pre-delay is rejected")
     func preDelayOutOfRangeRejected() {
         do {
-            _ = try IOSSimSwipeCommand.validateOptions(
-                startX: 100, startY: 100, endX: 200, endY: 200,
+            try IOSSimSwipeCommand.validateTimingOptions(
                 duration: nil, delta: nil,
                 preDelay: 11, postDelay: nil
             )

@@ -10,8 +10,15 @@ import SimUseCore
 /// `sim-use ios swipe`. The top-level command resolves the target
 /// platform via `PlatformRouter` and forwards iOS UDIDs through here.
 public struct IOSSimSwipeCommand: SimUseExecutableCommand {
+    /// Carries the resolved coordinates so `format(_:)` renders from
+    /// the execution result instead of re-resolving the raw flags —
+    /// same shape as `IOSSimTapCommand.ExecutionResult`.
     public struct ExecutionResult: Codable {
-        public init() {}
+        public let coordinates: SwipeCoordinates
+
+        public init(coordinates: SwipeCoordinates) {
+            self.coordinates = coordinates
+        }
     }
 
     public static let configuration = CommandConfiguration(
@@ -19,29 +26,7 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         abstract: "Perform a swipe gesture from one point to another on the screen."
     )
 
-    @Argument(help: ArgumentHelp(
-        "Optional positional coordinate pairs: <from x,y> <to x,y>. Exclusive with --from/--to and --start-x/--start-y/--end-x/--end-y.",
-        valueName: "x,y"
-    ))
-    public var coordinatePairs: [CoordinatePair] = []
-
-    @Option(name: .customLong("from"), help: ArgumentHelp("Starting coordinate pair.", valueName: "x,y"))
-    public var from: CoordinatePair?
-
-    @Option(name: .customLong("to"), help: ArgumentHelp("Ending coordinate pair.", valueName: "x,y"))
-    public var to: CoordinatePair?
-
-    @Option(name: .customLong("start-x"), help: "The X coordinate of the starting point.")
-    public var startX: Double?
-
-    @Option(name: .customLong("start-y"), help: "The Y coordinate of the starting point.")
-    public var startY: Double?
-
-    @Option(name: .customLong("end-x"), help: "The X coordinate of the ending point.")
-    public var endX: Double?
-
-    @Option(name: .customLong("end-y"), help: "The Y coordinate of the ending point.")
-    public var endY: Double?
+    @OptionGroup public var coordinates: SwipeCoordinateOptions
 
     @Option(name: .customLong("duration"), help: "Duration of the swipe in seconds.")
     public var duration: Double?
@@ -72,22 +57,12 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
     /// Match the top-level `Swipe` and `AndroidSwipeCommand` so direct
     /// `sim-use ios swipe` calls aren't silent on success.
     public func format(_ result: ExecutionResult) -> CommandOutput {
-        guard let coords = try? resolvedCoordinates() else {
-            return .line("✓ Swipe completed successfully")
-        }
-        let sx = Int(coords.startX.rounded())
-        let sy = Int(coords.startY.rounded())
-        let ex = Int(coords.endX.rounded())
-        let ey = Int(coords.endY.rounded())
-        return .line("✓ Swipe (\(sx),\(sy)) → (\(ex),\(ey)) completed successfully")
+        .line("✓ Swipe \(result.coordinates.displaySummary) completed successfully")
     }
 
     public func validate() throws {
-        _ = try Self.validateOptions(
-            startX: startX, startY: startY,
-            endX: endX, endY: endY,
-            from: from, to: to,
-            positionalPairs: coordinatePairs,
+        _ = try coordinates.resolve()
+        try Self.validateTimingOptions(
             duration: duration,
             delta: delta,
             preDelay: preDelay,
@@ -95,35 +70,25 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         )
     }
 
-    /// Shared validation factored out as a static so the top-level
-    /// cross-platform forwarder runs the same rules without
-    /// re-implementing them.
-    public static func validateOptions(
-        startX: Double?,
-        startY: Double?,
-        endX: Double?,
-        endY: Double?,
-        from: CoordinatePair? = nil,
-        to: CoordinatePair? = nil,
-        positionalPairs: [CoordinatePair] = [],
+    /// Timing/granularity rules factored out as a static so the
+    /// top-level cross-platform forwarder runs the same checks without
+    /// re-implementing them. Coordinate rules live in
+    /// `SwipeCoordinateOptions.resolve()`.
+    public static func validateTimingOptions(
         duration: Double?,
         delta: Double?,
         preDelay: Double?,
         postDelay: Double?
-    ) throws -> SwipeCoordinates {
-        let coords = try SwipeCoordinateResolver.resolve(
-            startX: startX, startY: startY,
-            endX: endX, endY: endY,
-            from: from, to: to,
-            positional: positionalPairs
-        )
-        guard coords.startX >= 0, coords.startY >= 0, coords.endX >= 0, coords.endY >= 0 else {
-            throw ValidationError("Coordinates must be non-negative values.")
-        }
-
+    ) throws {
         if let duration {
             guard duration > 0 else {
                 throw ValidationError("Duration must be greater than 0.")
+            }
+            // Same ceiling as pre/post-delay and the Android verbs.
+            // Also catches millisecond values passed by habit from
+            // `adb shell input swipe` — those belong in seconds here.
+            guard duration <= 10.0 else {
+                throw ValidationError("Duration must be at most 10 seconds. Durations are in seconds, not milliseconds — pass 0.3 for a 300 ms swipe.")
             }
         }
 
@@ -131,10 +96,6 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
             guard delta > 0 else {
                 throw ValidationError("Delta must be greater than 0.")
             }
-        }
-
-        guard coords.startX != coords.endX || coords.startY != coords.endY else {
-            throw ValidationError("Start and end points must be different.")
         }
 
         if let preDelay {
@@ -148,21 +109,10 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
                 throw ValidationError("Post-delay must be between 0 and 10 seconds.")
             }
         }
-
-        return coords
     }
 
     public func resolvedCoordinates() throws -> SwipeCoordinates {
-        try Self.validateOptions(
-            startX: startX, startY: startY,
-            endX: endX, endY: endY,
-            from: from, to: to,
-            positionalPairs: coordinatePairs,
-            duration: duration,
-            delta: delta,
-            preDelay: preDelay,
-            postDelay: postDelay
-        )
+        try coordinates.resolve()
     }
 
     public func execute() async throws -> ExecutionResult {
@@ -170,7 +120,7 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
 
-        let coords = try resolvedCoordinates()
+        let coords = try coordinates.resolve()
         let swipeDuration = duration ?? 1.0
         let swipeDelta = delta ?? 50.0
 
@@ -208,6 +158,6 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         )
 
         logger.info().log("Swipe gesture completed successfully")
-        return ExecutionResult()
+        return ExecutionResult(coordinates: coords)
     }
 }

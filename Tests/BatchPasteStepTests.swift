@@ -143,4 +143,14 @@ struct BatchPasteStepParsingTests {
             return
         }
     }
+
+    @Test("positional `swipe x,y x,y` is accepted as a batch step")
+    func swipePositionalCoordinates() async throws {
+        let primitives = try await parse(["swipe", "10,20", "30,40"])
+        #expect(primitives.count == 1)
+        guard case .hidMergeable = primitives[0] else {
+            Issue.record("swipe should produce one mergeable HID primitive; got \(primitives)")
+            return
+        }
+    }
 }

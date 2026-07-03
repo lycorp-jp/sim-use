@@ -22,6 +22,10 @@ public struct CoordinatePair: ExpressibleByArgument, Codable, Equatable, Sendabl
         let xRaw = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
         let yRaw = parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
         guard let x = Double(xRaw), let y = Double(yRaw) else { return nil }
+        // `Double(String)` happily parses "inf"/"nan"; a non-finite
+        // coordinate can never be a screen position and would trap the
+        // Double→Int conversions downstream, so reject at parse time.
+        guard x.isFinite, y.isFinite else { return nil }
         return CoordinatePair(x: x, y: y)
     }
 }
@@ -38,9 +42,30 @@ public struct SwipeCoordinates: Codable, Equatable, Sendable {
         self.endX = endX
         self.endY = endY
     }
+
+    // Integer projections shared by every backend and success line so
+    // the two Android entry points can't disagree on truncation vs
+    // rounding again. Safe: the resolver bounds coordinates to
+    // finite values ≤ `SwipeCoordinateResolver.maximumCoordinate`.
+    public var roundedStartX: Int { Int(startX.rounded()) }
+    public var roundedStartY: Int { Int(startY.rounded()) }
+    public var roundedEndX: Int { Int(endX.rounded()) }
+    public var roundedEndY: Int { Int(endY.rounded()) }
+
+    /// `(100,200) → (300,400)` — the coordinate summary rendered by the
+    /// swipe success lines on all three surfaces.
+    public var displaySummary: String {
+        "(\(roundedStartX),\(roundedStartY)) → (\(roundedEndX),\(roundedEndY))"
+    }
 }
 
 public enum SwipeCoordinateResolver {
+    /// Generous ceiling on any single coordinate value. No real screen
+    /// comes anywhere close; the bound exists so a fat-fingered value
+    /// like `1e19` is rejected with a clean error instead of trapping
+    /// the Double→Int conversion in the Android backend.
+    public static let maximumCoordinate: Double = 100_000
+
     public static func resolve(
         startX: Double?,
         startY: Double?,
@@ -75,18 +100,40 @@ public enum SwipeCoordinateResolver {
             throw ValidationError("Specify only one swipe coordinate form: --from/--to, positional <x,y> <x,y>, or --start-x/--start-y/--end-x/--end-y.")
         }
 
+        let coords: SwipeCoordinates
         if hasLegacy {
-            return SwipeCoordinates(
+            coords = SwipeCoordinates(
                 startX: startX!, startY: startY!,
                 endX: endX!, endY: endY!
             )
+        } else if let from, let to {
+            coords = SwipeCoordinates(startX: from.x, startY: from.y, endX: to.x, endY: to.y)
+        } else {
+            coords = SwipeCoordinates(
+                startX: positional[0].x, startY: positional[0].y,
+                endX: positional[1].x, endY: positional[1].y
+            )
         }
-        if let from, let to {
-            return SwipeCoordinates(startX: from.x, startY: from.y, endX: to.x, endY: to.y)
+        try validateRange(coords)
+        return coords
+    }
+
+    /// Coordinate range rules, applied to every resolved form on every
+    /// surface (top-level, iOS, Android, batch) so no entry point can
+    /// forward degenerate or trap-inducing values to a backend.
+    private static func validateRange(_ coords: SwipeCoordinates) throws {
+        let values = [coords.startX, coords.startY, coords.endX, coords.endY]
+        guard values.allSatisfy({ $0.isFinite }) else {
+            throw ValidationError("Coordinates must be finite numbers.")
         }
-        return SwipeCoordinates(
-            startX: positional[0].x, startY: positional[0].y,
-            endX: positional[1].x, endY: positional[1].y
-        )
+        guard values.allSatisfy({ $0 >= 0 }) else {
+            throw ValidationError("Coordinates must be non-negative values.")
+        }
+        guard values.allSatisfy({ $0 <= maximumCoordinate }) else {
+            throw ValidationError("Coordinates must be at most \(Int(maximumCoordinate)).")
+        }
+        guard coords.startX != coords.endX || coords.startY != coords.endY else {
+            throw ValidationError("Start and end points must be different.")
+        }
     }
 }
