@@ -94,7 +94,7 @@ public enum BridgeSessionStore {
         // (Wi-Fi adb: 192.168.1.5:5555), and underscores
         // (occasionally produced by emulator tooling).
         let allowed = CharacterSet(charactersIn:
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-_"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-"
         )
         return udid.unicodeScalars.allSatisfy(allowed.contains)
     }

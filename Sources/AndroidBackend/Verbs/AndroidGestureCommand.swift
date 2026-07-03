@@ -4,9 +4,9 @@ import Foundation
 import SimUseCore
 
 /// `sim-use android gesture` — preset gesture pattern dispatched
-/// through the bridge's `/swipe` endpoint (which is itself backed by
-/// `AccessibilityService.dispatchGesture`, the right primitive for
-/// single-finger linear strokes).
+/// through the bridge: single-finger presets via `/swipe`, multi-touch
+/// presets (pinch / rotate) via `/gesture` multi-stroke dispatch. Both
+/// endpoints are backed by `AccessibilityService.dispatchGesture`.
 ///
 /// Mirrors the iOS `gesture` verb on the Android side; the cross-
 /// platform top-level `gesture` forwards here for Android UDIDs.
