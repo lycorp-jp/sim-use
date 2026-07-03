@@ -122,8 +122,9 @@ struct Daemon: AsyncParsableCommand {
             /// Present when a per-daemon step failed but we still continued.
             let error: String?
 
-            /// New cross-platform synonym for `udid`. Drop the `udid`
-            /// key in Phase 2 once all consumers have migrated.
+            /// `deviceId` is the canonical wire key; `udid` is only
+            /// accepted on decode as a deprecated fallback (to be
+            /// removed in a future release).
             private enum CodingKeys: String, CodingKey {
                 case udid, deviceId, pid, method, stopped, error
             }
@@ -148,7 +149,6 @@ struct Daemon: AsyncParsableCommand {
 
             func encode(to encoder: Encoder) throws {
                 var c = encoder.container(keyedBy: CodingKeys.self)
-                try c.encode(udid, forKey: .udid)
                 try c.encode(udid, forKey: .deviceId)
                 try c.encode(pid, forKey: .pid)
                 try c.encode(method, forKey: .method)
@@ -307,8 +307,9 @@ struct Daemon: AsyncParsableCommand {
             let reachable: Bool
             let error: String?
 
-            /// Transitional dual-key for the device identifier. Drop the
-            /// `udid` key in Phase 2 once consumers have migrated.
+            /// `deviceId` is the canonical wire key; `udid` is only
+            /// accepted on decode as a deprecated fallback (to be
+            /// removed in a future release).
             private enum CodingKeys: String, CodingKey {
                 case udid, deviceId, pid, uptimeSeconds, simUseVersion, protocolVersion,
                      socketPath, logPath, reachable, error
@@ -352,7 +353,6 @@ struct Daemon: AsyncParsableCommand {
 
             func encode(to encoder: Encoder) throws {
                 var c = encoder.container(keyedBy: CodingKeys.self)
-                try c.encode(udid, forKey: .udid)
                 try c.encode(udid, forKey: .deviceId)
                 try c.encode(pid, forKey: .pid)
                 try c.encode(uptimeSeconds, forKey: .uptimeSeconds)

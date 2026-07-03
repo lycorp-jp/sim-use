@@ -16,10 +16,10 @@ import Foundation
 /// just want "can I act on this now?" should use `isUsable`, which
 /// applies the per-platform rule.
 public struct Device: Codable, Equatable, Hashable, Sendable {
-    /// Custom keys for transitional dual-key device-id encoding. The
-    /// `udid` key is the historic name; `deviceId` is the new
-    /// cross-platform synonym. Until Phase 2 drops `udid`, we emit
-    /// both and accept either on decode (preferring `deviceId`).
+    /// Custom keys for the device-id wire migration. `deviceId` is the
+    /// canonical cross-platform key and the only one emitted; `udid`
+    /// is the historic name, still accepted on decode as a deprecated
+    /// fallback (to be removed in a future release).
     private enum CodingKeys: String, CodingKey {
         case udid
         case deviceId
@@ -91,10 +91,6 @@ public struct Device: Codable, Equatable, Hashable, Sendable {
 
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
-        // Emit both keys during the transition. Drop `udid` in Phase 2
-        // once known consumers (Viewer, agent scripts, dashboards) all
-        // read `deviceId`.
-        try c.encode(udid, forKey: .udid)
         try c.encode(udid, forKey: .deviceId)
         try c.encode(name, forKey: .name)
         try c.encode(platform, forKey: .platform)

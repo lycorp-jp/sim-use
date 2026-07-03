@@ -83,7 +83,7 @@ export default function Details({
                 title="Copy CLI command"
                 onClick={() =>
                   navigator.clipboard?.writeText(
-                    `sim-use tap @${selected.aliases.at} --udid ${snapshot.udid}`,
+                    `sim-use tap @${selected.aliases.at} --device ${snapshot.deviceId}`,
                   )
                 }
               >

@@ -40,14 +40,13 @@ struct ViewerAPIHandlers {
             let data = (envelope["data"] as? [String: Any]) ?? [:]
             let rawDevices = (data["devices"] as? [[String: Any]]) ?? []
             let simplified: [[String: Any]] = rawDevices.map { d in
-                // Prefer the new `deviceId` key; fall back to `udid`
-                // for compatibility with payloads emitted before the
-                // dual-key transition. Forward both keys downstream so
-                // legacy SPA clients keep working.
+                // Prefer the canonical `deviceId` key; fall back to
+                // `udid` for compatibility with payloads emitted before
+                // the dual-key transition. Only `deviceId` is forwarded
+                // downstream — the SPA reads that key exclusively.
                 let id = (d["deviceId"] as? String) ?? (d["udid"] as? String) ?? ""
                 var slim: [String: Any] = [:]
                 slim["deviceId"] = id
-                slim["udid"] = id
                 slim["name"] = d["name"] ?? ""
                 slim["platform"] = d["platform"] ?? ""
                 slim["runtime"] = d["runtime"] ?? ""
@@ -59,7 +58,7 @@ struct ViewerAPIHandlers {
         }
     }
 
-    // MARK: - GET /api/snapshot?udid=…
+    // MARK: - GET /api/snapshot?deviceId=…
 
     func snapshot(_ request: HTTPRequest) async -> HTTPResponse {
         // Accept either `deviceId` (new) or `udid` (deprecated alias) on
@@ -86,7 +85,6 @@ struct ViewerAPIHandlers {
                 "ok": true,
                 "capturedAt": iso8601Now(),
                 "deviceId": deviceId,
-                "udid": deviceId,
                 "outline": outline ?? "",
                 "entries": data["entries"] ?? [],
                 "lists": data["lists"] ?? [],

@@ -38,7 +38,7 @@ make viewer        # or: scripts/build-viewer.sh
 ## API endpoints
 
 - `GET /api/devices` — list booted simulators and connected Android devices.
-- `GET /api/snapshot?udid=<UDID>` — `sim-use ui --json` → `{ screen, entries, outline, capturedAt }`.
+- `GET /api/snapshot?deviceId=<DEVICE_ID>` — `sim-use ui --json` → `{ screen, entries, outline, capturedAt }`. `udid=` is still accepted as a deprecated alias.
 - `POST /api/tap` — replay `sim-use tap @N` on the selected element.
 
 ## Controls
