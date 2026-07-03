@@ -87,30 +87,6 @@ public struct AccessibilityElement: Decodable {
         AXLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// AXLabel with every internal run of whitespace (spaces, tabs, newlines)
-    /// collapsed to a single space and the ends trimmed. The compact
-    /// `describe-ui` outline renders a multi-line AXLabel space-joined, so an
-    /// agent that copies a label out of the outline and passes it back to
-    /// `--label` supplies a space-joined string that never equals the
-    /// newline-bearing AXLabel under exact comparison. Matching on the
-    /// collapsed form lets that round-trip succeed.
-    public var collapsedLabel: String? {
-        AccessibilityElement.collapseWhitespace(AXLabel)
-    }
-
-    /// `collapsedLabel` counterpart for AXValue, used by the `--value`
-    /// whitespace-tolerant fallback.
-    public var collapsedValue: String? {
-        AccessibilityElement.collapseWhitespace(AXValue)
-    }
-
-    /// Collapse internal whitespace runs to single spaces and trim. Returns
-    /// nil for a nil input; an all-whitespace string collapses to "".
-    public static func collapseWhitespace(_ string: String?) -> String? {
-        guard let string else { return nil }
-        return string.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-    }
-
     public var normalizedUniqueId: String? {
         AXUniqueId?.trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -89,8 +89,8 @@ struct WhitespaceLabelMatchTests {
 
     @Test("collapseWhitespace collapses runs and trims; nil passes through")
     func collapseHelper() {
-        #expect(AccessibilityElement.collapseWhitespace("  a\n\n b\tc  ") == "a b c")
-        #expect(AccessibilityElement.collapseWhitespace("single") == "single")
-        #expect(AccessibilityElement.collapseWhitespace(nil) == nil)
+        #expect(SelectorTextMatcher.collapseWhitespace("  a\n\n b\tc  ") == "a b c")
+        #expect(SelectorTextMatcher.collapseWhitespace("single") == "single")
+        #expect(SelectorTextMatcher.collapseWhitespace(nil) == nil)
     }
 }

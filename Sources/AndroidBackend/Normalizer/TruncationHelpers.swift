@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
+import SimUseCore
 
 /// Shared label/value escape + truncation helpers. Mirrors the iOS
 /// `OutlineFormatter` private helpers so cross-platform outlines render
@@ -32,25 +33,10 @@ enum TruncationHelpers {
          .replacingOccurrences(of: "\"", with: "\\\"")
     }
 
+    /// Delegates to the canonical collapse in SimUseCore — the same
+    /// normal form the selector resolvers match on, so the outline
+    /// display and the copy-back round-trip can never drift apart.
     static func collapseWhitespace(_ s: String) -> String {
-        var mapped = String.UnicodeScalarView()
-        mapped.reserveCapacity(s.unicodeScalars.count)
-        for scalar in s.unicodeScalars {
-            if scalar == "\n" || scalar == "\r" || scalar == "\t" {
-                mapped.append(" ")
-            } else {
-                mapped.append(scalar)
-            }
-        }
-        var out = ""
-        out.reserveCapacity(mapped.count)
-        var previousWasSpace = false
-        for scalar in mapped {
-            let isSpace = scalar == " "
-            if isSpace && previousWasSpace { continue }
-            out.unicodeScalars.append(scalar)
-            previousWasSpace = isSpace
-        }
-        return out
+        SelectorTextMatcher.collapseWhitespace(s)
     }
 }

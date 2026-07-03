@@ -336,7 +336,11 @@ public enum AndroidSelectorResolver {
         }
 
         if let label = selector.label {
-            candidates = candidates.filter { $0.label == label }
+            // Exact-first with a whitespace-collapsed fallback, shared
+            // with the iOS resolver via SelectorTextMatcher: the Android
+            // outline space-joins multi-line contentDescriptions for
+            // display, so the copied-back string must resolve here too.
+            candidates = SelectorTextMatcher.filterEquals(candidates, query: label) { $0.label }
         }
         if let needle = selector.labelContains {
             // Case-sensitive substring, mirroring iOS (`--label-contains`
@@ -347,7 +351,7 @@ public enum AndroidSelectorResolver {
             // resolve to several on Android. Callers that want
             // case-insensitive matching should pass a `(?i)` regex via
             // `--label-regex`.
-            candidates = candidates.filter { $0.label.contains(needle) }
+            candidates = SelectorTextMatcher.filterContains(candidates, needle: needle) { $0.label }
         }
         if let pattern = selector.labelRegex {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
@@ -359,12 +363,12 @@ public enum AndroidSelectorResolver {
             }
         }
         if let value = selector.value {
-            candidates = candidates.filter { ($0.value ?? "") == value }
+            candidates = SelectorTextMatcher.filterEquals(candidates, query: value) { $0.value }
         }
         if let needle = selector.valueContains {
             // Case-sensitive — see the matching rationale on
             // `labelContains` above.
-            candidates = candidates.filter { ($0.value ?? "").contains(needle) }
+            candidates = SelectorTextMatcher.filterContains(candidates, needle: needle) { $0.value }
         }
         if let pattern = selector.valueRegex {
             guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {

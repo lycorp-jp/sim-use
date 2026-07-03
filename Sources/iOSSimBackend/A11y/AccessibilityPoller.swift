@@ -27,19 +27,19 @@ public struct AccessibilityPoller {
         let roots = try await fetchRoots(false)
         do {
             return try AccessibilityTargetResolver.resolveCenterPoint(roots: roots, query: query, elementType: elementType, frameFilter: frameFilter)
-        } catch let error as ElementResolutionError where error.isNotFound && waitTimeout > 0 {
+        } catch let error as ElementResolutionError where error.isRetryableDuringWait && waitTimeout > 0 {
             let clock = ContinuousClock()
             let deadline = clock.now + .seconds(waitTimeout)
 
             var lastError = error
             while clock.now < deadline {
-                logger.info().log("Element not found, retrying in \(pollInterval)s…")
+                logger.info().log("Element not resolved (\(lastError.isNotFound ? "not found" : "ambiguous")), retrying in \(pollInterval)s…")
                 try await Task.sleep(for: .seconds(pollInterval))
 
                 let freshRoots = try await fetchRoots(true)
                 do {
                     return try AccessibilityTargetResolver.resolveCenterPoint(roots: freshRoots, query: query, elementType: elementType, frameFilter: frameFilter)
-                } catch let retryError as ElementResolutionError where retryError.isNotFound {
+                } catch let retryError as ElementResolutionError where retryError.isRetryableDuringWait {
                     lastError = retryError
                     continue
                 }
