@@ -54,12 +54,19 @@ public struct DaemonSuccessResponse<Data: Encodable>: Encodable {
     /// backward-compatible: omitted from the wire when nil, so older
     /// clients simply don't see it.
     public let advisory: ProcessAdvisory?
+    public let commandAdvisory: CommandAdvisory?
 
-    public init(id: String? = nil, data: Data, advisory: ProcessAdvisory? = nil) {
+    public init(
+        id: String? = nil,
+        data: Data,
+        advisory: ProcessAdvisory? = nil,
+        commandAdvisory: CommandAdvisory? = nil
+    ) {
         self.id = id
         self.ok = true
         self.data = data
         self.advisory = advisory
+        self.commandAdvisory = commandAdvisory
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -67,10 +74,11 @@ public struct DaemonSuccessResponse<Data: Encodable>: Encodable {
         if let id { try container.encode(id, forKey: .id) }
         try container.encode(ok, forKey: .ok)
         try container.encode(data, forKey: .data)
+        if let commandAdvisory { try container.encode(commandAdvisory, forKey: .advisory) }
         if let advisory, !advisory.isEmpty { try container.encode(advisory, forKey: .process) }
     }
 
-    private enum CodingKeys: String, CodingKey { case id, ok, data, process }
+    private enum CodingKeys: String, CodingKey { case id, ok, data, advisory, process }
 }
 
 public struct DaemonErrorResponse: Encodable {

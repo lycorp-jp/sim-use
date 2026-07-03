@@ -17,7 +17,12 @@ extension SimUseExecutableCommand {
     public mutating func executeAsDaemonResponse(id: String?, advisory: ProcessAdvisory? = nil) async throws -> Data {
         try resolveDeferredArguments()
         let result = try await execute()
-        let envelope = DaemonSuccessResponse(id: id, data: result, advisory: advisory)
+        let envelope = DaemonSuccessResponse(
+            id: id,
+            data: result,
+            advisory: advisory,
+            commandAdvisory: (result as? CommandAdvisoryProviding)?.commandAdvisory
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(envelope)

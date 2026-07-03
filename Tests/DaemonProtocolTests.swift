@@ -124,6 +124,16 @@ struct DaemonSuccessResponseTests {
         let text = jsonString(try encoderStable().encode(resp))
         #expect(text == #"{"data":{"count":3,"foo":"bar"},"ok":true,"process":{"events":[{"bundleId":"com.x","confidence":"high","kind":"disappeared","pid":100}],"pending":[]}}"#)
     }
+
+    @Test("Command advisory nests under the advisory key when present")
+    func commandAdvisoryNestsUnderAdvisory() throws {
+        let resp = DaemonSuccessResponse(
+            data: Payload(foo: "bar", count: 3),
+            commandAdvisory: CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
+        )
+        let text = jsonString(try encoderStable().encode(resp))
+        #expect(text == #"{"advisory":{"kind":"full_screen_tap_target","message":"check target"},"data":{"count":3,"foo":"bar"},"ok":true}"#)
+    }
 }
 
 // MARK: - DaemonPingData

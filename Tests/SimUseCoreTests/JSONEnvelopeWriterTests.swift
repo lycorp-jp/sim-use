@@ -57,6 +57,15 @@ struct JSONEnvelopeWriterTests {
         #expect(json == #"{"data":{"platform":"ios","visible":true},"ok":true,"process":{"events":[{"bundleId":"com.x","confidence":"high","kind":"disappeared","pid":100}],"pending":[]}}"#)
     }
 
+    @Test("success envelope carries command advisory under `advisory` when present")
+    func successEnvelopeWithCommandAdvisory() throws {
+        let payload = SamplePayload(platform: "ios", visible: true, imePackage: nil)
+        let advisory = CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
+        let bytes = try JSONEnvelopeWriter.encodeSuccess(payload, commandAdvisory: advisory)
+        let json = try #require(String(data: bytes, encoding: .utf8))
+        #expect(json == #"{"advisory":{"kind":"full_screen_tap_target","message":"check target"},"data":{"platform":"ios","visible":true},"ok":true}"#)
+    }
+
     @Test("success envelope omits `process` when advisory is nil or empty")
     func successEnvelopeAdvisoryOmitted() throws {
         let payload = SamplePayload(platform: "ios", visible: true, imePackage: nil)
@@ -64,6 +73,12 @@ struct JSONEnvelopeWriterTests {
         #expect(try #require(String(data: nilCase, encoding: .utf8)) == #"{"data":{"platform":"ios","visible":true},"ok":true}"#)
         let emptyCase = try JSONEnvelopeWriter.encodeSuccess(payload, advisory: ProcessAdvisory(events: [], pending: []))
         #expect(try #require(String(data: emptyCase, encoding: .utf8)) == #"{"data":{"platform":"ios","visible":true},"ok":true}"#)
+    }
+
+    @Test("command advisory renderer emits the client-side info line")
+    func commandAdvisoryRenderer() {
+        let advisory = CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
+        #expect(CommandAdvisoryRenderer.banner(for: advisory) == "[i] check target")
     }
 
     @Test("error envelope without hint omits the hint key entirely")

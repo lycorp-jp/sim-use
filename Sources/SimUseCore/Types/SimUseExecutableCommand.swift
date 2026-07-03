@@ -80,7 +80,11 @@ extension SimUseExecutableCommand {
                 try resolveDeferredArguments()
                 await clientPreflight()
                 let resolved = try await resolveExecutionResult()
-                try emitJSONSuccess(resolved.result, advisory: resolved.advisory)
+                try emitJSONSuccess(
+                    resolved.result,
+                    advisory: resolved.advisory,
+                    commandAdvisory: resolved.commandAdvisory
+                )
             } catch {
                 emitJSONError(error)
                 Darwin.exit(1)
@@ -99,6 +103,9 @@ extension SimUseExecutableCommand {
                 if let advisory = resolved.advisory,
                    let banner = ProcessAdvisoryRenderer.banner(for: advisory) {
                     FileHandle.standardOutput.write(Data((banner + "\n").utf8))
+                }
+                if let commandAdvisory = resolved.commandAdvisory {
+                    FileHandle.standardOutput.write(Data((CommandAdvisoryRenderer.banner(for: commandAdvisory) + "\n").utf8))
                 }
                 let output = format(result)
                 let tFormatted = DispatchTime.now()
@@ -137,11 +144,16 @@ extension SimUseExecutableCommand {
     /// Failures inside the daemon path are *not* retried in-process:
     /// they are surfaced verbatim so the user sees the same error the
     /// daemon would have produced.
-    private func resolveExecutionResult() async throws -> (result: ExecutionResult, advisory: ProcessAdvisory?) {
+    private func resolveExecutionResult() async throws -> (
+        result: ExecutionResult,
+        advisory: ProcessAdvisory?,
+        commandAdvisory: CommandAdvisory?
+    ) {
         guard shouldUseDaemon, let udid = simulatorUDIDForDaemon else {
             // In-process (standalone) path has no persistent tracker, so
             // it carries no cross-command process advisory.
-            return (try await execute(), nil)
+            let result = try await execute()
+            return (result, nil, (result as? CommandAdvisoryProviding)?.commandAdvisory)
         }
 
         let perf = ProcessInfo.processInfo.environment["SIM_USE_CLIENT_PERF"] == "1"
@@ -174,10 +186,12 @@ extension SimUseExecutableCommand {
 
         let result: ExecutionResult
         let advisory: ProcessAdvisory?
+        let commandAdvisory: CommandAdvisory?
         do {
             let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<ExecutionResult>.self, from: responseData)
             result = payload.data
             advisory = payload.advisory
+            commandAdvisory = payload.commandAdvisory
         } catch {
             throw DaemonClientError.malformedResponse(underlying: error)
         }
@@ -192,7 +206,7 @@ extension SimUseExecutableCommand {
             ))
         }
 
-        return (result, advisory)
+        return (result, advisory, commandAdvisory)
     }
 
     /// Is this command eligible for daemon dispatch *right now*?
@@ -232,8 +246,16 @@ extension SimUseExecutableCommand {
         return result
     }
 
-    private func emitJSONSuccess(_ result: ExecutionResult, advisory: ProcessAdvisory?) throws {
-        try JSONEnvelopeWriter.writeSuccess(result, advisory: advisory)
+    private func emitJSONSuccess(
+        _ result: ExecutionResult,
+        advisory: ProcessAdvisory?,
+        commandAdvisory: CommandAdvisory?
+    ) throws {
+        try JSONEnvelopeWriter.writeSuccess(
+            result,
+            advisory: advisory,
+            commandAdvisory: commandAdvisory
+        )
     }
 
     private func emitJSONError(_ error: Error) {
@@ -251,12 +273,14 @@ public struct DaemonClientSuccessPayload<T: Decodable>: Decodable {
     /// the daemon attached one (issue #81). Absent on responses that
     /// predate the field or carry no event.
     public let advisory: ProcessAdvisory?
+    public let commandAdvisory: CommandAdvisory?
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.data = try container.decode(T.self, forKey: .data)
         self.advisory = try container.decodeIfPresent(ProcessAdvisory.self, forKey: .process)
+        self.commandAdvisory = try container.decodeIfPresent(CommandAdvisory.self, forKey: .advisory)
     }
 
-    private enum CodingKeys: String, CodingKey { case data, process }
+    private enum CodingKeys: String, CodingKey { case data, process, advisory }
 }

@@ -20,9 +20,14 @@ public enum JSONEnvelopeWriter {
     public static func writeSuccess<T: Encodable>(
         _ data: T,
         advisory: ProcessAdvisory? = nil,
+        commandAdvisory: CommandAdvisory? = nil,
         to handle: FileHandle = .standardOutput
     ) throws {
-        let encoded = try makeEncoder().encode(SuccessEnvelope(data: data, process: nonEmpty(advisory)))
+        let encoded = try makeEncoder().encode(SuccessEnvelope(
+            data: data,
+            advisory: commandAdvisory,
+            process: nonEmpty(advisory)
+        ))
         handle.write(encoded)
         handle.write(Data([0x0A]))
     }
@@ -49,8 +54,16 @@ public enum JSONEnvelopeWriter {
     /// Direct access for callers that need the encoded bytes without
     /// writing to a `FileHandle` (used by tests to snapshot the wire
     /// shape).
-    public static func encodeSuccess<T: Encodable>(_ data: T, advisory: ProcessAdvisory? = nil) throws -> Data {
-        try makeEncoder().encode(SuccessEnvelope(data: data, process: nonEmpty(advisory)))
+    public static func encodeSuccess<T: Encodable>(
+        _ data: T,
+        advisory: ProcessAdvisory? = nil,
+        commandAdvisory: CommandAdvisory? = nil
+    ) throws -> Data {
+        try makeEncoder().encode(SuccessEnvelope(
+            data: data,
+            advisory: commandAdvisory,
+            process: nonEmpty(advisory)
+        ))
     }
 
     /// Drop an empty advisory so the `process` key never appears with no
@@ -79,16 +92,18 @@ public enum JSONEnvelopeWriter {
 private struct SuccessEnvelope<T: Encodable>: Encodable {
     let ok: Bool = true
     let data: T
+    let advisory: CommandAdvisory?
     let process: ProcessAdvisory?
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(ok, forKey: .ok)
         try container.encode(data, forKey: .data)
+        if let advisory { try container.encode(advisory, forKey: .advisory) }
         if let process { try container.encode(process, forKey: .process) }
     }
 
-    private enum CodingKeys: String, CodingKey { case ok, data, process }
+    private enum CodingKeys: String, CodingKey { case ok, data, advisory, process }
 }
 
 private struct ErrorEnvelope: Encodable {
