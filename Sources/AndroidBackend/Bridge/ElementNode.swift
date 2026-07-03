@@ -4,7 +4,8 @@ import SimUseCore
 
 /// Wire schema for an accessibility node as emitted by
 /// `sim-use-device-bridge`'s `/a11y_tree_full` endpoint. Matches the full
-/// P0+P1 field set from `ai-doc/ANDROID_WIRE_SPEC.md` §Schemas. Fields
+/// P0+P1 field set of the bridge's `model/ElementNode.kt` — keep the
+/// two field sets in sync. Fields
 /// that may be absent on older Android versions are modeled as `nil`
 /// rather than forced to defaults so the normalizer can tell "absent"
 /// from "empty".

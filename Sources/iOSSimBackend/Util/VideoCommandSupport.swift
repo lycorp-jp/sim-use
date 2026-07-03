@@ -84,6 +84,39 @@ public func cancellableSleep(seconds: TimeInterval, flag: CancellationFlag) asyn
     }
 }
 
+/// Stop-path watchdog for the `record-video` command.
+///
+/// After a stop signal arrives, the frame loop breaks and
+/// `H264StreamRecorder.finish()` (`AVAssetWriter.finishWriting`) writes the
+/// mp4 trailer (moov atom). If finalization hangs past `gracePeriod`, the
+/// process must not exit 0 — the file is likely truncated and unplayable —
+/// so the watchdog warns on stderr and exits `EX_SOFTWARE` instead of
+/// leaving a supervisor to SIGKILL us or, worse, reporting success.
+public enum RecordingFinishWatchdog {
+    /// Grace window granted to `finish()` after the stop signal. Wide
+    /// enough for a normal trailer flush (typically well under 1 s) while
+    /// still bounding a hung `finishWriting`.
+    public static let gracePeriod: TimeInterval = 3.0
+
+    /// `EX_SOFTWARE` (sysexits.h). Distinct from the exit codes the CLI
+    /// already produces: 0 (success), 1 (runtime error), 64 (usage error).
+    public static let exitCode: Int32 = 70
+
+    public static let warningMessage =
+        "warning: video finalization did not complete within \(Int(gracePeriod))s — output file may be truncated or unplayable\n"
+
+    /// Arm the watchdog from the signal handler. `recordingFinished` must
+    /// be cancelled once `finish()` has returned (success or failure).
+    public static func arm(recordingFinished: CancellationFlag) {
+        DispatchQueue.global().asyncAfter(deadline: .now() + gracePeriod) {
+            if !recordingFinished.isCancelled() {
+                FileHandle.standardError.write(Data(warningMessage.utf8))
+                _exit(exitCode)
+            }
+        }
+    }
+}
+
 public final class SignalObserver {
     private var sources: [DispatchSourceSignal] = []
     private let signals: [Int32]
@@ -116,6 +149,22 @@ public enum VideoProcessingError: Error {
     case emptyScreenshot
     case failedToDecodeImage
     case failedToAllocatePixelBuffer
+}
+
+/// Thrown when the asset writer input refuses new frames for longer
+/// than the stall timeout. A wedged writer (disk pressure, encoder
+/// failure) does not recover, so callers must abort the recording
+/// rather than retry — a distinct type lets frame loops tell this
+/// fatal condition apart from transient per-frame capture errors.
+public struct VideoWriterStallError: Error, LocalizedError, Equatable {
+    public let timeout: TimeInterval
+
+    public var errorDescription: String? {
+        String(
+            format: "Video writer did not accept new frames for %.0f seconds; the writer appears stalled (disk pressure or encoder failure). Aborting recording.",
+            timeout
+        )
+    }
 }
 
 public struct VideoFrameUtilities {
@@ -253,12 +302,37 @@ public final class H264StreamRecorder: @unchecked Sendable {
         self.adaptor = adaptor
     }
 
-    public func append(image: CGImage, presentationTime: CMTime) throws {
-        if !input.isReadyForMoreMediaData {
-            while !input.isReadyForMoreMediaData {
-                Thread.sleep(forTimeInterval: 0.005)
+    /// How long `append` waits for the writer input to drain before
+    /// giving up. Generous on purpose: with `expectsMediaDataInRealTime`
+    /// a healthy writer is ready again within milliseconds, so reaching
+    /// this deadline means the writer is wedged, not merely busy.
+    static let readinessTimeout: TimeInterval = 10
+
+    /// Poll `isReady` every `pollInterval` until it returns true,
+    /// throwing `VideoWriterStallError` once `timeout` has elapsed.
+    /// The clock and sleep hooks are injectable so the timeout policy
+    /// is unit-testable without AVFoundation or real sleeping.
+    static func waitUntilReady(
+        isReady: () -> Bool,
+        timeout: TimeInterval,
+        pollInterval: TimeInterval = 0.005,
+        now: () -> ContinuousClock.Instant = { ContinuousClock.now },
+        sleep: (TimeInterval) -> Void = { Thread.sleep(forTimeInterval: $0) }
+    ) throws {
+        let deadline = now().advanced(by: .seconds(timeout))
+        while !isReady() {
+            guard now() < deadline else {
+                throw VideoWriterStallError(timeout: timeout)
             }
+            sleep(pollInterval)
         }
+    }
+
+    public func append(image: CGImage, presentationTime: CMTime) throws {
+        try Self.waitUntilReady(
+            isReady: { input.isReadyForMoreMediaData },
+            timeout: Self.readinessTimeout
+        )
 
         guard let pixelBuffer = Self.makePixelBuffer(width: width, height: height, adaptor: adaptor) else {
             throw VideoProcessingError.failedToAllocatePixelBuffer

@@ -112,11 +112,7 @@ struct RecordVideo: SimUseExecutableCommand {
         let recordingFinished = CancellationFlag()
         let signalObserver = SignalObserver(signals: [SIGINT, SIGTERM]) {
             cancellationFlag.cancel()
-            DispatchQueue.global().asyncAfter(deadline: .now() + 1.5) {
-                if !recordingFinished.isCancelled() {
-                    _exit(0)
-                }
-            }
+            RecordingFinishWatchdog.arm(recordingFinished: recordingFinished)
         }
         defer { signalObserver.invalidate() }
 
@@ -218,6 +214,10 @@ struct RecordVideo: SimUseExecutableCommand {
                     let actualFPS = Double(frameCount) / max(elapsed, 0.0001)
                     FileHandle.standardError.write(Data(String(format: "Captured %lld frames (%.1f FPS actual)\n", frameCount, actualFPS).utf8))
                 }
+            } catch let error as VideoWriterStallError {
+                // A stalled writer does not recover; abort the recording
+                // instead of re-logging the stall once per timeout forever.
+                throw error
             } catch {
                 FileHandle.standardError.write(Data("Error capturing frame: \(error.localizedDescription)\n".utf8))
             }

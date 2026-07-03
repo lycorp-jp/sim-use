@@ -87,7 +87,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         public let appLabel: String
         /// CFBundleIdentifier of the foreground app. iOS V1 leaves this
         /// empty when the AX tree doesn't expose it; resolution via
-        /// simctl is a separate follow-up (see plan/IMPLEMENTATION_LOG).
+        /// simctl is a separate follow-up.
         public let appPackage: String
         /// Android-only crash-dialog signal carried through the top-level
         /// `describe-ui` envelope (which shares this iOS-shaped struct).
