@@ -93,13 +93,14 @@ extension IOSSimTapCommand: BatchConvertible {
 
 extension IOSSimSwipeCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
+        let coords = try resolvedCoordinates()
         let swipeDuration = duration ?? 1.0
         let swipeDelta = delta ?? 50.0
         let swipeEvent = FBSimulatorHIDEvent.swipe(
-            startX,
-            yStart: startY,
-            xEnd: endX,
-            yEnd: endY,
+            coords.startX,
+            yStart: coords.startY,
+            xEnd: coords.endX,
+            yEnd: coords.endY,
             delta: swipeDelta,
             duration: swipeDuration
         )

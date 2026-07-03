@@ -68,6 +68,7 @@ sim-use screenshot --device <UDID> --output after.png
 | Android back | `sim-use button back --device <UDID>` |
 | Wait for animation | `sleep 0.4` between commands, or `--pre-delay 0.5` |
 | Toggle/switch | `sim-use tap @N --duration 0.05 --device <UDID>` (UISwitch needs a brief hold) |
+| Swipe | `sim-use swipe --from 50,500 --to 350,500 --device <UDID>` |
 | Pinch zoom in | `sim-use gesture pinch-out --device <UDID>` (two-finger spread) |
 | Rotate | `sim-use gesture rotate-cw --angle 90 --device <UDID>` |
 

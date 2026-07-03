@@ -5,15 +5,14 @@ import SimUseCore
 
 /// `sim-use android swipe` — single-stroke gesture.
 ///
-/// Flag surface mirrors the top-level cross-platform `sim-use swipe`
-/// verb (`--start-x`/`--start-y`/`--end-x`/`--end-y`, `--duration`
-/// in seconds, optional `--pre-delay`/`--post-delay`) so an agent that
-/// already speaks the top-level form can drop `android` in front
-/// without re-learning the argument shape.
+/// Coordinate flags come from the shared `SwipeCoordinateOptions`
+/// group, so the surface is identical to the top-level cross-platform
+/// `sim-use swipe` verb and `sim-use ios swipe` — an agent that already
+/// speaks one form can drop `android` in front without re-learning the
+/// argument shape. `--duration` is in SECONDS (0.5.x shipped it in
+/// milliseconds; validate() caps it at 10 s so legacy ms values fail
+/// loudly instead of producing multi-minute swipes).
 ///
-/// The legacy `--from x,y` / `--to x,y` / millisecond `--duration`
-/// shape that 0.5.x shipped is rejected at validate time with a
-/// pointer to the new flags.
 public struct AndroidSwipeCommand: SimUseExecutableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "swipe",
@@ -22,17 +21,7 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
 
     @OptionGroup public var device: AndroidDeviceOptions
 
-    @Option(name: .customLong("start-x"), help: "The X coordinate of the starting point (pixels).")
-    public var startX: Double
-
-    @Option(name: .customLong("start-y"), help: "The Y coordinate of the starting point (pixels).")
-    public var startY: Double
-
-    @Option(name: .customLong("end-x"), help: "The X coordinate of the end point (pixels).")
-    public var endX: Double
-
-    @Option(name: .customLong("end-y"), help: "The Y coordinate of the end point (pixels).")
-    public var endY: Double
+    @OptionGroup public var coordinates: SwipeCoordinateOptions
 
     @Option(name: .customLong("duration"), help: "Duration of the swipe in seconds (default 0.3).")
     public var duration: Double = 0.3
@@ -48,22 +37,54 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
 
     public init() {}
 
+    /// Carries the resolved coordinates so `format(_:)` renders from
+    /// the execution result instead of re-resolving the raw flags.
     public struct ExecutionResult: Codable {
-        public init() {}
+        public let coordinates: SwipeCoordinates
+
+        public init(coordinates: SwipeCoordinates) {
+            self.coordinates = coordinates
+        }
     }
 
     public var simulatorUDIDForDaemon: String? { device.resolved }
 
     public func validate() throws {
+        let coords = try coordinates.resolve()
+        // Android dispatches integer pixels: a pair that differs only
+        // in the fractional part (e.g. 10.4,10.4 → 10.49,10.49) passes
+        // the resolver's Double comparison but degrades to a
+        // same-point gesture after rounding.
+        guard coords.roundedStartX != coords.roundedEndX || coords.roundedStartY != coords.roundedEndY else {
+            throw ValidationError("Start and end points must be different after rounding to integer pixels.")
+        }
         guard duration >= 0 else {
             throw ValidationError("--duration must be non-negative.")
         }
-        if let preDelay, preDelay < 0 {
-            throw ValidationError("--pre-delay must be non-negative.")
+        // Same ceiling as `android tap` / `android multi-touch`. Also
+        // the guard that keeps a millisecond value passed by habit
+        // (0.5.x shipped `--duration` in ms; `adb shell input swipe`
+        // still uses ms) from silently becoming a multi-minute swipe.
+        guard duration <= 10.0 else {
+            throw ValidationError("--duration must be between 0 and 10 seconds (seconds, not milliseconds — pass 0.3 for a 300 ms swipe).")
         }
-        if let postDelay, postDelay < 0 {
-            throw ValidationError("--post-delay must be non-negative.")
+        // 0...10 like every other surface. The upper bound also rejects
+        // inf/nan, which the sign-only check let through into the
+        // Double→UInt64 conversion in execute()'s Task.sleep — a trap.
+        if let preDelay {
+            guard preDelay >= 0 && preDelay <= 10.0 else {
+                throw ValidationError("--pre-delay must be between 0 and 10 seconds.")
+            }
         }
+        if let postDelay {
+            guard postDelay >= 0 && postDelay <= 10.0 else {
+                throw ValidationError("--post-delay must be between 0 and 10 seconds.")
+            }
+        }
+    }
+
+    public func resolvedCoordinates() throws -> SwipeCoordinates {
+        try coordinates.resolve()
     }
 
     public mutating func resolveDeferredArguments() throws {
@@ -71,35 +92,29 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
     }
 
     public func execute() async throws -> ExecutionResult {
+        let coords = try coordinates.resolve()
         if let preDelay, preDelay > 0 {
-            Thread.sleep(forTimeInterval: preDelay)
+            try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
         }
-        let sx = Int(startX.rounded())
-        let sy = Int(startY.rounded())
-        let ex = Int(endX.rounded())
-        let ey = Int(endY.rounded())
         let durationMs = max(1, Int((duration * 1000).rounded()))
         try Self.performSwipe(
             udid: device.resolved,
-            startX: sx, startY: sy,
-            endX: ex, endY: ey,
+            startX: coords.roundedStartX, startY: coords.roundedStartY,
+            endX: coords.roundedEndX, endY: coords.roundedEndY,
             durationMs: durationMs
         )
         if let postDelay, postDelay > 0 {
-            Thread.sleep(forTimeInterval: postDelay)
+            try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
         }
-        return ExecutionResult()
+        return ExecutionResult(coordinates: coords)
     }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
-        let sx = Int(startX.rounded())
-        let sy = Int(startY.rounded())
-        let ex = Int(endX.rounded())
-        let ey = Int(endY.rounded())
+        let summary = result.coordinates.displaySummary
         let durationMs = max(1, Int((duration * 1000).rounded()))
         return CommandOutput(
-            stdout: "✓ Swipe (\(sx),\(sy)) → (\(ex),\(ey)) completed successfully\n",
-            stderr: "swipe (\(sx),\(sy)) → (\(ex),\(ey)) duration=\(durationMs)ms\n"
+            stdout: "✓ Swipe \(summary) completed successfully\n",
+            stderr: "swipe \(summary) duration=\(durationMs)ms\n"
         )
     }
 
@@ -116,6 +131,16 @@ public struct AndroidSwipeCommand: SimUseExecutableCommand {
         durationMs: Int,
         controller: AndroidDeviceController = AndroidDeviceController()
     ) throws {
+        // Choke point for both `android swipe` and the top-level
+        // forwarder: the top-level command validates coordinates as
+        // Doubles before it knows the target is Android, so the
+        // rounded-degenerate case is only catchable here. CLIError,
+        // not ValidationError — on the execute() path the latter
+        // renders as the opaque "(ArgumentParser.ValidationError
+        // error 1.)" wrapper (see IOSSimTypeCommand).
+        guard startX != endX || startY != endY else {
+            throw CLIError(errorDescription: "Start and end points must be different after rounding to integer pixels.")
+        }
         let client = controller.bridge(serial: udid)
         try client.swipe(startX: startX, startY: startY, endX: endX, endY: endY, durationMs: durationMs)
     }
