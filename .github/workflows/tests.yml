@@ -4,10 +4,11 @@
 #
 # Package.swift declares binary targets under build_products/XCFrameworks,
 # so the idb-derived FB* XCFrameworks must exist before any swift build /
-# swift test. Building them (scripts/build.sh dev) clones idb and runs four
-# xcodebuild passes (~20 min), so the output is cached keyed on everything
-# that shapes it: the build script (pins IDB_GIT_REF), the local idb
-# patches, and the selected Xcode version.
+# swift test. Building them (scripts/build.sh dev: idb clone + four
+# xcodebuild passes) measures ~2 min on hosted runners; caching the output
+# still halves warm-run wall time and avoids the network clone. Keyed on
+# everything that shapes it: the build script (pins IDB_GIT_REF), the
+# local idb patches, and the selected Xcode version.
 
 name: Tests
 
