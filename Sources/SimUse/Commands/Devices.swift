@@ -33,7 +33,7 @@ struct Devices: SimUseExecutableCommand {
             "ok": true,
             "data": {
               "devices": [
-                {"deviceId": "...", "udid": "...",  // udid kept as deprecated alias of deviceId
+                {"deviceId": "...",
                  "name": "...", "platform": "ios|android",
                  "state": "Booted|Shutdown|device|offline|...", "runtime": "iOS 18.6|Android|..."},
                 ...

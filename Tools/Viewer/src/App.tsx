@@ -5,7 +5,7 @@ import type { Device, Snapshot } from "./types";
 
 export default function App() {
   const [devices, setDevices] = useState<Device[]>([]);
-  const [udid, setUdid] = useState<string>("");
+  const [deviceId, setDeviceId] = useState<string>("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [selectedAt, setSelectedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,9 +24,9 @@ export default function App() {
       const body = await res.json();
       if (!body.ok) throw new Error(body.error ?? "devices fetch failed");
       setDevices(body.devices as Device[]);
-      setUdid((current) => {
-        if (current && body.devices.some((d: Device) => d.udid === current)) return current;
-        return body.devices[0]?.udid ?? "";
+      setDeviceId((current) => {
+        if (current && body.devices.some((d: Device) => d.deviceId === current)) return current;
+        return body.devices[0]?.deviceId ?? "";
       });
     } catch (err) {
       setError(String((err as Error).message));
@@ -34,13 +34,13 @@ export default function App() {
   }, []);
 
   const fetchSnapshot = useCallback(async () => {
-    if (!udid) return;
+    if (!deviceId) return;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     setError(null);
     try {
-      const res = await fetch(`/api/snapshot?udid=${encodeURIComponent(udid)}`, {
+      const res = await fetch(`/api/snapshot?deviceId=${encodeURIComponent(deviceId)}`, {
         signal: controller.signal,
       });
       const body = await res.json();
@@ -50,7 +50,7 @@ export default function App() {
       if ((err as Error).name === "AbortError") return;
       setError(String((err as Error).message));
     }
-  }, [udid]);
+  }, [deviceId]);
 
   useEffect(() => {
     refreshDevices();
@@ -59,7 +59,7 @@ export default function App() {
   // Changing simulators invalidates any prior tap feedback.
   useEffect(() => {
     setTapStatus(null);
-  }, [udid]);
+  }, [deviceId]);
 
   // Sequential sampler: each tick awaits the previous fetch before
   // scheduling the next, so a single describe-ui that takes longer than
@@ -88,29 +88,29 @@ export default function App() {
       setPlaying(false);
       return;
     }
-    if (!udid) return;
+    if (!deviceId) return;
     setPlaying(true);
     // Fire the first shot immediately so the canvas isn't blank until
     // the first interval tick lands (which on 5s feels like forever).
     fetchSnapshot();
-  }, [playing, udid, fetchSnapshot]);
+  }, [playing, deviceId, fetchSnapshot]);
 
   // Switching simulators or clearing the selected UDID must stop the
   // sampler — the in-flight fetch targets the old UDID and the new one
   // hasn't been primed yet.
   useEffect(() => {
-    if (!udid) setPlaying(false);
-  }, [udid]);
+    if (!deviceId) setPlaying(false);
+  }, [deviceId]);
 
   const tapSelected = useCallback(async () => {
-    if (!udid || selectedAt == null) return;
+    if (!deviceId || selectedAt == null) return;
     setTapping(true);
     setTapStatus(null);
     try {
       const res = await fetch("/api/tap", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ udid, at: selectedAt }),
+        body: JSON.stringify({ deviceId, at: selectedAt }),
       });
       const body = await res.json();
       if (!body.ok) throw new Error(body.error ?? "tap failed");
@@ -127,7 +127,7 @@ export default function App() {
     } finally {
       setTapping(false);
     }
-  }, [udid, selectedAt, fetchSnapshot]);
+  }, [deviceId, selectedAt, fetchSnapshot]);
 
   // matchIds is null when no filter is active — downstream components
   // treat null as "everything passes" which keeps the default-happy path
@@ -220,9 +220,9 @@ export default function App() {
           <label>
             Device
             <select
-              value={udid}
+              value={deviceId}
               onChange={(e) => {
-                setUdid(e.target.value);
+                setDeviceId(e.target.value);
                 setSnapshot(null);
                 setSelectedAt(null);
                 setPlaying(false);
@@ -240,10 +240,10 @@ export default function App() {
                 // code's `?:` did that).
                 const isIos = d.platform === "ios";
                 const isAndroid = d.platform === "android";
-                const shortId = isIos ? d.udid.slice(0, 8) : d.udid;
+                const shortId = isIos ? d.deviceId.slice(0, 8) : d.deviceId;
                 const tag = isIos ? "iOS" : isAndroid ? "Android" : d.platform;
                 return (
-                  <option key={d.udid} value={d.udid}>
+                  <option key={d.deviceId} value={d.deviceId}>
                     [{tag}] {d.name} — {shortId}
                   </option>
                 );
@@ -259,7 +259,7 @@ export default function App() {
           <button
             className={`primary play-button ${playing ? "stop" : ""}`}
             onClick={togglePlay}
-            disabled={!udid}
+            disabled={!deviceId}
             title={playing ? "Stop sampling" : `Start sampling every ${intervalMs / 1000}s`}
           >
             {playing ? (
@@ -346,7 +346,7 @@ export default function App() {
             />
           ) : (
             <div className="placeholder">
-              {udid
+              {deviceId
                 ? "No snapshot yet. Click ▶ Play to start sampling."
                 : "Boot a simulator or attach an Android device, then select it above."}
             </div>

@@ -113,7 +113,8 @@ final class AndroidJSONEnvelopeTests: XCTestCase {
         // shape on Android UDIDs.
         XCTAssertTrue(json.hasPrefix(#"{"data":{"devices":["#), json)
         XCTAssertTrue(json.hasSuffix(#"]},"ok":true}"#), json)
-        XCTAssertTrue(json.contains(#""udid":"emulator-5554""#), json)
+        XCTAssertTrue(json.contains(#""deviceId":"emulator-5554""#), json)
+        XCTAssertFalse(json.contains(#""udid""#), "legacy `udid` key must not be emitted: \(json)")
         XCTAssertTrue(json.contains(#""platform":"android""#), json)
     }
 }

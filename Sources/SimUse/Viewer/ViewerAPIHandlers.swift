@@ -29,24 +29,24 @@ struct ViewerAPIHandlers {
 
     func devices(_ request: HTTPRequest) async -> HTTPResponse {
         do {
-            let (stdout, _) = try await run(arguments: ["devices", "--json"])
-            guard let envelope = try JSONSerialization.jsonObject(with: stdout) as? [String: Any] else {
-                return .json(502, ["ok": false, "error": "sim-use devices: bad JSON"])
+            let result = try await run(arguments: ["devices", "--json"])
+            let envelope = parseEnvelope(result.stdout)
+            if let failure = failureResponse(envelope: envelope, result: result) {
+                return failure
             }
-            if let ok = envelope["ok"] as? Bool, ok == false {
-                return forwardFailure(envelope)
+            guard let envelope else {
+                return .json(502, ["ok": false, "error": "sim-use devices: bad JSON"])
             }
             let data = (envelope["data"] as? [String: Any]) ?? [:]
             let rawDevices = (data["devices"] as? [[String: Any]]) ?? []
             let simplified: [[String: Any]] = rawDevices.map { d in
-                // Prefer the new `deviceId` key; fall back to `udid`
-                // for compatibility with payloads emitted before the
-                // dual-key transition. Forward both keys downstream so
-                // legacy SPA clients keep working.
+                // Prefer the canonical `deviceId` key; fall back to
+                // `udid` for compatibility with payloads emitted before
+                // the dual-key transition. Only `deviceId` is forwarded
+                // downstream — the SPA reads that key exclusively.
                 let id = (d["deviceId"] as? String) ?? (d["udid"] as? String) ?? ""
                 var slim: [String: Any] = [:]
                 slim["deviceId"] = id
-                slim["udid"] = id
                 slim["name"] = d["name"] ?? ""
                 slim["platform"] = d["platform"] ?? ""
                 slim["runtime"] = d["runtime"] ?? ""
@@ -58,7 +58,7 @@ struct ViewerAPIHandlers {
         }
     }
 
-    // MARK: - GET /api/snapshot?udid=…
+    // MARK: - GET /api/snapshot?deviceId=…
 
     func snapshot(_ request: HTTPRequest) async -> HTTPResponse {
         // Accept either `deviceId` (new) or `udid` (deprecated alias) on
@@ -70,12 +70,13 @@ struct ViewerAPIHandlers {
             return .json(400, ["ok": false, "error": "deviceId (or udid) query param is required"])
         }
         do {
-            let (stdout, _) = try await run(arguments: ["describe-ui", "--device", deviceId, "--json"], timeout: 30)
-            guard let envelope = try JSONSerialization.jsonObject(with: stdout) as? [String: Any] else {
-                return .json(502, ["ok": false, "error": "sim-use describe-ui: bad JSON"])
+            let result = try await run(arguments: ["describe-ui", "--device", deviceId, "--json"], timeout: 30)
+            let envelope = parseEnvelope(result.stdout)
+            if let failure = failureResponse(envelope: envelope, result: result) {
+                return failure
             }
-            if let ok = envelope["ok"] as? Bool, ok == false {
-                return forwardFailure(envelope)
+            guard let envelope else {
+                return .json(502, ["ok": false, "error": "sim-use describe-ui: bad JSON"])
             }
             let data = (envelope["data"] as? [String: Any]) ?? [:]
             let outline = data["outline"] as? String
@@ -84,7 +85,6 @@ struct ViewerAPIHandlers {
                 "ok": true,
                 "capturedAt": iso8601Now(),
                 "deviceId": deviceId,
-                "udid": deviceId,
                 "outline": outline ?? "",
                 "entries": data["entries"] ?? [],
                 "lists": data["lists"] ?? [],
@@ -121,11 +121,9 @@ struct ViewerAPIHandlers {
             return .json(400, ["ok": false, "error": "at must be a positive integer alias"])
         }
         do {
-            let (stdout, _) = try await run(arguments: ["tap", "@\(at)", "--device", deviceId, "--json"])
-            if let envelope = try JSONSerialization.jsonObject(with: stdout) as? [String: Any],
-               let ok = envelope["ok"] as? Bool, ok == false
-            {
-                return forwardFailure(envelope)
+            let result = try await run(arguments: ["tap", "@\(at)", "--device", deviceId, "--json"])
+            if let failure = failureResponse(envelope: parseEnvelope(result.stdout), result: result) {
+                return failure
             }
             return .json(200, ["ok": true, "at": at])
         } catch {
@@ -135,7 +133,10 @@ struct ViewerAPIHandlers {
 
     // MARK: - Subprocess plumbing
 
-    private func run(arguments: [String], timeout: TimeInterval = 15) async throws -> (Data, Data) {
+    private func run(
+        arguments: [String],
+        timeout: TimeInterval = 15
+    ) async throws -> (stdout: Data, stderr: Data, status: Int32) {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -165,7 +166,7 @@ struct ViewerAPIHandlers {
         try process.run()
 
         return try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(Data, Data), Error>) in
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<(stdout: Data, stderr: Data, status: Int32), Error>) in
                 let timeoutTask = DispatchWorkItem {
                     if process.isRunning {
                         process.terminate()
@@ -179,16 +180,13 @@ struct ViewerAPIHandlers {
                     // is not our verb's output anyway.
                     let out = collectedOut.finish()
                     let err = collectedErr.finish()
-                    // The CLI uses non-zero exits for domain errors,
-                    // but the JSON envelope carries those as
-                    // `{ok:false, error, hint}` which the caller
-                    // already forwards. Treat a normal exit as
-                    // success regardless of code; only surface a
-                    // subprocess failure when the kernel reports the
-                    // child was killed by a signal (timeout fired,
-                    // peer disconnect, etc.).
+                    // A normal exit — even non-zero — is the caller's
+                    // to interpret via `failureResponse`, so hand back
+                    // the exit status alongside the output. Only throw
+                    // when the kernel reports the child was killed by
+                    // a signal (timeout fired, peer disconnect, etc.).
                     if proc.terminationReason == .exit {
-                        continuation.resume(returning: (out, err))
+                        continuation.resume(returning: (out, err, proc.terminationStatus))
                     } else {
                         let stderrText = String(data: err, encoding: .utf8) ?? ""
                         let stdoutText = String(data: out, encoding: .utf8) ?? ""
@@ -205,6 +203,45 @@ struct ViewerAPIHandlers {
                 process.terminate()
             }
         }
+    }
+
+    private func parseEnvelope(_ stdout: Data) -> [String: Any]? {
+        (try? JSONSerialization.jsonObject(with: stdout)) as? [String: Any]
+    }
+
+    /// Shared failure policy for a completed subprocess. Returns the
+    /// response to send when the invocation must be treated as failed,
+    /// or nil when the caller may proceed with its success path.
+    ///
+    /// - An envelope carrying `ok == false` is forwarded verbatim,
+    ///   regardless of exit code — CLI domain errors legitimately exit
+    ///   non-zero WITH an envelope.
+    /// - Without a usable `ok` field (unparseable stdout, non-object
+    ///   JSON, or a missing/mistyped `ok`), a non-zero exit means the
+    ///   CLI died before producing its envelope: surface its stderr
+    ///   (falling back to stdout, then to the bare exit status)
+    ///   instead of pretending the verb succeeded.
+    private func failureResponse(
+        envelope: [String: Any]?,
+        result: (stdout: Data, stderr: Data, status: Int32)
+    ) -> HTTPResponse? {
+        if let envelope, let ok = envelope["ok"] as? Bool {
+            return ok ? nil : forwardFailure(envelope)
+        }
+        guard result.status != 0 else { return nil }
+        let stderrText = (String(data: result.stderr, encoding: .utf8) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let stdoutText = (String(data: result.stdout, encoding: .utf8) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let message: String
+        if !stderrText.isEmpty {
+            message = stderrText
+        } else if !stdoutText.isEmpty {
+            message = stdoutText
+        } else {
+            message = "sim-use exited with status \(result.status)"
+        }
+        return .json(502, ["ok": false, "error": message])
     }
 
     private func forwardFailure(_ envelope: [String: Any]) -> HTTPResponse {

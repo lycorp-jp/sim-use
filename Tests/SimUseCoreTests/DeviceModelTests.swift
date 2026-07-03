@@ -47,12 +47,13 @@ final class DeviceModelTests: XCTestCase {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let json = String(data: try encoder.encode(d), encoding: .utf8)
         // Field order is sorted (sortedKeys); platform is the rawValue
-        // string, not an integer. `deviceId` is the new cross-platform
-        // synonym for `udid`; both keys are emitted with identical
-        // values during the deprecation window so existing Viewer / jq
-        // consumers keep working. Drop `udid` from this assertion in
-        // Phase 2 once it is removed from the wire.
-        XCTAssertEqual(json, #"{"deviceId":"u","name":"n","platform":"ios","runtime":"iOS 18.6","state":"Booted","udid":"u"}"#)
+        // string, not an integer. `deviceId` is the canonical wire key;
+        // the legacy `udid` key was dual-emitted during the deprecation
+        // window and is no longer written as of Phase 2. Decoding still
+        // accepts `udid`-only payloads (see testJSONAcceptsUDIDOnly).
+        XCTAssertEqual(json, #"{"deviceId":"u","name":"n","platform":"ios","runtime":"iOS 18.6","state":"Booted"}"#)
+        XCTAssertFalse(json?.contains(#""udid""#) ?? true,
+                       "legacy `udid` key must not be emitted, got: \(json ?? "nil")")
     }
 
     func testJSONAcceptsDeviceIdOnly() throws {
