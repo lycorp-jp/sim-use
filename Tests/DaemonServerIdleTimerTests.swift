@@ -84,12 +84,15 @@ struct DaemonServerIdleTimerTests {
         let paths = DaemonPaths(udid: udid, baseDirectory: tmp)
         try paths.ensureBaseDirectory()
 
-        // Command runs 0.5 s; idle timeout is 0.2 s. A buggy timer fires
-        // (twice) during the command and tears the socket down at 0.2 s.
-        SlowProbeState.configure(socketPath: paths.socketURL.path, sleepNanos: 500_000_000)
+        // Command runs 2.5 s; idle timeout is 1 s. A buggy timer fires
+        // during the command and tears the socket down at 1 s. The
+        // idle budget also covers server start → first accept (the
+        // reset point); keep it generous so main-actor congestion from
+        // parallel suites can't consume it before the request lands.
+        SlowProbeState.configure(socketPath: paths.socketURL.path, sleepNanos: 2_500_000_000)
 
         try await withExclusiveCommandParser({ _ in SlowProbeCommand() }) {
-            let server = DaemonServer(udid: udid, idleTimeout: 0.2, paths: paths)
+            let server = DaemonServer(udid: udid, idleTimeout: 1.0, paths: paths)
             let serverTask = Task { try await server.run() }
 
             // Wait for bind + listen + pidfile.
