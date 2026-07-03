@@ -9,7 +9,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "tap-test")
 
         try await TestHelpers.runSimUseCommand(
-            "batch --step \"tap -x 180 -y 360\" --step \"tap -x 220 -y 420\"",
+            "ios batch --step \"tap -x 180 -y 360\" --step \"tap -x 220 -y 420\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -36,7 +36,7 @@ struct BatchTests {
         defer { try? FileManager.default.removeItem(at: tempFile) }
 
         try await TestHelpers.runSimUseCommand(
-            "batch --file \"\(tempFile.path)\"",
+            "ios batch --file \"\(tempFile.path)\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -51,7 +51,7 @@ struct BatchTests {
         let udid = try TestHelpers.requireSimulatorUDID()
         let simUsePath = try TestHelpers.getSimUsePath()
 
-        let command = "printf 'tap -x 160 -y 350\\ntap -x 200 -y 410\\n' | \"\(simUsePath)\" batch --stdin --udid \"\(udid)\""
+        let command = "printf 'tap -x 160 -y 350\\ntap -x 200 -y 410\\n' | \"\(simUsePath)\" ios batch --stdin --udid \"\(udid)\""
         let result = try await CommandRunner.run(command)
         #expect(result.exitCode == 0)
 
@@ -65,7 +65,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-test")
 
         let result = try await TestHelpers.runSimUseCommandAllowFailure(
-            "batch --continue-on-error --wait-timeout 2 --poll-interval 0.1 --ax-cache perStep --step \"unknown-command\" --step \"tap --label 'Trigger State Change'\" --step \"tap --label 'State Target'\"",
+            "ios batch --continue-on-error --wait-timeout 2 --poll-interval 0.1 --ax-cache perStep --step \"unknown-command\" --step \"tap --label 'Trigger State Change'\" --step \"tap --label 'State Target'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -82,7 +82,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-test")
 
         let result = try await TestHelpers.runSimUseCommandAllowFailure(
-            "batch --ax-cache perBatch --step \"tap --label 'Trigger State Change'\" --step \"tap --label 'State Target'\"",
+            "ios batch --ax-cache perBatch --step \"tap --label 'Trigger State Change'\" --step \"tap --label 'State Target'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -95,7 +95,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-test")
 
         try await TestHelpers.runSimUseCommand(
-            "batch --ax-cache perStep --step \"tap --label 'Trigger State Change'\" --step \"tap --label 'State Target'\"",
+            "ios batch --ax-cache perStep --step \"tap --label 'Trigger State Change'\" --step \"tap --label 'State Target'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -108,7 +108,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-test")
 
         try await TestHelpers.runSimUseCommand(
-            "batch --wait-timeout 5 --poll-interval 0.1 --step \"tap --label 'Trigger Delayed Element'\" --step \"tap --label 'Delayed Target'\"",
+            "ios batch --wait-timeout 5 --poll-interval 0.1 --step \"tap --label 'Trigger Delayed Element'\" --step \"tap --label 'Delayed Target'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -121,7 +121,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-test")
 
         let result = try await TestHelpers.runSimUseCommandAllowFailure(
-            "batch --wait-timeout 0 --step \"tap --label 'Trigger Delayed Element'\" --step \"tap --label 'Delayed Target'\"",
+            "ios batch --wait-timeout 0 --step \"tap --label 'Trigger Delayed Element'\" --step \"tap --label 'Delayed Target'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -134,7 +134,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-login-flow")
 
         try await TestHelpers.runSimUseCommand(
-            "batch --ax-cache perStep --wait-timeout 6 --poll-interval 0.1 --step \"type 'cam@example.com'\" --step \"tap --label Continue\" --step \"type 'supersecret'\" --step \"tap --label 'Sign In'\" --step \"tap --label 'Open Settings'\" --step \"tap --label 'Toggle Preference'\"",
+            "ios batch --ax-cache perStep --wait-timeout 6 --poll-interval 0.1 --step \"type 'cam@example.com'\" --step \"tap --label Continue\" --step \"type 'supersecret'\" --step \"tap --label 'Sign In'\" --step \"tap --label 'Open Settings'\" --step \"tap --label 'Toggle Preference'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -153,7 +153,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-login-flow")
 
         let result = try await TestHelpers.runSimUseCommandAllowFailure(
-            "batch --ax-cache perStep --wait-timeout 0 --step \"type 'cam@example.com'\" --step \"tap --label Continue\" --step \"type 'supersecret'\" --step \"tap --label 'Sign In'\" --step \"tap --label 'Open Settings'\"",
+            "ios batch --ax-cache perStep --wait-timeout 0 --step \"type 'cam@example.com'\" --step \"tap --label Continue\" --step \"type 'supersecret'\" --step \"tap --label 'Sign In'\" --step \"tap --label 'Open Settings'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -166,7 +166,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-test")
 
         try await TestHelpers.runSimUseCommand(
-            "batch --ax-cache perStep --step \"tap --label-contains 'Trigger State'\" --step \"tap --label 'State Target'\"",
+            "ios batch --ax-cache perStep --step \"tap --label-contains 'Trigger State'\" --step \"tap --label 'State Target'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -183,7 +183,7 @@ struct BatchTests {
         // through the batch step parser without altering existing
         // semantics.
         try await TestHelpers.runSimUseCommand(
-            "batch --ax-cache perStep --step \"tap --label 'Trigger State Change' --frame maxY=0.8r\" --step \"tap --label 'State Target'\"",
+            "ios batch --ax-cache perStep --step \"tap --label 'Trigger State Change' --frame maxY=0.8r\" --step \"tap --label 'State Target'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -196,7 +196,7 @@ struct BatchTests {
         try await TestHelpers.launchPlaygroundApp(to: "batch-test")
 
         try await TestHelpers.runSimUseCommand(
-            "batch --ax-cache perStep --step \"tap --label-regex '^Trigger State Change$'\" --step \"tap --label 'State Target'\"",
+            "ios batch --ax-cache perStep --step \"tap --label-regex '^Trigger State Change$'\" --step \"tap --label 'State Target'\"",
             simulatorUDID: defaultSimulatorUDID
         )
 
@@ -212,7 +212,7 @@ struct BatchTests {
 
         await #expect(throws: (any Error).self) {
             try await TestHelpers.runSimUseCommand(
-                "batch --step \"tap -x 100 -y 200\" --file \"\(tempFile.path)\"",
+                "ios batch --step \"tap -x 100 -y 200\" --file \"\(tempFile.path)\"",
                 simulatorUDID: defaultSimulatorUDID
             )
         }

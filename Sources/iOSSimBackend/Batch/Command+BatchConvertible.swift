@@ -62,6 +62,9 @@ extension IOSSimTapCommand: BatchConvertible {
                 pollInterval: context.pollInterval,
                 elementType: elementType,
                 frameFilter: frameFilter,
+                rootsProvider: { forceRefresh in
+                    try await context.accessibilityRoots(logger: logger, forceRefresh: forceRefresh)
+                },
                 logger: logger
             )
         }

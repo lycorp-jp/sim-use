@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 public struct AccessibilityPoller {
+    /// Supplies AX roots for resolution. `forceRefresh: false` may serve
+    /// a cached snapshot; `true` (poll ticks) must fetch a fresh one so
+    /// delayed elements become visible.
+    public typealias RootsProvider = @MainActor (_ forceRefresh: Bool) async throws -> [AccessibilityElement]
+
     public static func resolveWithPolling(
         query: AccessibilityQuery,
         simulatorUDID: String,
@@ -10,9 +15,16 @@ public struct AccessibilityPoller {
         pollInterval: TimeInterval,
         elementType: String? = nil,
         frameFilter: AccessibilityTargetResolver.FrameFilter? = nil,
+        rootsProvider: RootsProvider? = nil,
         logger: SimUseLogger
     ) async throws -> (x: Double, y: Double) {
-        let roots = try await AccessibilityFetcher.fetchAccessibilityElements(for: simulatorUDID, logger: logger)
+        // Non-batch callers pass no provider and keep the historical
+        // fetch-every-time behaviour; batch passes the BatchContext cache.
+        let fetchRoots: RootsProvider = rootsProvider ?? { _ in
+            try await AccessibilityFetcher.fetchAccessibilityElements(for: simulatorUDID, logger: logger)
+        }
+
+        let roots = try await fetchRoots(false)
         do {
             return try AccessibilityTargetResolver.resolveCenterPoint(roots: roots, query: query, elementType: elementType, frameFilter: frameFilter)
         } catch let error as ElementResolutionError where error.isNotFound && waitTimeout > 0 {
@@ -24,7 +36,7 @@ public struct AccessibilityPoller {
                 logger.info().log("Element not found, retrying in \(pollInterval)s…")
                 try await Task.sleep(for: .seconds(pollInterval))
 
-                let freshRoots = try await AccessibilityFetcher.fetchAccessibilityElements(for: simulatorUDID, logger: logger)
+                let freshRoots = try await fetchRoots(true)
                 do {
                     return try AccessibilityTargetResolver.resolveCenterPoint(roots: freshRoots, query: query, elementType: elementType, frameFilter: frameFilter)
                 } catch let retryError as ElementResolutionError where retryError.isNotFound {
