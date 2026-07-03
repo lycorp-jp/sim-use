@@ -1,6 +1,7 @@
 # sim-use
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Tests](https://github.com/lycorp-jp/sim-use/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/lycorp-jp/sim-use/actions/workflows/tests.yml)
 
 Give AI agents the ability to observe and act on iOS Simulator and Android emulator / device screens.
 

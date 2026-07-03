@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- GitHub Actions CI (`.github/workflows/tests.yml`): unit tests run on macOS hosted runners for every push and pull request targeting `main`, with the idb-derived FB XCFrameworks cached between runs, plus a bridge protocol parity check.
+
 ### Changed
 
 - JSON output no longer emits the legacy `udid` key (dual-emitted since the `deviceId` transition); `deviceId` is the canonical key in `devices --json`, `daemon stop/status --json`, and Viewer API responses. Inputs (daemon wire decode, Viewer API requests) still accept `udid` as a deprecated alias, to be removed in a future release.
