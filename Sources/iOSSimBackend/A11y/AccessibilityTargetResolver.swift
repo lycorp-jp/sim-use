@@ -64,6 +64,21 @@ public enum ElementResolutionError: LocalizedError, HintProviding {
         return false
     }
 
+    /// Whether a `--wait-timeout` poll loop should keep retrying after
+    /// this error. `notFound` is the classic "element not rendered yet"
+    /// case. `multipleMatches` is retryable too: the whitespace-collapsed
+    /// fallback can transiently see two collapse-equal elements while a
+    /// screen transition overlaps old and new content — waiting lets the
+    /// ambiguity clear. A stable ambiguity still surfaces as
+    /// `multipleMatches` (with its disambiguation hint) once the wait
+    /// window expires.
+    public var isRetryableDuringWait: Bool {
+        switch self {
+        case .notFound, .multipleMatches: return true
+        case .invalidFrame, .invalidPattern: return false
+        }
+    }
+
     /// Structured supplementary info that surfaces in the `--json` error
     /// envelope. The human `errorDescription` already explains the failure;
     /// the hint exists so agents can self-correct without re-parsing prose.
@@ -320,8 +335,13 @@ public struct AccessibilityTargetResolver {
                 candidateKind: "labels"
             )
         case .label(let rawValue):
-            let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let matches = allElements.filter { $0.normalizedLabel == value }
+            // Exact-first with a whitespace-collapsed fallback (shared
+            // with the Android resolver): a multi-line AXLabel renders
+            // space-joined in the compact outline, so the exact query the
+            // agent copies back never equals the newline-bearing label.
+            // The fallback only runs when the exact pass found nothing,
+            // so existing exact matches are never altered.
+            let matches = SelectorTextMatcher.filterEquals(allElements, query: rawValue) { $0.AXLabel }
             return try selectBestLabelMatch(
                 matches,
                 kind: "--label",
@@ -329,8 +349,7 @@ public struct AccessibilityTargetResolver {
                 fallbackPool: allElements
             )
         case .value(let rawValue):
-            let value = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-            let matches = allElements.filter { $0.normalizedValue == value }
+            let matches = SelectorTextMatcher.filterEquals(allElements, query: rawValue) { $0.AXValue }
             return try selectBestLabelMatch(
                 matches,
                 kind: "--value",
@@ -338,8 +357,7 @@ public struct AccessibilityTargetResolver {
                 fallbackPool: allElements
             )
         case .labelContains(let rawValue):
-            let needle = rawValue
-            let matches = allElements.filter { ($0.normalizedLabel ?? "").contains(needle) }
+            let matches = SelectorTextMatcher.filterContains(allElements, needle: rawValue) { $0.AXLabel }
             return try selectBestLabelMatch(
                 matches,
                 kind: "--label-contains",

@@ -486,30 +486,13 @@ public enum OutlineFormatter {
         return String(clusters.prefix(keep)) + ellipsis
     }
 
+    /// Delegates to the canonical collapse in SimUseCore — the same
+    /// normal form the selector resolvers match on, so the outline
+    /// display and the copy-back round-trip can never drift apart.
+    /// This also folds whitespace the old scalar-map missed (NBSP,
+    /// U+2028/U+2029 line separators), so element lines can no longer
+    /// wrap on exotic line breaks.
     private static func collapseWhitespace(_ s: String) -> String {
-        // Iterate by unicode scalar rather than by `Character`, because
-        // Swift joins `\r\n` into a single grapheme cluster — the
-        // grapheme would not match either `\n` or `\r` on its own and
-        // would slip through unmapped.
-        var mapped = String.UnicodeScalarView()
-        mapped.reserveCapacity(s.unicodeScalars.count)
-        for scalar in s.unicodeScalars {
-            if scalar == "\n" || scalar == "\r" || scalar == "\t" {
-                mapped.append(" ")
-            } else {
-                mapped.append(scalar)
-            }
-        }
-
-        var out = ""
-        out.reserveCapacity(mapped.count)
-        var previousWasSpace = false
-        for scalar in mapped {
-            let isSpace = scalar == " "
-            if isSpace && previousWasSpace { continue }
-            out.unicodeScalars.append(scalar)
-            previousWasSpace = isSpace
-        }
-        return out
+        SelectorTextMatcher.collapseWhitespace(s)
     }
 }
