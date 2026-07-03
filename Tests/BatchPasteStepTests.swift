@@ -133,4 +133,24 @@ struct BatchPasteStepParsingTests {
         #expect(action.label.contains("\(utf8Count)"),
                 "expected pbcopy label to mention the full \(utf8Count)-byte payload; got '\(action.label)'")
     }
+
+    @Test("`swipe --from x,y --to x,y` is accepted as a batch step")
+    func swipePairCoordinates() async throws {
+        let primitives = try await parse(["swipe", "--from", "10,20", "--to", "30,40"])
+        #expect(primitives.count == 1)
+        guard case .hidMergeable = primitives[0] else {
+            Issue.record("swipe should produce one mergeable HID primitive; got \(primitives)")
+            return
+        }
+    }
+
+    @Test("positional `swipe x,y x,y` is accepted as a batch step")
+    func swipePositionalCoordinates() async throws {
+        let primitives = try await parse(["swipe", "10,20", "30,40"])
+        #expect(primitives.count == 1)
+        guard case .hidMergeable = primitives[0] else {
+            Issue.record("swipe should produce one mergeable HID primitive; got \(primitives)")
+            return
+        }
+    }
 }

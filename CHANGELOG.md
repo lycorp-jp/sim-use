@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - GitHub Actions CI (`.github/workflows/tests.yml`): Swift unit tests on macOS hosted runners (idb-derived FB XCFrameworks cached between runs), bridge Kotlin JVM unit tests on ubuntu, and a bridge protocol parity check — all for every push and pull request targeting `main`.
 - `make build` / `make test` condense swift output via [xcsift](https://github.com/ldomaradzki/xcsift) (TOON summary; test coverage report) when it is installed — strictly optional, plain swift output otherwise; `SIM_USE_XCSIFT=0` forces plain output.
+- `swipe` now accepts `--from x,y --to x,y` and positional `x,y x,y` coordinates on top-level, iOS, Android, and iOS batch surfaces while keeping the existing four coordinate flags.
 
 ### Changed
 
+- Swipe coordinate flags now live in a shared `SwipeCoordinateOptions` group, so the top-level, iOS, and Android surfaces validate identically; the swipe success line and `--json` `data` payload derive the coordinates from the execution result (`data` now includes a `coordinates` object).
+- `swipe --duration` is capped at 10 seconds on every surface (parity with `tap` / `multi-touch` / gesture presets). The error message spells out that durations are in seconds, so a millisecond value passed by habit (0.5.x `android swipe`, `adb shell input swipe`) fails loudly instead of producing a multi-minute swipe.
 - JSON output no longer emits the legacy `udid` key (dual-emitted since the `deviceId` transition); `deviceId` is the canonical key in `devices --json`, `daemon stop/status --json`, and Viewer API responses. Inputs (daemon wire decode, Viewer API requests) still accept `udid` as a deprecated alias, to be removed in a future release.
 - Daemon client now retries a command once against the same daemon when the simulator reports the post-boot `transient_booting` readiness gap, matching the long-documented behaviour.
 - Bridge `/swipe` now accepts durations up to 10 s (previously silently clamped to 5 s), covering the full `--duration` range the CLI validates for long-press holds. Bridge `versionCode` bumped to 16.
@@ -22,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `android swipe` invoked directly now enforces the same coordinate rules as the other surfaces: negative coordinates and identical start/end points are rejected at validate time instead of being forwarded to the bridge.
+- Swipe coordinates are validated as finite and ≤ 100000 on all surfaces, so values like `inf`, `nan`, or `1e19` fail with a clean validation error instead of trapping the daemon in the Double→Int conversion.
+- The top-level `swipe` and `android swipe` no longer disagree on fractional Android coordinates (truncation vs rounding); both round half away from zero via shared accessors.
+- `android swipe --pre-delay`/`--post-delay` are bounded to 0–10 seconds like every other surface; the previous sign-only check let `inf`/`nan` through into the Double→UInt64 sleep conversion, which trapped the daemon.
+- Android swipe rejects coordinate pairs that round to the same integer pixel (e.g. `--from 10.4,10.4 --to 10.49,10.49`), which previously passed the Double comparison but dispatched a degenerate same-point gesture to the bridge.
 - `DaemonClient.stopDaemon` no longer waits on and SIGTERMs a pidfile pid that is the caller's own process (a stale pidfile can hold a recycled pid; in-process daemons in tests always do). Signalling ourselves fanned out through every live `DaemonServer`'s SIGTERM source and tore down unrelated daemons mid-request — the main source of daemon-test flakiness under parallel load.
 - Cached HID connection is now validated against the simulator's boot instance before reuse, so a simulator shut down and re-booted under the same UDID gets a fresh connection instead of hanging the daemon (or failing every command) on the dead one until restart. Additionally, any failed HID perform drops the cached connection, and failures that provably happened before delivery (dead mach port) are transparently retried once against a rebuilt session.
 - `ios batch --ax-cache` was a complete no-op: the default `perBatch` never cached and every selector-based step refetched the AX tree. `perBatch` now resolves all steps against one snapshot, `perStep` refetches at each step, `none` never caches, and `--wait-timeout` poll ticks bypass the cache (updating it) so delayed elements are still found.

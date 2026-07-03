@@ -19,17 +19,7 @@ struct Swipe: SimUseExecutableCommand {
         abstract: "Perform a swipe gesture from one point to another on the screen."
     )
 
-    @Option(name: .customLong("start-x"), help: "The X coordinate of the starting point.")
-    var startX: Double
-
-    @Option(name: .customLong("start-y"), help: "The Y coordinate of the starting point.")
-    var startY: Double
-
-    @Option(name: .customLong("end-x"), help: "The X coordinate of the ending point.")
-    var endX: Double
-
-    @Option(name: .customLong("end-y"), help: "The Y coordinate of the ending point.")
-    var endY: Double
+    @OptionGroup var coordinates: SwipeCoordinateOptions
 
     @Option(name: .customLong("duration"), help: "Duration of the swipe in seconds.")
     var duration: Double?
@@ -63,22 +53,21 @@ struct Swipe: SimUseExecutableCommand {
     /// happens to consume them as Doubles but the user-facing
     /// numbers stay readable.
     func format(_ result: ExecutionResult) -> CommandOutput {
-        let sx = Int(startX.rounded())
-        let sy = Int(startY.rounded())
-        let ex = Int(endX.rounded())
-        let ey = Int(endY.rounded())
-        return .line("✓ Swipe (\(sx),\(sy)) → (\(ex),\(ey)) completed successfully")
+        .line("✓ Swipe \(result.coordinates.displaySummary) completed successfully")
     }
 
     func validate() throws {
-        try IOSSimSwipeCommand.validateOptions(
-            startX: startX, startY: startY,
-            endX: endX, endY: endY,
+        _ = try coordinates.resolve()
+        try IOSSimSwipeCommand.validateTimingOptions(
             duration: duration,
             delta: delta,
             preDelay: preDelay,
             postDelay: postDelay
         )
+    }
+
+    func resolvedCoordinates() throws -> SwipeCoordinates {
+        try coordinates.resolve()
     }
 
     func execute() async throws -> ExecutionResult {
@@ -92,10 +81,7 @@ struct Swipe: SimUseExecutableCommand {
 
     private func executeIOSSim() async throws -> ExecutionResult {
         var sub = IOSSimSwipeCommand()
-        sub.startX = startX
-        sub.startY = startY
-        sub.endX = endX
-        sub.endY = endY
+        sub.coordinates = coordinates
         sub.duration = duration
         sub.delta = delta
         sub.preDelay = preDelay
@@ -112,21 +98,22 @@ struct Swipe: SimUseExecutableCommand {
     /// `pre-delay` / `post-delay` honored via `Task.sleep` around
     /// the bridge call — mirrors `Gesture.swift`'s `executeAndroid`.
     private func executeAndroid() async throws -> ExecutionResult {
+        let coords = try coordinates.resolve()
         let durationMs = max(1, Int((duration ?? 0.3) * 1000))
         if let preDelay, preDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
         }
         try AndroidSwipeCommand.performSwipe(
             udid: device.resolved,
-            startX: Int(startX),
-            startY: Int(startY),
-            endX: Int(endX),
-            endY: Int(endY),
+            startX: coords.roundedStartX,
+            startY: coords.roundedStartY,
+            endX: coords.roundedEndX,
+            endY: coords.roundedEndY,
             durationMs: durationMs
         )
         if let postDelay, postDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
         }
-        return ExecutionResult()
+        return ExecutionResult(coordinates: coords)
     }
 }

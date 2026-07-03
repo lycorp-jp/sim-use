@@ -156,6 +156,8 @@ sim-use tap --id Safari --device $UDID
 sim-use tap --label "Safari" --device $UDID
 sim-use tap --value "On" --device $UDID
 
+sim-use swipe --from 100,300 --to 300,100 --device $UDID
+sim-use swipe 100,300 300,100 --device $UDID
 sim-use swipe --start-x 100 --start-y 300 --end-x 300 --end-y 100 --device $UDID
 sim-use swipe --start-x 50 --start-y 500 --end-x 350 --end-y 500 --duration 2.0 --delta 25 --device $UDID
 

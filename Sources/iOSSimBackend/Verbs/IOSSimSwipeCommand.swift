@@ -10,8 +10,15 @@ import SimUseCore
 /// `sim-use ios swipe`. The top-level command resolves the target
 /// platform via `PlatformRouter` and forwards iOS UDIDs through here.
 public struct IOSSimSwipeCommand: SimUseExecutableCommand {
+    /// Carries the resolved coordinates so `format(_:)` renders from
+    /// the execution result instead of re-resolving the raw flags —
+    /// same shape as `IOSSimTapCommand.ExecutionResult`.
     public struct ExecutionResult: Codable {
-        public init() {}
+        public let coordinates: SwipeCoordinates
+
+        public init(coordinates: SwipeCoordinates) {
+            self.coordinates = coordinates
+        }
     }
 
     public static let configuration = CommandConfiguration(
@@ -19,17 +26,7 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         abstract: "Perform a swipe gesture from one point to another on the screen."
     )
 
-    @Option(name: .customLong("start-x"), help: "The X coordinate of the starting point.")
-    public var startX: Double
-
-    @Option(name: .customLong("start-y"), help: "The Y coordinate of the starting point.")
-    public var startY: Double
-
-    @Option(name: .customLong("end-x"), help: "The X coordinate of the ending point.")
-    public var endX: Double
-
-    @Option(name: .customLong("end-y"), help: "The Y coordinate of the ending point.")
-    public var endY: Double
+    @OptionGroup public var coordinates: SwipeCoordinateOptions
 
     @Option(name: .customLong("duration"), help: "Duration of the swipe in seconds.")
     public var duration: Double?
@@ -60,17 +57,12 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
     /// Match the top-level `Swipe` and `AndroidSwipeCommand` so direct
     /// `sim-use ios swipe` calls aren't silent on success.
     public func format(_ result: ExecutionResult) -> CommandOutput {
-        let sx = Int(startX.rounded())
-        let sy = Int(startY.rounded())
-        let ex = Int(endX.rounded())
-        let ey = Int(endY.rounded())
-        return .line("✓ Swipe (\(sx),\(sy)) → (\(ex),\(ey)) completed successfully")
+        .line("✓ Swipe \(result.coordinates.displaySummary) completed successfully")
     }
 
     public func validate() throws {
-        try Self.validateOptions(
-            startX: startX, startY: startY,
-            endX: endX, endY: endY,
+        _ = try coordinates.resolve()
+        try Self.validateTimingOptions(
             duration: duration,
             delta: delta,
             preDelay: preDelay,
@@ -78,26 +70,25 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         )
     }
 
-    /// Shared validation factored out as a static so the top-level
-    /// cross-platform forwarder runs the same rules without
-    /// re-implementing them.
-    public static func validateOptions(
-        startX: Double,
-        startY: Double,
-        endX: Double,
-        endY: Double,
+    /// Timing/granularity rules factored out as a static so the
+    /// top-level cross-platform forwarder runs the same checks without
+    /// re-implementing them. Coordinate rules live in
+    /// `SwipeCoordinateOptions.resolve()`.
+    public static func validateTimingOptions(
         duration: Double?,
         delta: Double?,
         preDelay: Double?,
         postDelay: Double?
     ) throws {
-        guard startX >= 0, startY >= 0, endX >= 0, endY >= 0 else {
-            throw ValidationError("Coordinates must be non-negative values.")
-        }
-
         if let duration {
             guard duration > 0 else {
                 throw ValidationError("Duration must be greater than 0.")
+            }
+            // Same ceiling as pre/post-delay and the Android verbs.
+            // Also catches millisecond values passed by habit from
+            // `adb shell input swipe` — those belong in seconds here.
+            guard duration <= 10.0 else {
+                throw ValidationError("Duration must be at most 10 seconds. Durations are in seconds, not milliseconds — pass 0.3 for a 300 ms swipe.")
             }
         }
 
@@ -105,10 +96,6 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
             guard delta > 0 else {
                 throw ValidationError("Delta must be greater than 0.")
             }
-        }
-
-        guard startX != endX || startY != endY else {
-            throw ValidationError("Start and end points must be different.")
         }
 
         if let preDelay {
@@ -124,15 +111,20 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         }
     }
 
+    public func resolvedCoordinates() throws -> SwipeCoordinates {
+        try coordinates.resolve()
+    }
+
     public func execute() async throws -> ExecutionResult {
         let logger = SimUseLogger()
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
 
+        let coords = try coordinates.resolve()
         let swipeDuration = duration ?? 1.0
         let swipeDelta = delta ?? 50.0
 
-        logger.info().log("Performing swipe from (\(startX), \(startY)) to (\(endX), \(endY))")
+        logger.info().log("Performing swipe from (\(coords.startX), \(coords.startY)) to (\(coords.endX), \(coords.endY))")
         logger.info().log("Duration: \(swipeDuration)s, Delta: \(swipeDelta)px")
 
         var events: [FBSimulatorHIDEvent] = []
@@ -143,10 +135,10 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         }
 
         let swipeEvent = FBSimulatorHIDEvent.swipe(
-            startX,
-            yStart: startY,
-            xEnd: endX,
-            yEnd: endY,
+            coords.startX,
+            yStart: coords.startY,
+            xEnd: coords.endX,
+            yEnd: coords.endY,
             delta: swipeDelta,
             duration: swipeDuration
         )
@@ -166,6 +158,6 @@ public struct IOSSimSwipeCommand: SimUseExecutableCommand {
         )
 
         logger.info().log("Swipe gesture completed successfully")
-        return ExecutionResult()
+        return ExecutionResult(coordinates: coords)
     }
 }

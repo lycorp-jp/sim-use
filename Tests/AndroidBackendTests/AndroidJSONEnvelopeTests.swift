@@ -56,14 +56,26 @@ final class AndroidJSONEnvelopeTests: XCTestCase {
     }
 
     func testEmptyExecutionResultEnvelopeShape() throws {
-        // The default for swipe / touch / type / paste / button /
-        // gesture — a bare `{ok: true, data: {}}` envelope. Each
-        // Android verb declares its own `ExecutionResult: Codable`
-        // with no fields; pin AndroidSwipeCommand's as canonical so
-        // the protocol-default path can never silently drift.
-        let bytes = try JSONEnvelopeWriter.encodeSuccess(AndroidSwipeCommand.ExecutionResult())
+        // The default for touch / type / paste / button / gesture —
+        // a bare `{ok: true, data: {}}` envelope. Each Android verb
+        // declares its own `ExecutionResult: Codable` with no fields;
+        // pin AndroidTouchCommand's as canonical so the
+        // protocol-default path can never silently drift.
+        let bytes = try JSONEnvelopeWriter.encodeSuccess(AndroidTouchCommand.ExecutionResult())
         let json = try XCTUnwrap(String(data: bytes, encoding: .utf8))
         XCTAssertEqual(json, #"{"data":{},"ok":true}"#)
+    }
+
+    func testSwipePayloadEnvelopeShape() throws {
+        // Swipe carries the resolved coordinates so the success line
+        // and `--json` consumers read them from the result instead of
+        // a re-resolution of the raw flags.
+        let payload = AndroidSwipeCommand.ExecutionResult(
+            coordinates: SwipeCoordinates(startX: 100, startY: 200, endX: 300, endY: 400.5)
+        )
+        let bytes = try JSONEnvelopeWriter.encodeSuccess(payload)
+        let json = try XCTUnwrap(String(data: bytes, encoding: .utf8))
+        XCTAssertEqual(json, #"{"data":{"coordinates":{"endX":300,"endY":400.5,"startX":100,"startY":200}},"ok":true}"#)
     }
 
     func testScreenshotPayloadEnvelopeShape() throws {
