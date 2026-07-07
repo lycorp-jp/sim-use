@@ -101,34 +101,21 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
     public struct ExecutionResult: Codable, CommandAdvisoryProviding {
         public let x: Double
         public let y: Double
-        public let advisory: CommandAdvisory?
+        /// Excluded from the encoded `data` payload via `CodingKeys`
+        /// (the default value keeps decode synthesis working) — the
+        /// envelope hoists it to the top-level `advisory` key. See
+        /// `CommandAdvisoryProviding` for the contract.
+        public var commandAdvisory: CommandAdvisory? = nil
 
-        public init(x: Double, y: Double, advisory: CommandAdvisory? = nil) {
+        public init(x: Double, y: Double, commandAdvisory: CommandAdvisory? = nil) {
             self.x = x
             self.y = y
-            self.advisory = advisory
-        }
-
-        public var commandAdvisory: CommandAdvisory? {
-            advisory
+            self.commandAdvisory = commandAdvisory
         }
 
         private enum CodingKeys: String, CodingKey {
             case x
             case y
-        }
-
-        public init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            self.x = try container.decode(Double.self, forKey: .x)
-            self.y = try container.decode(Double.self, forKey: .y)
-            self.advisory = nil
-        }
-
-        public func encode(to encoder: Encoder) throws {
-            var container = encoder.container(keyedBy: CodingKeys.self)
-            try container.encode(x, forKey: .x)
-            try container.encode(y, forKey: .y)
         }
     }
 
@@ -434,7 +421,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         }
 
         logger.info().log("Tap completed successfully")
-        return ExecutionResult(x: resolvedPoint.x, y: resolvedPoint.y, advisory: resolvedAdvisory)
+        return ExecutionResult(x: resolvedPoint.x, y: resolvedPoint.y, commandAdvisory: resolvedAdvisory)
     }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {

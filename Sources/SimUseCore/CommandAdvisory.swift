@@ -32,6 +32,18 @@ public struct CommandAdvisory: Codable, Equatable, Sendable {
     }
 }
 
+/// Adopted by `ExecutionResult` types that can carry a per-command
+/// advisory. Both envelope layers hoist `commandAdvisory` to the
+/// top-level `advisory` key: `executeAsDaemonResponse` on the daemon
+/// side and `resolveExecutionResult` on the in-process side.
+///
+/// Contract: the advisory must NOT appear in the conformer's own
+/// encoded output — the envelope carries it, so a synthesized Codable
+/// that includes the stored property would silently duplicate it
+/// inside `data`. Exclude it with a `CodingKeys` enum that omits the
+/// property (give the property a default value so decode synthesis
+/// keeps working), and register the conformer in
+/// `CommandAdvisoryContractTests`, which pins exactly this.
 public protocol CommandAdvisoryProviding {
     var commandAdvisory: CommandAdvisory? { get }
 }

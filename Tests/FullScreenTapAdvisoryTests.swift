@@ -125,17 +125,8 @@ struct FullScreenTapAdvisoryTests {
         #expect(frame.width == 400)
         #expect(frame.height == 800)
     }
-
-    @Test("tap execution result keeps advisory out of data payload")
-    func tapResultDoesNotEncodeAdvisoryInData() throws {
-        let result = IOSSimTapCommand.ExecutionResult(
-            x: 10,
-            y: 20,
-            advisory: CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
-        )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let text = String(data: try encoder.encode(result), encoding: .utf8)
-        #expect(text == #"{"x":10,"y":20}"#)
-    }
 }
+
+// The exclude-from-data assertion for the tap ExecutionResult moved to
+// CommandAdvisoryContractTests, the single home that pins the contract
+// for every CommandAdvisoryProviding conformer.
