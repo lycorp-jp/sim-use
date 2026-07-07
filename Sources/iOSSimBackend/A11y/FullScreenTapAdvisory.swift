@@ -13,7 +13,7 @@ public enum FullScreenTapAdvisory {
         roots: [AccessibilityElement],
         query: String
     ) -> CommandAdvisory? {
-        guard let screen = displayFrame(in: roots),
+        guard let screen = AXDisplayFrame.frame(in: roots),
               let message = message(matched: matched, screen: screen, query: query)
         else { return nil }
         return CommandAdvisory(kind: .fullScreenTapTarget, message: message)
@@ -32,11 +32,5 @@ public enum FullScreenTapAdvisory {
         return "The element matching '\(query)' covers ~\(pct)% of the screen; " +
             "tapping its center may hit a full-screen wrapper rather than the intended control. " +
             "Use a positional @N/#N alias or explicit -x/-y coordinates."
-    }
-
-    private static func displayFrame(in roots: [AccessibilityElement]) -> AccessibilityElement.Frame? {
-        roots.compactMap(\.frame)
-            .filter { $0.width > 0 && $0.height > 0 }
-            .max { ($0.width * $0.height) < ($1.width * $1.height) }
     }
 }

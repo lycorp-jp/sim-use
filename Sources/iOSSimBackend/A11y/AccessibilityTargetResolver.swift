@@ -302,8 +302,8 @@ public struct AccessibilityTargetResolver {
         if let frameFilter, !frameFilter.isEmpty {
             let effective: FrameFilter
             if frameFilter.hasRelativeBounds {
-                guard let screen = roots.first?.frame else {
-                    throw ElementResolutionError.invalidFrame(reason: "--frame uses relative bounds but the AX root has no frame to resolve against.")
+                guard let screen = AXDisplayFrame.frame(in: roots) else {
+                    throw ElementResolutionError.invalidFrame(reason: "--frame uses relative bounds but no AX root has a usable frame to resolve against.")
                 }
                 effective = frameFilter.resolved(screen: screen)
             } else {

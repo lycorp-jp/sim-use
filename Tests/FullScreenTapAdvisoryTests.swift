@@ -89,6 +89,43 @@ struct FullScreenTapAdvisoryTests {
         #expect(target.advisory == nil)
     }
 
+    @Test("prefers the Application root over a larger non-Application root")
+    func prefersApplicationRootOverLargerWindow() throws {
+        // A scroll-canvas window taller than the display must not
+        // deflate the coverage fraction: the wrapper is 97.5% of the
+        // Application root but only 26% of the canvas window.
+        let canvasRoot = try advisoryElement(
+            type: "Window",
+            label: "Canvas",
+            frame: advisoryFrame(0, 0, 400, 3000)
+        )
+        let appRoot = try advisoryElement(
+            label: "App",
+            frame: screen,
+            children: [[
+                "type": "Other",
+                "AXLabel": "Full Screen Wrapper",
+                "frame": ["x": 0, "y": 10, "width": 400, "height": 780],
+            ]]
+        )
+
+        let target = try AccessibilityTargetResolver.resolveTarget(
+            roots: [canvasRoot, appRoot],
+            query: .label("Full Screen Wrapper")
+        )
+
+        #expect(target.advisory != nil)
+    }
+
+    @Test("display frame falls back to the largest root when no Application root has a frame")
+    func fallsBackToLargestRootWithoutApplication() throws {
+        let smallWindow = try advisoryElement(type: "Window", label: "Overlay", frame: advisoryFrame(0, 0, 100, 100))
+        let bigWindow = try advisoryElement(type: "Window", label: "Main", frame: advisoryFrame(0, 0, 400, 800))
+        let frame = try #require(AXDisplayFrame.frame(in: [smallWindow, bigWindow]))
+        #expect(frame.width == 400)
+        #expect(frame.height == 800)
+    }
+
     @Test("tap execution result keeps advisory out of data payload")
     func tapResultDoesNotEncodeAdvisoryInData() throws {
         let result = IOSSimTapCommand.ExecutionResult(

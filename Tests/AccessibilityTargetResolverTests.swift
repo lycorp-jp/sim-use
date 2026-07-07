@@ -305,6 +305,36 @@ struct FrameFilterIntegrationTests {
         }
     }
 
+    @Test("relative frame filter uses the Application root when a non-app root comes first")
+    func relFrameSkipsLeadingNonAppRoot() throws {
+        // A keyboard-style window precedes the app root; 0.7r must
+        // resolve against the app's 800-tall frame (y >= 560), not the
+        // keyboard's 300-tall one (y >= 710, which would reject the
+        // y=700 cell and fail the resolution).
+        let json: [[String: Any]] = [
+            [
+                "type": "Window",
+                "AXLabel": "Keyboard",
+                "frame": ["x": 0, "y": 500, "width": 400, "height": 300],
+            ],
+            [
+                "type": "Application",
+                "AXLabel": "App",
+                "frame": ["x": 0, "y": 0, "width": 400, "height": 800],
+                "children": [
+                    cellJSON(label: "Header", x: 0, y: 50),
+                    cellJSON(label: "Header", x: 0, y: 700),
+                ],
+            ],
+        ]
+        let roots = try decodeRoots(json)
+        let filter = try AccessibilityTargetResolver.FrameFilter(specs: ["minY=0.7r"])
+        let point = try AccessibilityTargetResolver.resolveCenterPoint(
+            roots: roots, query: .label("Header"), frameFilter: filter
+        )
+        #expect(point.y == 720)
+    }
+
     @Test("relative frame filter without an AX root frame surfaces invalidFrame")
     func relWithoutScreenFrame() throws {
         // Build a tree where the first root has no frame at all.
