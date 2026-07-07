@@ -10,11 +10,21 @@ import SimUseCore
 /// session plumbing has no Android equivalent. Reach via
 /// `sim-use ios batch` only.
 public struct IOSSimBatchCommand: SimUseExecutableCommand {
-    public struct ExecutionResult: Codable {
+    public struct ExecutionResult: Codable, CommandAdvisoryProviding {
         public let stepsExecuted: Int
-        public init(stepsExecuted: Int) {
+        /// Merged advisories recorded while resolving selector-based
+        /// steps (see `BatchContext.recordAdvisory`). Hoisted to the
+        /// envelope's top-level `advisory` key; excluded from the
+        /// encoded `data` payload via `CodingKeys` per the
+        /// `CommandAdvisoryProviding` contract.
+        public var commandAdvisory: CommandAdvisory? = nil
+
+        public init(stepsExecuted: Int, commandAdvisory: CommandAdvisory? = nil) {
             self.stepsExecuted = stepsExecuted
+            self.commandAdvisory = commandAdvisory
         }
+
+        private enum CodingKeys: String, CodingKey { case stepsExecuted }
     }
 
     public static let configuration = CommandConfiguration(
@@ -222,7 +232,11 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
             throw CLIError(errorDescription: "Batch completed with \(failures.count) failure(s):\n\(failureMessage)")
         }
 
-        return ExecutionResult(stepsExecuted: stepLines.count)
+        let advisories = await MainActor.run { context.commandAdvisories }
+        return ExecutionResult(
+            stepsExecuted: stepLines.count,
+            commandAdvisory: CommandAdvisory.merged(advisories)
+        )
     }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {

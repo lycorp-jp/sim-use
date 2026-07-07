@@ -17,6 +17,19 @@ public struct CommandAdvisory: Codable, Equatable, Sendable {
         self.kind = kind
         self.message = message
     }
+
+    /// Collapse several advisories into the single `advisory` slot the
+    /// success envelope carries. Multi-step surfaces (batch) join their
+    /// per-step messages line by line under the first advisory's kind;
+    /// the renderer prefixes each line so the text output stays scannable.
+    public static func merged(_ advisories: [CommandAdvisory]) -> CommandAdvisory? {
+        guard let first = advisories.first else { return nil }
+        guard advisories.count > 1 else { return first }
+        return CommandAdvisory(
+            kind: first.kind,
+            message: advisories.map(\.message).joined(separator: "\n")
+        )
+    }
 }
 
 public protocol CommandAdvisoryProviding {
@@ -25,6 +38,9 @@ public protocol CommandAdvisoryProviding {
 
 public enum CommandAdvisoryRenderer {
     public static func banner(for advisory: CommandAdvisory) -> String {
-        "[i] \(advisory.message)"
+        advisory.message
+            .split(separator: "\n", omittingEmptySubsequences: true)
+            .map { "[i] \($0)" }
+            .joined(separator: "\n")
     }
 }

@@ -55,7 +55,7 @@ extension IOSSimTapCommand: BatchConvertible {
                 throw CLIError(errorDescription: "Unexpected state: no coordinates and no element query.")
             }
 
-            resolvedPoint = try await AccessibilityPoller.resolveWithPolling(
+            let target = try await AccessibilityPoller.resolveWithPollingTarget(
                 query: query,
                 simulatorUDID: context.simulatorUDID,
                 waitTimeout: context.waitTimeout,
@@ -67,6 +67,13 @@ extension IOSSimTapCommand: BatchConvertible {
                 },
                 logger: logger
             )
+            resolvedPoint = (target.x, target.y)
+            // Same full-screen-wrapper warning the standalone tap emits;
+            // batch has no per-step envelope, so it rides the context to
+            // the batch ExecutionResult.
+            if let advisory = target.advisory {
+                context.recordAdvisory(advisory)
+            }
         }
 
         if let duration, duration > 0 {

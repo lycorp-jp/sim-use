@@ -81,6 +81,22 @@ struct JSONEnvelopeWriterTests {
         #expect(CommandAdvisoryRenderer.banner(for: advisory) == "[i] check target")
     }
 
+    @Test("command advisory renderer prefixes every line of a multi-line message")
+    func commandAdvisoryRendererMultiLine() {
+        let advisory = CommandAdvisory(kind: .fullScreenTapTarget, message: "Step 1: a\nStep 3: b")
+        #expect(CommandAdvisoryRenderer.banner(for: advisory) == "[i] Step 1: a\n[i] Step 3: b")
+    }
+
+    @Test("merged advisories collapse into one line-joined advisory")
+    func mergedAdvisories() {
+        #expect(CommandAdvisory.merged([]) == nil)
+        let single = CommandAdvisory(kind: .fullScreenTapTarget, message: "only")
+        #expect(CommandAdvisory.merged([single]) == single)
+        let other = CommandAdvisory(kind: .fullScreenTapTarget, message: "second")
+        #expect(CommandAdvisory.merged([single, other])
+            == CommandAdvisory(kind: .fullScreenTapTarget, message: "only\nsecond"))
+    }
+
     @Test("error envelope without hint omits the hint key entirely")
     func errorEnvelopeWithoutHint() throws {
         struct PlainError: Error, LocalizedError {
