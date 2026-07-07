@@ -136,6 +136,39 @@ struct DaemonSuccessResponseTests {
     }
 }
 
+// MARK: - DaemonClientSuccessPayload
+
+@Suite("DaemonClientSuccessPayload decoding")
+struct DaemonClientSuccessPayloadTests {
+    private struct Payload: Decodable, Equatable {
+        let foo: String
+    }
+
+    @Test("Decodes data plus a known command advisory")
+    func decodesKnownAdvisory() throws {
+        let wire = Data(#"{"advisory":{"kind":"full_screen_tap_target","message":"m"},"data":{"foo":"bar"},"ok":true}"#.utf8)
+        let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<Payload>.self, from: wire)
+        #expect(payload.data == Payload(foo: "bar"))
+        #expect(payload.advisory == CommandAdvisory(kind: .fullScreenTapTarget, message: "m"))
+    }
+
+    @Test("An unknown advisory kind from a newer daemon is dropped, not fatal")
+    func unknownAdvisoryKindIsDropped() throws {
+        let wire = Data(#"{"advisory":{"kind":"from_the_future","message":"m"},"data":{"foo":"bar"},"ok":true}"#.utf8)
+        let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<Payload>.self, from: wire)
+        #expect(payload.data == Payload(foo: "bar"))
+        #expect(payload.advisory == nil)
+    }
+
+    @Test("Absent advisory decodes as nil")
+    func absentAdvisoryIsNil() throws {
+        let wire = Data(#"{"data":{"foo":"bar"},"ok":true}"#.utf8)
+        let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<Payload>.self, from: wire)
+        #expect(payload.advisory == nil)
+        #expect(payload.processAdvisory == nil)
+    }
+}
+
 // MARK: - DaemonPingData
 
 @Suite("DaemonPingData codable round-trip")

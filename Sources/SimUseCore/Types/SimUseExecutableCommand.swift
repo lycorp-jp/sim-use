@@ -280,7 +280,14 @@ public struct DaemonClientSuccessPayload<T: Decodable>: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.data = try container.decode(T.self, forKey: .data)
         self.processAdvisory = try container.decodeIfPresent(ProcessAdvisory.self, forKey: .process)
-        self.advisory = try container.decodeIfPresent(CommandAdvisory.self, forKey: .advisory)
+        // A malformed advisory must never fail the whole payload: the
+        // command has already executed and the advisory is purely
+        // informational. A newer daemon can emit a CommandAdvisory.Kind
+        // this client's closed enum doesn't know (version probe failure
+        // or SIM_USE_DAEMON_VERSION_CHECK=0 skips the restart gate);
+        // decode it tolerantly instead of surfacing malformedResponse
+        // for a command that succeeded.
+        self.advisory = (try? container.decodeIfPresent(CommandAdvisory.self, forKey: .advisory)) ?? nil
     }
 
     private enum CodingKeys: String, CodingKey { case data, process, advisory }
