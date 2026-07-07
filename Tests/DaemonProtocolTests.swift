@@ -109,7 +109,7 @@ struct DaemonSuccessResponseTests {
 
     @Test("Advisory is omitted from the envelope when nil")
     func advisoryOmittedWhenNil() throws {
-        let resp = DaemonSuccessResponse(data: Payload(foo: "bar", count: 3), advisory: nil)
+        let resp = DaemonSuccessResponse(data: Payload(foo: "bar", count: 3), processAdvisory: nil)
         let text = jsonString(try encoderStable().encode(resp))
         #expect(text == #"{"data":{"count":3,"foo":"bar"},"ok":true}"#)
     }
@@ -119,7 +119,7 @@ struct DaemonSuccessResponseTests {
         let event = ProcessEvent(kind: .disappeared, bundleId: "com.x", pid: 100, confidence: .high)
         let resp = DaemonSuccessResponse(
             data: Payload(foo: "bar", count: 3),
-            advisory: ProcessAdvisory(events: [event], pending: [])
+            processAdvisory: ProcessAdvisory(events: [event], pending: [])
         )
         let text = jsonString(try encoderStable().encode(resp))
         #expect(text == #"{"data":{"count":3,"foo":"bar"},"ok":true,"process":{"events":[{"bundleId":"com.x","confidence":"high","kind":"disappeared","pid":100}],"pending":[]}}"#)
@@ -129,7 +129,7 @@ struct DaemonSuccessResponseTests {
     func commandAdvisoryNestsUnderAdvisory() throws {
         let resp = DaemonSuccessResponse(
             data: Payload(foo: "bar", count: 3),
-            commandAdvisory: CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
+            advisory: CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
         )
         let text = jsonString(try encoderStable().encode(resp))
         #expect(text == #"{"advisory":{"kind":"full_screen_tap_target","message":"check target"},"data":{"count":3,"foo":"bar"},"ok":true}"#)

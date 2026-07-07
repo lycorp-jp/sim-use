@@ -52,7 +52,7 @@ struct JSONEnvelopeWriterTests {
             events: [ProcessEvent(kind: .disappeared, bundleId: "com.x", pid: 100, confidence: .high)],
             pending: []
         )
-        let bytes = try JSONEnvelopeWriter.encodeSuccess(payload, advisory: advisory)
+        let bytes = try JSONEnvelopeWriter.encodeSuccess(payload, processAdvisory: advisory)
         let json = try #require(String(data: bytes, encoding: .utf8))
         #expect(json == #"{"data":{"platform":"ios","visible":true},"ok":true,"process":{"events":[{"bundleId":"com.x","confidence":"high","kind":"disappeared","pid":100}],"pending":[]}}"#)
     }
@@ -61,7 +61,7 @@ struct JSONEnvelopeWriterTests {
     func successEnvelopeWithCommandAdvisory() throws {
         let payload = SamplePayload(platform: "ios", visible: true, imePackage: nil)
         let advisory = CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
-        let bytes = try JSONEnvelopeWriter.encodeSuccess(payload, commandAdvisory: advisory)
+        let bytes = try JSONEnvelopeWriter.encodeSuccess(payload, advisory: advisory)
         let json = try #require(String(data: bytes, encoding: .utf8))
         #expect(json == #"{"advisory":{"kind":"full_screen_tap_target","message":"check target"},"data":{"platform":"ios","visible":true},"ok":true}"#)
     }
@@ -69,9 +69,9 @@ struct JSONEnvelopeWriterTests {
     @Test("success envelope omits `process` when advisory is nil or empty")
     func successEnvelopeAdvisoryOmitted() throws {
         let payload = SamplePayload(platform: "ios", visible: true, imePackage: nil)
-        let nilCase = try JSONEnvelopeWriter.encodeSuccess(payload, advisory: nil)
+        let nilCase = try JSONEnvelopeWriter.encodeSuccess(payload, processAdvisory: nil)
         #expect(try #require(String(data: nilCase, encoding: .utf8)) == #"{"data":{"platform":"ios","visible":true},"ok":true}"#)
-        let emptyCase = try JSONEnvelopeWriter.encodeSuccess(payload, advisory: ProcessAdvisory(events: [], pending: []))
+        let emptyCase = try JSONEnvelopeWriter.encodeSuccess(payload, processAdvisory: ProcessAdvisory(events: [], pending: []))
         #expect(try #require(String(data: emptyCase, encoding: .utf8)) == #"{"data":{"platform":"ios","visible":true},"ok":true}"#)
     }
 

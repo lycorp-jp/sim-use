@@ -52,21 +52,23 @@ public struct DaemonSuccessResponse<Data: Encodable>: Encodable {
     public let data: Data
     /// Optional process-liveness advisory (issue #81). Additive and
     /// backward-compatible: omitted from the wire when nil, so older
-    /// clients simply don't see it.
-    public let advisory: ProcessAdvisory?
-    public let commandAdvisory: CommandAdvisory?
+    /// clients simply don't see it. Encodes under the `process` key.
+    public let processAdvisory: ProcessAdvisory?
+    /// Per-command advisory hoisted out of the result (see
+    /// `CommandAdvisoryProviding`). Encodes under the `advisory` key.
+    public let advisory: CommandAdvisory?
 
     public init(
         id: String? = nil,
         data: Data,
-        advisory: ProcessAdvisory? = nil,
-        commandAdvisory: CommandAdvisory? = nil
+        processAdvisory: ProcessAdvisory? = nil,
+        advisory: CommandAdvisory? = nil
     ) {
         self.id = id
         self.ok = true
         self.data = data
+        self.processAdvisory = processAdvisory
         self.advisory = advisory
-        self.commandAdvisory = commandAdvisory
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -74,8 +76,8 @@ public struct DaemonSuccessResponse<Data: Encodable>: Encodable {
         if let id { try container.encode(id, forKey: .id) }
         try container.encode(ok, forKey: .ok)
         try container.encode(data, forKey: .data)
-        if let commandAdvisory { try container.encode(commandAdvisory, forKey: .advisory) }
-        if let advisory, !advisory.isEmpty { try container.encode(advisory, forKey: .process) }
+        if let advisory { try container.encode(advisory, forKey: .advisory) }
+        if let processAdvisory, !processAdvisory.isEmpty { try container.encode(processAdvisory, forKey: .process) }
     }
 
     private enum CodingKeys: String, CodingKey { case id, ok, data, advisory, process }

@@ -14,19 +14,21 @@ import Foundation
 /// this writer directly from their own `run()`.
 public enum JSONEnvelopeWriter {
     /// Emit `{ok: true, data: <payload>}` followed by a single LF.
-    /// When `advisory` carries process-liveness events it nests under
-    /// the `process` key (issue #81); a nil / empty advisory is omitted
-    /// so the baseline envelope shape is unchanged.
+    /// When `processAdvisory` carries process-liveness events it nests
+    /// under the `process` key (issue #81); a per-command `advisory`
+    /// nests under the `advisory` key. Nil (or, for process, empty)
+    /// advisories are omitted so the baseline envelope shape is
+    /// unchanged.
     public static func writeSuccess<T: Encodable>(
         _ data: T,
-        advisory: ProcessAdvisory? = nil,
-        commandAdvisory: CommandAdvisory? = nil,
+        processAdvisory: ProcessAdvisory? = nil,
+        advisory: CommandAdvisory? = nil,
         to handle: FileHandle = .standardOutput
     ) throws {
         let encoded = try makeEncoder().encode(SuccessEnvelope(
             data: data,
-            advisory: commandAdvisory,
-            process: nonEmpty(advisory)
+            advisory: advisory,
+            process: nonEmpty(processAdvisory)
         ))
         handle.write(encoded)
         handle.write(Data([0x0A]))
@@ -56,13 +58,13 @@ public enum JSONEnvelopeWriter {
     /// shape).
     public static func encodeSuccess<T: Encodable>(
         _ data: T,
-        advisory: ProcessAdvisory? = nil,
-        commandAdvisory: CommandAdvisory? = nil
+        processAdvisory: ProcessAdvisory? = nil,
+        advisory: CommandAdvisory? = nil
     ) throws -> Data {
         try makeEncoder().encode(SuccessEnvelope(
             data: data,
-            advisory: commandAdvisory,
-            process: nonEmpty(advisory)
+            advisory: advisory,
+            process: nonEmpty(processAdvisory)
         ))
     }
 

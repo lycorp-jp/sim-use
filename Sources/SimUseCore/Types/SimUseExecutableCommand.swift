@@ -82,8 +82,8 @@ extension SimUseExecutableCommand {
                 let resolved = try await resolveExecutionResult()
                 try emitJSONSuccess(
                     resolved.result,
-                    advisory: resolved.advisory,
-                    commandAdvisory: resolved.commandAdvisory
+                    processAdvisory: resolved.processAdvisory,
+                    advisory: resolved.advisory
                 )
             } catch {
                 emitJSONError(error)
@@ -100,12 +100,12 @@ extension SimUseExecutableCommand {
                 // command output (e.g. the describe-ui App header) so an
                 // agent driving via the default text surface can't miss a
                 // crash signal (issue #81).
-                if let advisory = resolved.advisory,
-                   let banner = ProcessAdvisoryRenderer.banner(for: advisory) {
+                if let processAdvisory = resolved.processAdvisory,
+                   let banner = ProcessAdvisoryRenderer.banner(for: processAdvisory) {
                     FileHandle.standardOutput.write(Data((banner + "\n").utf8))
                 }
-                if let commandAdvisory = resolved.commandAdvisory {
-                    FileHandle.standardOutput.write(Data((CommandAdvisoryRenderer.banner(for: commandAdvisory) + "\n").utf8))
+                if let advisory = resolved.advisory {
+                    FileHandle.standardOutput.write(Data((CommandAdvisoryRenderer.banner(for: advisory) + "\n").utf8))
                 }
                 let output = format(result)
                 let tFormatted = DispatchTime.now()
@@ -146,8 +146,8 @@ extension SimUseExecutableCommand {
     /// daemon would have produced.
     private func resolveExecutionResult() async throws -> (
         result: ExecutionResult,
-        advisory: ProcessAdvisory?,
-        commandAdvisory: CommandAdvisory?
+        processAdvisory: ProcessAdvisory?,
+        advisory: CommandAdvisory?
     ) {
         guard shouldUseDaemon, let udid = simulatorUDIDForDaemon else {
             // In-process (standalone) path has no persistent tracker, so
@@ -185,13 +185,13 @@ extension SimUseExecutableCommand {
         let t1 = DispatchTime.now()
 
         let result: ExecutionResult
-        let advisory: ProcessAdvisory?
-        let commandAdvisory: CommandAdvisory?
+        let processAdvisory: ProcessAdvisory?
+        let advisory: CommandAdvisory?
         do {
             let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<ExecutionResult>.self, from: responseData)
             result = payload.data
+            processAdvisory = payload.processAdvisory
             advisory = payload.advisory
-            commandAdvisory = payload.commandAdvisory
         } catch {
             throw DaemonClientError.malformedResponse(underlying: error)
         }
@@ -206,7 +206,7 @@ extension SimUseExecutableCommand {
             ))
         }
 
-        return (result, advisory, commandAdvisory)
+        return (result, processAdvisory, advisory)
     }
 
     /// Is this command eligible for daemon dispatch *right now*?
@@ -248,13 +248,13 @@ extension SimUseExecutableCommand {
 
     private func emitJSONSuccess(
         _ result: ExecutionResult,
-        advisory: ProcessAdvisory?,
-        commandAdvisory: CommandAdvisory?
+        processAdvisory: ProcessAdvisory?,
+        advisory: CommandAdvisory?
     ) throws {
         try JSONEnvelopeWriter.writeSuccess(
             result,
-            advisory: advisory,
-            commandAdvisory: commandAdvisory
+            processAdvisory: processAdvisory,
+            advisory: advisory
         )
     }
 
@@ -272,14 +272,15 @@ public struct DaemonClientSuccessPayload<T: Decodable>: Decodable {
     /// Process-liveness advisory carried under the `process` key, when
     /// the daemon attached one (issue #81). Absent on responses that
     /// predate the field or carry no event.
-    public let advisory: ProcessAdvisory?
-    public let commandAdvisory: CommandAdvisory?
+    public let processAdvisory: ProcessAdvisory?
+    /// Per-command advisory carried under the `advisory` key.
+    public let advisory: CommandAdvisory?
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.data = try container.decode(T.self, forKey: .data)
-        self.advisory = try container.decodeIfPresent(ProcessAdvisory.self, forKey: .process)
-        self.commandAdvisory = try container.decodeIfPresent(CommandAdvisory.self, forKey: .advisory)
+        self.processAdvisory = try container.decodeIfPresent(ProcessAdvisory.self, forKey: .process)
+        self.advisory = try container.decodeIfPresent(CommandAdvisory.self, forKey: .advisory)
     }
 
     private enum CodingKeys: String, CodingKey { case data, process, advisory }
