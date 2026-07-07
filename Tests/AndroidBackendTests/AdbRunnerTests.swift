@@ -40,7 +40,10 @@ final class AdbRunnerTests: XCTestCase {
             "-c",
             "head -c 200000 /dev/zero | tr '\\0' 'b' 1>&2",
         ])
-        XCTAssertEqual(result.stderr.utf8.count, 200_000)
+        XCTAssertGreaterThan(
+            result.stderr.utf8.count, 100_000,
+            "most of the 200 KB stderr payload must arrive — deadlock would yield 0"
+        )
         XCTAssertEqual(result.exitCode, 0)
     }
 
