@@ -71,7 +71,7 @@ struct SimUse: AsyncParsableCommand {
     static let simUseLogger = SimUseLogger()
 
     static let configuration = CommandConfiguration(
-        abstract: "A utility to interact with iOS Simulators and extract accessibility information.",
+        abstract: "A utility to interact with iOS Simulators and Android emulators/devices and extract accessibility information.",
         version: VERSION,
         subcommands: [
             // Cross-platform verbs (top-level routes by UDID shape).

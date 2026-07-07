@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The root `sim-use --help` abstract no longer claims the tool is iOS-Simulator-only; it now mentions Android emulators/devices as well.
 - `android swipe` invoked directly now enforces the same coordinate rules as the other surfaces: negative coordinates and identical start/end points are rejected at validate time instead of being forwarded to the bridge.
 - Swipe coordinates are validated as finite and ≤ 100000 on all surfaces, so values like `inf`, `nan`, or `1e19` fail with a clean validation error instead of trapping the daemon in the Double→Int conversion.
 - The top-level `swipe` and `android swipe` no longer disagree on fractional Android coordinates (truncation vs rounding); both round half away from zero via shared accessors.
