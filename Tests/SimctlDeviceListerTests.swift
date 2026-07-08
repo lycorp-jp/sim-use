@@ -4,9 +4,10 @@
 import SimUseCore
 import XCTest
 
-/// Unit tests for `SimctlDeviceLister.parse` (the parser path) and the
-/// runtime-identifier translator. We don't shell out to `xcrun simctl`
-/// here; those paths get covered by manual + smoke verification.
+/// Unit tests for `SimctlDeviceLister`: the `parse` path, the
+/// runtime-identifier translator, and the `runSimctl` pipe-drain
+/// contract. The drain tests spawn `/bin/sh` (never a real
+/// `xcrun simctl`) so they run in CI without a simulator.
 final class SimctlDeviceListerTests: XCTestCase {
 
     // MARK: - parse()
@@ -131,5 +132,36 @@ final class SimctlDeviceListerTests: XCTestCase {
             SimctlDeviceLister.friendlyRuntime("unknown.format"),
             "unknown.format"
         )
+    }
+
+    // MARK: - runSimctl()
+
+    /// 200 KB of stdout overflows the ~64 KB pipe buffer; without the drain
+    /// the child blocks on `write(2)` and `waitUntilExit()` never returns.
+    /// Mirrors `AdbRunnerTests.testRunDoesNotDeadlockOnLargeStdout`.
+    func testRunSimctlDoesNotDeadlockOnLargeStdout() throws {
+        let data = try SimctlDeviceLister.runSimctl(
+            executablePath: "/bin/sh",
+            args: ["-c", "head -c 200000 /dev/zero | tr '\\0' 'a'"]
+        )
+        XCTAssertEqual(
+            data.count,
+            200_000,
+            "all 200 KB of stdout must reach the caller — pipe drain is the contract"
+        )
+    }
+
+    /// Stderr must drain the same way; the failure path (non-zero exit)
+    /// must not wedge on a chatty child either.
+    func testRunSimctlDoesNotDeadlockOnLargeStderr() {
+        XCTAssertThrowsError(try SimctlDeviceLister.runSimctl(
+            executablePath: "/bin/sh",
+            args: ["-c", "head -c 200000 /dev/zero | tr '\\0' 'b' 1>&2; exit 7"]
+        )) { error in
+            guard case SimctlDeviceLister.ListerError.simctlFailed(let message) = error else {
+                return XCTFail("expected ListerError.simctlFailed, got \(error)")
+            }
+            XCTAssertTrue(message.contains("exited 7"), "error should surface the non-zero exit code; got: \(message)")
+        }
     }
 }
