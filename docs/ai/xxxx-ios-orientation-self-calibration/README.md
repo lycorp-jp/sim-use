@@ -144,7 +144,7 @@ still emit the raw framebuffer orientation.
 
 ## Verification
 
-- 717 unit tests (`make test`), including: transform math against the
+- 725 unit tests (`make test`), including: transform math against the
   empirically measured mappings, calibrator behavior for all four ground
   truths under a mock device, and a **sidebar-loss regression test** that
   fails with the raw probe and passes with the calibrated one.

@@ -33,6 +33,15 @@ public struct OrientationCalibration: Sendable {
     public static func identity(native: NativePortraitSize? = nil, advisory: CommandAdvisory? = nil) -> OrientationCalibration {
         OrientationCalibration(orientation: .portrait, native: native, probesUsed: 0, advisory: advisory)
     }
+
+    /// Wraps a hit-test probe so UI-space probe points cross into the
+    /// framebuffer space the hit-test consumes; identity returns the
+    /// probe unchanged (the exact pre-fix closure).
+    public func wrappedProbe(
+        _ probe: @escaping OrientationCalibrator.HitTestProbe
+    ) -> OrientationCalibrator.HitTestProbe {
+        isIdentity ? probe : { try await probe(self.hidCGPoint($0)) }
+    }
 }
 
 /// Determines the current interface orientation by probing the AX
@@ -297,6 +306,25 @@ public enum OrientationCalibrator {
             }
         }
         return false
+    }
+
+    /// The single orientation under which `framebufferPoint` projects
+    /// into `hitFrame` (± `containmentSlack`), or nil when zero or
+    /// several orientations do. An ambiguous hit must not pick a winner:
+    /// the `--point` fast path used to give portrait the tie, so on a
+    /// rotated device a raw hit landing on a large frame confidently
+    /// returned the wrong element as `orientation: portrait` with no
+    /// advisory.
+    nonisolated static func soleOrientation(
+        mapping framebufferPoint: CGPoint,
+        into hitFrame: CGRect,
+        native: NativePortraitSize
+    ) -> DisplayOrientation? {
+        let expanded = hitFrame.insetBy(dx: -containmentSlack, dy: -containmentSlack)
+        let contained = DisplayOrientation.allCases.filter {
+            expanded.contains($0.framebufferToUI(framebufferPoint, native: native))
+        }
+        return contained.count == 1 ? contained.first : nil
     }
 
     static func frameRect(of node: [String: Any]) -> CGRect? {

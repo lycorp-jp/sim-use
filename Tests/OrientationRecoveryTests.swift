@@ -93,9 +93,10 @@ struct OrientationRecoveryTests {
             probesUsed: 1,
             advisory: nil
         )
-        // Exactly the wrapper fetchAccessibilityInfo installs for
-        // non-identity calibrations.
-        let children = try await recoveredSidebarChildren { deviceProbe(calibration.hidCGPoint($0)) }
+        // The production wrapper fetchAccessibilityInfo installs for
+        // non-identity calibrations — testing the real composition, not
+        // a hand-rolled equivalent.
+        let children = try await recoveredSidebarChildren(probe: calibration.wrappedProbe { deviceProbe($0) })
         #expect(children.count >= 3)
         for child in children {
             let rect = try #require(OrientationCalibrator.frameRect(of: child))

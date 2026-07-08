@@ -111,9 +111,7 @@ public struct AccessibilityFetcher {
         // points (issue #34) — cross the boundary here so the quadtree's
         // UI-space bookkeeping stays untouched. Identity keeps the exact
         // pre-fix closure.
-        let recoveryProbe: CollapsedChildrenRecovery.PointProbe = calibration.isIdentity
-            ? probe
-            : { p in try await probe(calibration.hidCGPoint(p)) }
+        let recoveryProbe = calibration.wrappedProbe(probe)
 
         let recovered = try await CollapsedChildrenRecovery.recover(
             in: info,
@@ -166,11 +164,11 @@ public struct AccessibilityFetcher {
     /// `--point` coordinates are UI space — the space every printed frame
     /// uses. The hit-test XPC consumes framebuffer points, so a rotated
     /// device needs the query transformed. The first probe doubles as
-    /// calibration evidence: its returned frame tells us which orientations
-    /// could map this point into it. Portrait wins ties (a fat frame
-    /// containing several projections proves nothing, and portrait is the
-    /// overwhelmingly common case); only an unambiguous non-portrait match
-    /// or a full tree calibration triggers the transformed re-query.
+    /// calibration evidence: its returned frame settles the orientation
+    /// only when exactly one candidate maps the probe point into it. Any
+    /// tie (a fat frame containing several projections proves nothing)
+    /// falls through to a full tree calibration — giving portrait the tie
+    /// would return the wrong element on rotated devices.
     private static func pointQuery(
         target: FBSimulator,
         point: AccessibilityPoint,
@@ -203,18 +201,9 @@ public struct AccessibilityFetcher {
                 identityResult = raw
                 if let dict = raw as? [String: Any],
                    let frame = OrientationCalibrator.frameRect(of: dict) {
-                    let expanded = frame.insetBy(
-                        dx: -OrientationCalibrator.containmentSlack,
-                        dy: -OrientationCalibrator.containmentSlack
+                    orientation = OrientationCalibrator.soleOrientation(
+                        mapping: point.cgPoint, into: frame, native: native
                     )
-                    let contained = DisplayOrientation.allCases.filter {
-                        expanded.contains($0.framebufferToUI(point.cgPoint, native: native))
-                    }
-                    if contained.contains(.portrait) {
-                        orientation = .portrait
-                    } else if contained.count == 1 {
-                        orientation = contained[0]
-                    }
                 }
             }
         }
@@ -233,8 +222,20 @@ public struct AccessibilityFetcher {
         }
 
         let resolved = orientation ?? .portrait
+        // `orientation == nil` here means both the identity probe and the
+        // tree-fetch calibration failed to settle anything — that is a
+        // degraded portrait guess, not a clean single-probe confirmation,
+        // and must say so.
         let finalCalibration = calibration ?? OrientationCalibration(
-            orientation: resolved, native: native, probesUsed: 1, advisory: nil
+            orientation: resolved,
+            native: native,
+            probesUsed: 1,
+            advisory: orientation == nil
+                ? CommandAdvisory(
+                    kind: .orientationCalibrationFallback,
+                    message: "Orientation could not be confirmed for the point query; assuming portrait. The result may be wrong if the device is rotated."
+                )
+                : nil
         )
 
         let info: AnyObject

@@ -74,7 +74,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
     /// in dominance order so agents that prefer to reason explicitly
     /// about lists can skip the entries walk. See
     /// `DESCRIBE_UI_OUTLINE.md` §4.
-    public struct ExecutionResult: Codable {
+    public struct ExecutionResult: Codable, CommandAdvisoryProviding {
         public let platform: String
         /// Raw a11y tree passthrough. Optional because the daemon path
         /// skips encoding it when the client didn't request `--json` —
@@ -99,6 +99,11 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         /// (whose AX space already rotates with the screen) and on
         /// legacy daemons. Codable omits the key when nil.
         public let orientation: String?
+        /// Degraded-calibration warning (guessed orientation). Excluded
+        /// from the encoded `data` payload via `CodingKeys` — the
+        /// envelope hoists it to the top-level `advisory` key. See
+        /// `CommandAdvisoryProviding` for the contract.
+        public var commandAdvisory: CommandAdvisory? = nil
 
         public init(
             platform: String,
@@ -110,7 +115,8 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             appLabel: String,
             appPackage: String,
             crashDialog: CrashDialogSignal? = nil,
-            orientation: String? = nil
+            orientation: String? = nil,
+            commandAdvisory: CommandAdvisory? = nil
         ) {
             self.platform = platform
             self.raw = raw
@@ -122,6 +128,20 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             self.appPackage = appPackage
             self.crashDialog = crashDialog
             self.orientation = orientation
+            self.commandAdvisory = commandAdvisory
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case platform
+            case raw
+            case outline
+            case entries
+            case lists
+            case screen
+            case appLabel
+            case appPackage
+            case crashDialog
+            case orientation
         }
     }
 
@@ -267,7 +287,11 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             screen: outline.screen,
             appLabel: outline.appLabel,
             appPackage: appPackage,
-            orientation: orientation?.rawValue
+            orientation: orientation?.rawValue,
+            // Degraded calibration (guessed orientation) must reach the
+            // caller: the outline may have lost regions to mis-mapped
+            // recovery probes and `orientation` is a guess, not a fact.
+            commandAdvisory: fetchResult.calibration?.advisory
         )
     }
 
