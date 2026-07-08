@@ -18,19 +18,26 @@ public enum OutlineCache {
         public let capturedAt: String       // ISO-8601, second precision, UTC
         public let screen: Size
         public let entries: [Entry]
+        /// Calibrated interface orientation at capture time (iOS
+        /// `DisplayOrientation` raw value; nil on Android and in caches
+        /// written before the field existed). Diagnostic — coordinates
+        /// in `entries` are always UI space regardless.
+        public let orientation: String?
 
         public init(
             version: Int,
             udid: String,
             capturedAt: String,
             screen: Size,
-            entries: [Entry]
+            entries: [Entry],
+            orientation: String? = nil
         ) {
             self.version = version
             self.udid = udid
             self.capturedAt = capturedAt
             self.screen = screen
             self.entries = entries
+            self.orientation = orientation
         }
 
         public struct Size: Codable, Equatable, Sendable {
@@ -94,16 +101,18 @@ public enum OutlineCache {
         outline: Outline,
         udid: String,
         capturedAt: Date = Date(),
+        orientation: String? = nil,
         home: URL = homeDirectory
     ) throws {
-        let payload = makePayload(outline: outline, udid: udid, capturedAt: capturedAt)
+        let payload = makePayload(outline: outline, udid: udid, capturedAt: capturedAt, orientation: orientation)
         try writePayload(payload, udid: udid, home: home)
     }
 
     public static func makePayload(
         outline: Outline,
         udid: String,
-        capturedAt: Date = Date()
+        capturedAt: Date = Date(),
+        orientation: String? = nil
     ) -> Payload {
         let entries = outline.entries.map { entry -> Payload.Entry in
             let cx = entry.frame.x + entry.frame.width / 2
@@ -123,7 +132,8 @@ public enum OutlineCache {
             udid: udid,
             capturedAt: isoFormatter.string(from: capturedAt),
             screen: Payload.Size(width: outline.screen.width, height: outline.screen.height),
-            entries: entries
+            entries: entries,
+            orientation: orientation
         )
     }
 

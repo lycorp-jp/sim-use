@@ -22,6 +22,15 @@ public struct AccessibilityPoint: Equatable {
 
 @MainActor
 public struct AccessibilityFetcher {
+    /// Tree (or point-query) payload plus the orientation calibration the
+    /// fetch ran under. `calibration` is nil only for surfaces that never
+    /// calibrated (legacy shims); a degraded calibration is still present
+    /// with its advisory attached.
+    public struct FetchResult {
+        public let data: Data
+        public let calibration: OrientationCalibration?
+    }
+
     public static func fetchAccessibilityInfoJSONData(
         for simulatorUDID: String,
         point: AccessibilityPoint? = nil,
@@ -31,6 +40,26 @@ public struct AccessibilityFetcher {
         seedCellWidth: Double = 160,
         seedCellHeight: Double = 80
     ) async throws -> Data {
+        try await fetchAccessibilityInfo(
+            for: simulatorUDID,
+            point: point,
+            logger: logger,
+            maxProbes: maxProbes,
+            minCellSize: minCellSize,
+            seedCellWidth: seedCellWidth,
+            seedCellHeight: seedCellHeight
+        ).data
+    }
+
+    public static func fetchAccessibilityInfo(
+        for simulatorUDID: String,
+        point: AccessibilityPoint? = nil,
+        logger: SimUseLogger,
+        maxProbes: Int = 300,
+        minCellSize: Double = 14,
+        seedCellWidth: Double = 160,
+        seedCellHeight: Double = 80
+    ) async throws -> FetchResult {
         let perf = PerfLog.start()
 
         let simulatorSet = try await getSimulatorSet(
@@ -45,20 +74,7 @@ public struct AccessibilityFetcher {
         }
         perf.stage("sim lookup")
 
-        if let point {
-            let future = target.accessibilityElement(at: point.cgPoint, nestedFormat: true)
-            let info: AnyObject = try await FutureBridge.value(future)
-            perf.stage("point XPC")
-            let data = try serializeAccessibilityInfo(info)
-            perf.stage("serialize")
-            perf.finish()
-            return data
-        }
-
-        let future = target.accessibilityElements(withNestedFormat: true)
-        let info: AnyObject = try await FutureBridge.value(future)
-        perf.stage("tree fetch XPC")
-
+        let native = NativePortraitSize(screenInfo: target.screenInfo)
         let probe: CollapsedChildrenRecovery.PointProbe = { point in
             let start = DispatchTime.now()
             // `nestedFormat: false` — probes only need the topmost hit's own
@@ -72,9 +88,36 @@ public struct AccessibilityFetcher {
             perf.recordProbe(durationMs: durationMs, phase: "objectAtPoint")
             return raw as? [String: Any]
         }
+
+        if let point {
+            return try await pointQuery(
+                target: target,
+                point: point,
+                native: native,
+                probe: probe,
+                logger: logger,
+                perf: perf
+            )
+        }
+
+        let future = target.accessibilityElements(withNestedFormat: true)
+        let info: AnyObject = try await FutureBridge.value(future)
+        perf.stage("tree fetch XPC")
+
+        let calibration = await calibrate(info: info, native: native, probe: probe, logger: logger)
+        perf.stage("calibrate")
+
+        // AX frames are UI-space while the hit-test consumes framebuffer
+        // points (issue #34) — cross the boundary here so the quadtree's
+        // UI-space bookkeeping stays untouched. Identity keeps the exact
+        // pre-fix closure.
+        let recoveryProbe: CollapsedChildrenRecovery.PointProbe = calibration.isIdentity
+            ? probe
+            : { p in try await probe(calibration.hidCGPoint(p)) }
+
         let recovered = try await CollapsedChildrenRecovery.recover(
             in: info,
-            probe: probe,
+            probe: recoveryProbe,
             logger: logger,
             maxProbes: maxProbes,
             minCellSize: minCellSize,
@@ -87,14 +130,21 @@ public struct AccessibilityFetcher {
         let data = try serializeAccessibilityInfo(recovered)
         perf.stage("serialize")
         perf.finish()
-        return data
+        return FetchResult(data: data, calibration: calibration)
     }
 
     public static func fetchAccessibilityElements(
         for simulatorUDID: String,
         logger: SimUseLogger
     ) async throws -> [AccessibilityElement] {
-        let jsonData = try await fetchAccessibilityInfoJSONData(for: simulatorUDID, point: nil, logger: logger)
+        try await fetchAccessibilityElementsWithCalibration(for: simulatorUDID, logger: logger).roots
+    }
+
+    public static func fetchAccessibilityElementsWithCalibration(
+        for simulatorUDID: String,
+        logger: SimUseLogger
+    ) async throws -> (roots: [AccessibilityElement], calibration: OrientationCalibration?) {
+        let result = try await fetchAccessibilityInfo(for: simulatorUDID, point: nil, logger: logger)
         let decoder = JSONDecoder()
 
         // The root shape is normally an array of elements (nested-format output
@@ -103,12 +153,179 @@ public struct AccessibilityFetcher {
         // root should trigger the fallback; any other decoding error must bubble
         // up so we don't silently hide real bugs in element decoding.
         do {
-            return try decoder.decode([AccessibilityElement].self, from: jsonData)
+            return (try decoder.decode([AccessibilityElement].self, from: result.data), result.calibration)
         }
         catch let DecodingError.typeMismatch(_, context) where context.codingPath.isEmpty {
-            let root = try decoder.decode(AccessibilityElement.self, from: jsonData)
-            return [root]
+            let root = try decoder.decode(AccessibilityElement.self, from: result.data)
+            return ([root], result.calibration)
         }
+    }
+
+    // MARK: - Point query (UI-space semantics)
+
+    /// `--point` coordinates are UI space — the space every printed frame
+    /// uses. The hit-test XPC consumes framebuffer points, so a rotated
+    /// device needs the query transformed. The first probe doubles as
+    /// calibration evidence: its returned frame tells us which orientations
+    /// could map this point into it. Portrait wins ties (a fat frame
+    /// containing several projections proves nothing, and portrait is the
+    /// overwhelmingly common case); only an unambiguous non-portrait match
+    /// or a full tree calibration triggers the transformed re-query.
+    private static func pointQuery(
+        target: FBSimulator,
+        point: AccessibilityPoint,
+        native: NativePortraitSize?,
+        probe: @escaping CollapsedChildrenRecovery.PointProbe,
+        logger: SimUseLogger,
+        perf: PerfLog
+    ) async throws -> FetchResult {
+        func nestedQuery(_ p: CGPoint) async throws -> AnyObject {
+            let future = target.accessibilityElement(at: p, nestedFormat: true)
+            return try await FutureBridge.value(future)
+        }
+
+        guard let native else {
+            // No screen info — keep the legacy raw-space behavior.
+            let info = try await nestedQuery(point.cgPoint)
+            perf.stage("point XPC")
+            let data = try serializeAccessibilityInfo(info)
+            perf.finish()
+            return FetchResult(data: data, calibration: .identity())
+        }
+
+        var orientation: DisplayOrientation? = nil
+        var identityResult: AnyObject? = nil
+        var calibration: OrientationCalibration? = nil
+
+        if point.x < native.width, point.y < native.height {
+            if let raw = try? await nestedQuery(point.cgPoint) {
+                perf.stage("point XPC")
+                identityResult = raw
+                if let dict = raw as? [String: Any],
+                   let frame = OrientationCalibrator.frameRect(of: dict) {
+                    let expanded = frame.insetBy(
+                        dx: -OrientationCalibrator.containmentSlack,
+                        dy: -OrientationCalibrator.containmentSlack
+                    )
+                    let contained = DisplayOrientation.allCases.filter {
+                        expanded.contains($0.framebufferToUI(point.cgPoint, native: native))
+                    }
+                    if contained.contains(.portrait) {
+                        orientation = .portrait
+                    } else if contained.count == 1 {
+                        orientation = contained[0]
+                    }
+                }
+            }
+        }
+        // A UI point outside the native portrait bounds can only exist in
+        // a landscape UI — the identity probe was skipped above and the
+        // tree calibration below settles which landscape.
+
+        if orientation == nil {
+            let future = target.accessibilityElements(withNestedFormat: true)
+            if let info: AnyObject = try? await FutureBridge.value(future) {
+                perf.stage("tree fetch XPC (point calibration)")
+                let treeCalibration = await calibrate(info: info, native: native, probe: probe, logger: logger)
+                calibration = treeCalibration
+                orientation = treeCalibration.orientation
+            }
+        }
+
+        let resolved = orientation ?? .portrait
+        let finalCalibration = calibration ?? OrientationCalibration(
+            orientation: resolved, native: native, probesUsed: 1, advisory: nil
+        )
+
+        let info: AnyObject
+        if resolved == .portrait, let identityResult {
+            info = identityResult
+        } else {
+            info = try await nestedQuery(finalCalibration.hidCGPoint(point.cgPoint))
+            perf.stage("point XPC (transformed)")
+        }
+        let data = try serializeAccessibilityInfo(info)
+        perf.stage("serialize")
+        perf.finish()
+        return FetchResult(data: data, calibration: finalCalibration)
+    }
+
+    // MARK: - Calibration over the raw tree payload
+
+    private static func calibrate(
+        info: AnyObject,
+        native: NativePortraitSize?,
+        probe: @escaping CollapsedChildrenRecovery.PointProbe,
+        logger: SimUseLogger
+    ) async -> OrientationCalibration {
+        let roots = rawRoots(of: info)
+        let display = rawDisplayFrame(in: roots)
+        return await OrientationCalibrator.calibrate(
+            native: native,
+            uiScreenSize: display.map { (width: $0.width, height: $0.height) },
+            discriminators: rawDiscriminatorRects(in: roots, display: display),
+            probe: probe,
+            logger: logger
+        )
+    }
+
+    private static func rawRoots(of info: AnyObject) -> [[String: Any]] {
+        if let array = info as? [[String: Any]] { return array }
+        if let dict = info as? [String: Any] { return [dict] }
+        return []
+    }
+
+    /// Raw-payload mirror of `AXDisplayFrame.frame(in:)`: the largest
+    /// positive-area Application-typed root, falling back to the largest
+    /// root of any type.
+    private static func rawDisplayFrame(in roots: [[String: Any]]) -> CGRect? {
+        let usable = roots.compactMap { root -> (isApplication: Bool, rect: CGRect)? in
+            guard let rect = OrientationCalibrator.frameRect(of: root) else { return nil }
+            let type = root["type"] as? String
+            let role = root["role"] as? String
+            return (type == "Application" || role == "AXApplication", rect)
+        }
+        let applications = usable.filter(\.isApplication)
+        let pool = applications.isEmpty ? usable : applications
+        return pool.max { $0.rect.width * $0.rect.height < $1.rect.width * $1.rect.height }?.rect
+    }
+
+    /// Off-center element frames from a bounded walk of the raw tree —
+    /// calibration needs a handful of asymmetric rects, not the full tree.
+    private static func rawDiscriminatorRects(
+        in roots: [[String: Any]],
+        display: CGRect?,
+        nodeBudget: Int = 500,
+        limit: Int = 40
+    ) -> [CGRect] {
+        var rects: [CGRect] = []
+        var visited = 0
+        var queue = roots
+        while !queue.isEmpty, visited < nodeBudget {
+            let node = queue.removeFirst()
+            visited += 1
+            let type = node["type"] as? String
+            let role = node["role"] as? String
+            if type != "Application", role != "AXApplication",
+               let rect = OrientationCalibrator.frameRect(of: node) {
+                rects.append(rect)
+            }
+            if let children = node["children"] as? [[String: Any]] {
+                queue.append(contentsOf: children)
+            }
+        }
+        guard let display else { return Array(rects.prefix(limit)) }
+        let cx = display.midX
+        let cy = display.midY
+        func distanceSquared(_ r: CGRect) -> Double {
+            let dx = r.midX - cx
+            let dy = r.midY - cy
+            return dx * dx + dy * dy
+        }
+        return rects
+            .sorted { distanceSquared($0) > distanceSquared($1) }
+            .prefix(limit)
+            .map { $0 }
     }
 
     private static func serializeAccessibilityInfo(_ accessibilityInfo: AnyObject) throws -> Data {

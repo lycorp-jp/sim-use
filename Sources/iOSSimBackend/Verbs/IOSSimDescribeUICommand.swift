@@ -94,6 +94,11 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         /// Always `nil` on iOS — iOS apps disappear on crash rather than
         /// raising a system dialog. Codable omits the key when nil.
         public let crashDialog: CrashDialogSignal?
+        /// Calibrated interface orientation of this snapshot (issue #34):
+        /// a `DisplayOrientation` raw value on iOS, `nil` on Android
+        /// (whose AX space already rotates with the screen) and on
+        /// legacy daemons. Codable omits the key when nil.
+        public let orientation: String?
 
         public init(
             platform: String,
@@ -104,7 +109,8 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             screen: Outline.Frame,
             appLabel: String,
             appPackage: String,
-            crashDialog: CrashDialogSignal? = nil
+            crashDialog: CrashDialogSignal? = nil,
+            orientation: String? = nil
         ) {
             self.platform = platform
             self.raw = raw
@@ -115,6 +121,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             self.appLabel = appLabel
             self.appPackage = appPackage
             self.crashDialog = crashDialog
+            self.orientation = orientation
         }
     }
 
@@ -180,15 +187,17 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         let logger = SimUseLogger()
         try await performGlobalSetup(logger: logger)
 
-        let jsonData = try await AccessibilityFetcher.fetchAccessibilityInfoJSONData(
+        let parsedPoint = try Self.parsePoint(point)
+        let fetchResult = try await AccessibilityFetcher.fetchAccessibilityInfo(
             for: device.resolved,
-            point: try Self.parsePoint(point),
+            point: parsedPoint,
             logger: logger,
             maxProbes: maxProbes,
             minCellSize: minCellSize,
             seedCellWidth: seedCellWidth,
             seedCellHeight: seedCellHeight
         )
+        let jsonData = fetchResult.data
         // Only build the JSONValue tree when the client asked for it
         // (`--json`). On a complex screen the parse is ~30 ms and
         // shuffling it across the daemon socket adds another ~80 ms.
@@ -224,17 +233,29 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             rootElement: typedTree.first,
             cachedSnapshot: DaemonDispatch.lastLivenessSnapshot
         )
+        let orientation = fetchResult.calibration?.orientation
         let outline = OutlineFormatter.render(
             tree: typedTree,
-            foregroundBundleId: appPackage.isEmpty ? nil : appPackage
+            foregroundBundleId: appPackage.isEmpty ? nil : appPackage,
+            // Portrait keeps the legacy header byte-for-byte; only a
+            // rotated screen earns the tag.
+            orientationTag: orientation.flatMap { $0 == .portrait ? nil : $0.rawValue }
         )
 
         // Alias cache is best-effort: a write failure (permissions, full
         // disk) must not prevent the user from seeing the snapshot.
-        do {
-            try OutlineCache.write(outline: outline, udid: device.resolved)
-        } catch {
-            logger.info().log("Failed to write outline cache: \(error.localizedDescription)")
+        // `--point` results never persist — a one-element subtree would
+        // clobber the full-screen @N table the next tap resolves against.
+        if parsedPoint == nil {
+            do {
+                try OutlineCache.write(
+                    outline: outline,
+                    udid: device.resolved,
+                    orientation: orientation?.rawValue
+                )
+            } catch {
+                logger.info().log("Failed to write outline cache: \(error.localizedDescription)")
+            }
         }
 
         return ExecutionResult(
@@ -245,7 +266,8 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             lists: outline.lists,
             screen: outline.screen,
             appLabel: outline.appLabel,
-            appPackage: appPackage
+            appPackage: appPackage,
+            orientation: orientation?.rawValue
         )
     }
 
