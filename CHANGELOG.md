@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `sim-use devices` no longer hangs forever on machines with enough simulators installed to push `simctl list devices -j` past the ~64 KB kernel pipe buffer. `SimctlDeviceLister.runSimctl` now drains stdout/stderr concurrently with the child (the same `readabilityHandler` drain `Adb.run` uses on the Android path) instead of reading only after `waitUntilExit()`, which deadlocked once the child blocked on `write(2)`.
 - The root `sim-use --help` abstract no longer claims the tool is iOS-Simulator-only; it now mentions Android emulators/devices as well.
 - `android swipe` invoked directly now enforces the same coordinate rules as the other surfaces: negative coordinates and identical start/end points are rejected at validate time instead of being forwarded to the bridge.
 - Swipe coordinates are validated as finite and ≤ 100000 on all surfaces, so values like `inf`, `nan`, or `1e19` fail with a clean validation error instead of trapping the daemon in the Double→Int conversion.

@@ -30,15 +30,34 @@ public enum SimctlDeviceLister {
 
     // MARK: - Internals
 
-    private static func runSimctl(args: [String]) throws -> Data {
+    // `internal` + injectable `executablePath` so tests can drive the drain
+    // against `/bin/sh`; production uses the default `xcrun`.
+    static func runSimctl(executablePath: String = "/usr/bin/xcrun", args: [String]) throws -> Data {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = args
 
         let stdout = Pipe()
         let stderr = Pipe()
         process.standardOutput = stdout
         process.standardError = stderr
+
+        // Drain both pipes while the child runs. Once `simctl list devices -j`
+        // outgrows the ~64 KB pipe buffer the child blocks on `write(2)` and
+        // never exits, hanging `waitUntilExit()`. Same drain as `Adb.run`.
+        let bufferLock = NSLock()
+        var outBuffer = Data()
+        var errBuffer = Data()
+        stdout.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            bufferLock.lock(); outBuffer.append(chunk); bufferLock.unlock()
+        }
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            bufferLock.lock(); errBuffer.append(chunk); bufferLock.unlock()
+        }
 
         do {
             try process.run()
@@ -47,13 +66,21 @@ public enum SimctlDeviceLister {
         }
         process.waitUntilExit()
 
+        // Detach handlers and collect anything left after exit.
+        stdout.fileHandleForReading.readabilityHandler = nil
+        stderr.fileHandleForReading.readabilityHandler = nil
+        bufferLock.lock()
+        outBuffer.append(stdout.fileHandleForReading.readDataToEndOfFile())
+        errBuffer.append(stderr.fileHandleForReading.readDataToEndOfFile())
+        bufferLock.unlock()
+
         guard process.terminationStatus == 0 else {
-            let err = String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            let err = String(data: errBuffer, encoding: .utf8) ?? ""
             throw ListerError.simctlFailed(
                 message: "xcrun simctl exited \(process.terminationStatus): \(err.trimmingCharacters(in: .whitespacesAndNewlines))"
             )
         }
-        return stdout.fileHandleForReading.readDataToEndOfFile()
+        return outBuffer
     }
 
     /// Parses simctl's JSON:
