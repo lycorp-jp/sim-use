@@ -228,6 +228,32 @@ struct OrientationCalibratorTests {
         #expect(result.hidPoint(x: 100, y: 200) == (100, 200))
     }
 
+    @Test("stale snapshot advisory fires only on dimension mismatch")
+    func staleSnapshotAdvisory() {
+        func payload(width: Int, height: Int) -> OutlineCache.Payload {
+            OutlineCache.Payload(
+                version: OutlineCache.currentVersion,
+                udid: "TEST",
+                capturedAt: "2026-07-08T00:00:00Z",
+                screen: .init(width: width, height: height),
+                entries: []
+            )
+        }
+        let landscape = OrientationCalibration(
+            orientation: .landscapeRight, native: iPadNative, probesUsed: 1, advisory: nil
+        )
+        // Snapshot captured in the same landscape orientation — no advisory.
+        #expect(IOSSimTapCommand.staleSnapshotAdvisory(
+            calibration: landscape, payload: payload(width: 1210, height: 834)
+        ) == nil)
+        // Snapshot captured in portrait, device now landscape — stale.
+        let advisory = IOSSimTapCommand.staleSnapshotAdvisory(
+            calibration: landscape, payload: payload(width: 834, height: 1210)
+        )
+        #expect(advisory?.kind == .orientationCalibrationFallback)
+        #expect(advisory?.message.contains("834x1210") == true)
+    }
+
     @Test("orientation advisory kind survives an encode/decode round trip")
     func advisoryKindRoundTrip() throws {
         let advisory = CommandAdvisory(

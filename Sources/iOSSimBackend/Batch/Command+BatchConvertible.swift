@@ -35,6 +35,8 @@ private func buildDelayedEvent(
 
 extension IOSSimTapCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
+        // Dispatch coordinates: framebuffer space for AX-resolved
+        // selectors (issue #34), raw for explicit x/y.
         let resolvedPoint: (x: Double, y: Double)
 
         if let pointX, let pointY {
@@ -55,7 +57,7 @@ extension IOSSimTapCommand: BatchConvertible {
                 throw CLIError(errorDescription: "Unexpected state: no coordinates and no element query.")
             }
 
-            let target = try await AccessibilityPoller.resolveWithPollingTarget(
+            let hidTarget = try await AccessibilityPoller.resolveWithPollingHIDTarget(
                 query: query,
                 simulatorUDID: context.simulatorUDID,
                 waitTimeout: context.waitTimeout,
@@ -63,15 +65,19 @@ extension IOSSimTapCommand: BatchConvertible {
                 elementType: elementType,
                 frameFilter: frameFilter,
                 rootsProvider: { forceRefresh in
-                    try await context.accessibilityRoots(logger: logger, forceRefresh: forceRefresh)
+                    let roots = try await context.accessibilityRoots(logger: logger, forceRefresh: forceRefresh)
+                    // Batch-wide lazy calibration; its advisory is
+                    // recorded once inside the context.
+                    let calibration = await context.orientationCalibration(roots: roots, logger: logger)
+                    return (roots, calibration)
                 },
                 logger: logger
             )
-            resolvedPoint = (target.x, target.y)
+            resolvedPoint = hidTarget.hid
             // Same full-screen-wrapper warning the standalone tap emits;
             // batch has no per-step envelope, so it rides the context to
             // the batch ExecutionResult.
-            if let advisory = target.advisory {
+            if let advisory = hidTarget.target.advisory {
                 context.recordAdvisory(advisory)
             }
         }

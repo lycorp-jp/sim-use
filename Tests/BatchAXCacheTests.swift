@@ -52,7 +52,10 @@ private func makeContext(
         typeChunkSize: 200,
         waitTimeout: waitTimeout,
         pollInterval: pollInterval,
-        fetchElements: { _, _ in fetcher.fetch() }
+        fetchElements: { _, _ in fetcher.fetch() },
+        // The default calibrator needs a live simulator; fixture trees
+        // are upright by construction.
+        calibrator: { _, _, _ in .identity() }
     )
 }
 

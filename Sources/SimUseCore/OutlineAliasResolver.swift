@@ -163,6 +163,18 @@ public enum OutlineAliasResolver {
         udid: String,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
     ) throws -> Resolved {
+        try resolveWithPayload(raw, udid: udid, home: home).resolved
+    }
+
+    /// Like `resolve`, but also surfaces the matched cache entry and the
+    /// whole snapshot payload. HID consumers need them for orientation
+    /// calibration: the entry's frame is the primary probe discriminator
+    /// and the snapshot screen size seeds the candidate ordering.
+    public static func resolveWithPayload(
+        _ raw: String,
+        udid: String,
+        home: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> (resolved: Resolved, entry: OutlineCache.Payload.Entry, payload: OutlineCache.Payload) {
         guard let parsed = parse(raw) else {
             // Distinguish "empty" from "malformed" for a more helpful
             // error than a single catch-all.
@@ -195,7 +207,7 @@ public enum OutlineAliasResolver {
             guard let entry = payload.entries.first(where: { $0.aliases.at == n }) else {
                 throw ResolutionError.atOutOfRange(number: n, snapshot: payload)
             }
-            return Resolved(
+            let resolved = Resolved(
                 point: (x: Double(entry.x), y: Double(entry.y)),
                 kind: .at,
                 number: n,
@@ -203,6 +215,7 @@ public enum OutlineAliasResolver {
                 role: entry.role,
                 label: entry.label
             )
+            return (resolved, entry, payload)
 
         case .list(let index, let scope):
             // First check the snapshot has *any* list aliases at all —
@@ -227,7 +240,7 @@ public enum OutlineAliasResolver {
                 throw ResolutionError.listIndexOutOfRange(scope: scope, index: index, snapshot: payload)
             }
 
-            return Resolved(
+            let resolved = Resolved(
                 point: (x: Double(entry.x), y: Double(entry.y)),
                 kind: .list,
                 number: index,
@@ -235,6 +248,7 @@ public enum OutlineAliasResolver {
                 role: entry.role,
                 label: entry.label
             )
+            return (resolved, entry, payload)
 
         case .id:
             // Already handled above; unreachable in practice.

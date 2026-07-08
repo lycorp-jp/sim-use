@@ -182,8 +182,8 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
         try Self.writeSimulatorPasteboard(text: inputText, udid: device.resolved)
 
         if viaMenu {
-            let target = try await resolveTargetPoint(logger: logger)
-            try await pasteViaEditMenu(at: target, logger: logger)
+            let (target, calibration) = try await resolveTargetPoint(logger: logger)
+            try await pasteViaEditMenu(at: target, calibration: calibration, logger: logger)
         } else {
             if replace {
                 logger.info().log("--replace: sending Cmd+A to select all")
@@ -199,14 +199,19 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
 
     // MARK: - Edit-menu paste path
 
-    private func resolveTargetPoint(logger: SimUseLogger) async throws -> (x: Double, y: Double) {
+    /// Returns the long-press point in HID (framebuffer) space plus the
+    /// orientation calibration when one was computed. Explicit
+    /// `--target-x/y` stays raw by the same contract as `tap -x/-y`;
+    /// `--id` resolves through the AX tree (UI space) and must be
+    /// transformed (issue #34).
+    private func resolveTargetPoint(logger: SimUseLogger) async throws -> ((x: Double, y: Double), OrientationCalibration?) {
         if let x = targetX, let y = targetY {
-            return (x, y)
+            return ((x, y), nil)
         }
         guard let targetID else {
             throw CLIError(errorDescription: "Internal: --via-menu reached execute without a target.")
         }
-        return try await AccessibilityPoller.resolveWithPolling(
+        let hidTarget = try await AccessibilityPoller.resolveWithPollingHIDTarget(
             query: .id(targetID),
             simulatorUDID: device.resolved,
             waitTimeout: 0,
@@ -214,28 +219,34 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
             elementType: nil,
             logger: logger
         )
+        return (hidTarget.hid, hidTarget.calibration)
     }
 
-    private func pasteViaEditMenu(at target: (x: Double, y: Double), logger: SimUseLogger) async throws {
+    private func pasteViaEditMenu(
+        at target: (x: Double, y: Double),
+        calibration: OrientationCalibration?,
+        logger: SimUseLogger
+    ) async throws {
         logger.info().log("long-press at (\(target.x),\(target.y))")
         try await longPress(at: target, logger: logger)
 
         if replace {
-            try await tapEditMenuItem(labels: Self.selectAllLabels, kind: "Select All", logger: logger)
+            try await tapEditMenuItem(labels: Self.selectAllLabels, kind: "Select All", calibration: calibration, logger: logger)
             do {
                 try await tapEditMenuItem(
                     labels: Self.pasteMenuLabels,
                     kind: "Paste",
+                    calibration: calibration,
                     logger: logger,
                     timeout: 1.0
                 )
             } catch {
                 logger.info().log("Paste menu did not re-appear after Select All; re-long-pressing to re-invoke")
                 try await longPress(at: target, logger: logger)
-                try await tapEditMenuItem(labels: Self.pasteMenuLabels, kind: "Paste", logger: logger)
+                try await tapEditMenuItem(labels: Self.pasteMenuLabels, kind: "Paste", calibration: calibration, logger: logger)
             }
         } else {
-            try await tapEditMenuItem(labels: Self.pasteMenuLabels, kind: "Paste", logger: logger)
+            try await tapEditMenuItem(labels: Self.pasteMenuLabels, kind: "Paste", calibration: calibration, logger: logger)
         }
     }
 
@@ -251,6 +262,7 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
     private func tapEditMenuItem(
         labels: Set<String>,
         kind: String,
+        calibration: OrientationCalibration?,
         logger: SimUseLogger,
         timeout: Double? = nil
     ) async throws {
@@ -267,8 +279,19 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
             }), let frame = match.frame, frame.width > 0, frame.height > 0 {
                 let x = frame.x + frame.width / 2.0
                 let y = frame.y + frame.height / 2.0
+                // Menu-item centers come from the AX tree (UI space).
+                // Reuse the target resolution's calibration; the
+                // explicit --target-x/y path never calibrated, so probe
+                // now against the tree that contains the match.
+                let effective: OrientationCalibration
+                if let calibration {
+                    effective = calibration
+                } else {
+                    effective = await OrientationCalibrator.calibrate(udid: device.resolved, roots: elements, logger: logger)
+                }
+                let hid = effective.hidPoint(x: x, y: y)
                 logger.info().log("Tapping '\(match.normalizedLabel ?? "?")' (\(kind)) at (\(x),\(y))")
-                let tap = FBSimulatorHIDEvent.tapAt(x: x, y: y)
+                let tap = FBSimulatorHIDEvent.tapAt(x: hid.x, y: hid.y)
                 try await HIDInteractor.performHIDEvent(tap, for: device.resolved, logger: logger)
                 return
             }

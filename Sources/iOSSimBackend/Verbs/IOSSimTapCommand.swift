@@ -266,15 +266,29 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         let resolvedPoint: (x: Double, y: Double)
         let resolvedDescription: String
         let resolvedAdvisory: CommandAdvisory?
+        // Non-nil for AX-derived targets: their coordinates are UI space
+        // and must be transformed into framebuffer space before HID
+        // dispatch (issue #34). Explicit -x/-y stays raw by contract.
+        let calibration: OrientationCalibration?
 
         if let alias {
             switch OutlineAliasResolver.parse(alias) {
             case .at, .list:
                 do {
-                    let resolved = try OutlineAliasResolver.resolve(alias, udid: device.resolved)
+                    let (resolved, entry, payload) = try OutlineAliasResolver.resolveWithPayload(alias, udid: device.resolved)
                     resolvedPoint = resolved.point
                     resolvedDescription = resolved.humanDescription
-                    resolvedAdvisory = nil
+                    let snapshotCalibration = await OrientationCalibrator.calibrate(
+                        udid: device.resolved,
+                        snapshotEntry: entry,
+                        payload: payload,
+                        logger: logger
+                    )
+                    calibration = snapshotCalibration
+                    resolvedAdvisory = CommandAdvisory.merged([
+                        snapshotCalibration.advisory,
+                        Self.staleSnapshotAdvisory(calibration: snapshotCalibration, payload: payload),
+                    ].compactMap { $0 })
                 } catch {
                     if !jsonOutput {
                         print("Warning: \(error.localizedDescription) No tap performed.", to: &standardError)
@@ -287,7 +301,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
                 // handling. No alias cache read — the selector is
                 // self-contained and works across multiple snapshots.
                 do {
-                    let target = try await AccessibilityPoller.resolveWithPollingTarget(
+                    let hidTarget = try await AccessibilityPoller.resolveWithPollingHIDTarget(
                         query: .id(uniqueId),
                         simulatorUDID: device.resolved,
                         waitTimeout: waitTimeout,
@@ -296,8 +310,9 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
                         frameFilter: frameFilter,
                         logger: logger
                     )
-                    resolvedPoint = (x: target.x, y: target.y)
-                    resolvedAdvisory = target.advisory
+                    resolvedPoint = hidTarget.ui
+                    resolvedAdvisory = hidTarget.advisory
+                    calibration = hidTarget.calibration
                     resolvedDescription = "#\(uniqueId) (AXUniqueId) at (\(resolvedPoint.x), \(resolvedPoint.y))"
                 } catch let error as ElementResolutionError {
                     if !jsonOutput {
@@ -312,6 +327,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             resolvedPoint = (x: pointX, y: pointY)
             resolvedDescription = "(\(pointX), \(pointY))"
             resolvedAdvisory = nil
+            calibration = nil
         } else {
             let query: AccessibilityQuery
             if let elementID {
@@ -329,7 +345,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             }
 
             do {
-                let target = try await AccessibilityPoller.resolveWithPollingTarget(
+                let hidTarget = try await AccessibilityPoller.resolveWithPollingHIDTarget(
                     query: query,
                     simulatorUDID: device.resolved,
                     waitTimeout: waitTimeout,
@@ -338,8 +354,9 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
                     frameFilter: frameFilter,
                     logger: logger
                 )
-                resolvedPoint = (x: target.x, y: target.y)
-                resolvedAdvisory = target.advisory
+                resolvedPoint = hidTarget.ui
+                resolvedAdvisory = hidTarget.advisory
+                calibration = hidTarget.calibration
             } catch let error as ElementResolutionError {
                 if !jsonOutput {
                     print("Warning: \(error.localizedDescription) No tap performed.", to: &standardError)
@@ -350,7 +367,15 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             resolvedDescription = "center of matched element at (\(resolvedPoint.x), \(resolvedPoint.y))"
         }
 
+        // UI space → framebuffer space for HID; identity (and -x/-y) pass
+        // through untouched. Logging and ExecutionResult keep UI-space
+        // coordinates so output matches the outline the user is reading.
+        let dispatchPoint = calibration?.hidPoint(x: resolvedPoint.x, y: resolvedPoint.y) ?? resolvedPoint
+
         logger.info().log("Tapping at \(resolvedDescription)")
+        if dispatchPoint != resolvedPoint, let calibration {
+            logger.info().log("Orientation \(calibration.orientation.rawValue): dispatching HID at (\(dispatchPoint.x), \(dispatchPoint.y))")
+        }
 
         if let preDelay = preDelay, preDelay > 0 {
             logger.info().log("Pre-delay: \(preDelay)s")
@@ -358,8 +383,12 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         }
 
         if multiTouch.fingers == 2 {
-            let finger2 = multiTouch.fingerTwoPoint(forFinger1: resolvedPoint)
-            logger.info().log("Two-finger tap: finger1=(\(resolvedPoint.x),\(resolvedPoint.y)) finger2=(\(finger2.x),\(finger2.y)) duration=\(duration ?? 0)s")
+            // Finger geometry is defined in UI space (offsets relative to
+            // what the user sees); both fingers cross into framebuffer
+            // space together.
+            let finger2UI = multiTouch.fingerTwoPoint(forFinger1: resolvedPoint)
+            let finger2 = calibration?.hidPoint(x: finger2UI.x, y: finger2UI.y) ?? finger2UI
+            logger.info().log("Two-finger tap: finger1=(\(resolvedPoint.x),\(resolvedPoint.y)) finger2=(\(finger2UI.x),\(finger2UI.y)) duration=\(duration ?? 0)s")
             // The Down+Up shape with no Move events still registers as
             // a continuous gesture (the recogniser keys on finger
             // identifier continuity, not event count). When a duration
@@ -382,8 +411,8 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             let stepMs = hold > 0 ? max(minStepMs, Int((hold * 500).rounded())) : minStepMs
             try await MultiTouchDispatcher.run(
                 session: session,
-                start: (p1: resolvedPoint, p2: finger2),
-                end: (p1: resolvedPoint, p2: finger2),
+                start: (p1: dispatchPoint, p2: finger2),
+                end: (p1: dispatchPoint, p2: finger2),
                 steps: 1,
                 stepMs: stepMs,
                 logger: logger
@@ -396,20 +425,20 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             // some recognisers.
             logger.info().log("Touch down (hold \(duration)s)")
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.touchDownAt(x: resolvedPoint.x, y: resolvedPoint.y),
+                FBSimulatorHIDEvent.touchDownAt(x: dispatchPoint.x, y: dispatchPoint.y),
                 for: device.resolved,
                 logger: logger
             )
             try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             logger.info().log("Touch up")
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.touchUpAt(x: resolvedPoint.x, y: resolvedPoint.y),
+                FBSimulatorHIDEvent.touchUpAt(x: dispatchPoint.x, y: dispatchPoint.y),
                 for: device.resolved,
                 logger: logger
             )
         } else {
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.tapAt(x: resolvedPoint.x, y: resolvedPoint.y),
+                FBSimulatorHIDEvent.tapAt(x: dispatchPoint.x, y: dispatchPoint.y),
                 for: device.resolved,
                 logger: logger
             )
@@ -426,5 +455,26 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
         .line("✓ Tap at (\(result.x), \(result.y)) completed successfully")
+    }
+
+    /// The `@N` cache was written by a `describe-ui` run whose screen
+    /// size no longer matches the calibrated orientation's UI size —
+    /// either the device rotated since the snapshot or the foreground
+    /// screen changed shape. The tap still proceeds best-effort (the
+    /// transform is correct for coordinates that are still valid), but
+    /// the caller should know why it might have missed.
+    static func staleSnapshotAdvisory(
+        calibration: OrientationCalibration,
+        payload: OutlineCache.Payload
+    ) -> CommandAdvisory? {
+        guard let native = calibration.native else { return nil }
+        let size = calibration.orientation.uiSize(native: native)
+        guard abs(size.width - Double(payload.screen.width)) > 1
+            || abs(size.height - Double(payload.screen.height)) > 1
+        else { return nil }
+        return CommandAdvisory(
+            kind: .orientationCalibrationFallback,
+            message: "Snapshot was captured at \(payload.screen.width)x\(payload.screen.height) but the current \(calibration.orientation.rawValue) screen is \(Int(size.width))x\(Int(size.height)) — the device rotated or the screen changed since describe-ui; cached @N coordinates may be stale. Re-run describe-ui."
+        )
     }
 }
