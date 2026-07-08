@@ -22,6 +22,18 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 **Rule:** Always re-run `sim-use ui` after any action that changes the screen (navigation, dismissing a dialog, scrolling). Then use the fresh `@N` values.
 
+## iOS: rotated simulator
+
+**Symptom:** The `App:` header shows an orientation tag like `(landscape-right)` or `(portrait-upside-down)`, or a tap emits an `[i] Screen orientation could not be confirmed…` advisory.
+
+**Why:** iOS accessibility frames rotate with the app while HID taps target the fixed portrait framebuffer. sim-use bridges the two automatically: every AX-derived tap (`@N`, `#<id>`, `--label` family, batch steps) self-calibrates the current orientation with 1–3 hit-test probes and transforms coordinates before dispatch.
+
+**Recipes:**
+1. Normally nothing to do — selectors work in any orientation, and outline/tap coordinates always read in UI space (what you see).
+2. The calibration-fallback advisory means the mapping could not be verified (empty or symmetric screen) and portrait was assumed; re-run `ui` and retry, or use explicit `-x/-y`.
+3. A "snapshot was captured at WxH…" advisory means the device rotated after the last `ui`; re-run `ui` to refresh the `@N` table.
+4. Explicit `-x/-y` (and `--target-x/y`) are never transformed — they are device-native portrait coordinates by contract.
+
 ## System layer detection
 
 **Symptom:** `ui` output shows unexpected content — the `App:` header names a system process like `SpringBoard` (iOS) or `com.android.systemui` (Android).

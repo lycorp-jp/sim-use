@@ -65,6 +65,11 @@ Multiple selector styles for different needs:
 | `--label` | `tap --label "General"` | Scripted flows with `--wait-timeout` |
 | `-x -y` | `tap -x 100 -y 200` | Last resort — no AX data |
 
+AX-derived selectors work in any orientation: sim-use self-calibrates the
+current rotation on each command and maps outline coordinates onto the
+framebuffer before dispatching (iOS). Explicit `-x/-y` is always interpreted
+in the device-native portrait space.
+
 
 ## Why sim-use
 
@@ -309,10 +314,10 @@ Press Ctrl+C to stop; sim-use finalises the MP4 before exiting.
 ```bash
 sim-use ui --device $UDID                      # compact outline (default)
 sim-use ui --json --device $UDID               # structured envelope
-sim-use ui --point 100,200 --device $UDID      # specific point
+sim-use ui --point 100,200 --device $UDID      # specific point (same UI space as outline frames)
 ```
 
-The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `Group` regions) and `@N` / `#N` / `#N@M` / `#<id>` alias addressing.
+The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `Group` regions) and `@N` / `#N` / `#N@M` / `#<id>` alias addressing. When the device is rotated, the `App:` header carries an orientation tag (e.g. `(landscape-right)`) and the `--json` envelope an `orientation` field.
 
 A list cluster detector runs on every snapshot and attaches `#N` aliases to detected list cells. Outline lines for cells render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`); the `--json` envelope adds a sibling `lists` array, ordered by detector score, where each entry summarises one cluster as `{ scope, cellCount, cellHeight, containerRole, containerLabel, bbox, score }`. Per-cell membership is also surfaced through `entries[*].aliases.list = { scope, index }` so consumers can pivot on either shape. `lists[0]` is always the dominant cluster, or the array is empty when nothing list-shaped is on screen.
 
