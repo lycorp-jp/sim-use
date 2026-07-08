@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `describe-ui --point` coordinates are now interpreted in the same UI space as the printed outline frames. On a rotated simulator the query is transformed onto the framebuffer before the hit-test (previously the raw point was hit-tested in framebuffer space and returned the wrong element); an upright device behaves exactly as before.
+- `describe-ui` surfaces the calibrated interface orientation: the `App:` header gains a suffix tag (e.g. `(landscape-right)`) when the device is not upright, `--json` `data` gains an `orientation` field, and the alias snapshot records the orientation it was captured under.
 - Swipe coordinate flags now live in a shared `SwipeCoordinateOptions` group, so the top-level, iOS, and Android surfaces validate identically; the swipe success line and `--json` `data` payload derive the coordinates from the execution result (`data` now includes a `coordinates` object).
 - `swipe --duration` is capped at 10 seconds on every surface (parity with `tap` / `multi-touch` / gesture presets). The error message spells out that durations are in seconds, so a millisecond value passed by habit (0.5.x `android swipe`, `adb shell input swipe`) fails loudly instead of producing a multi-minute swipe.
 - JSON output no longer emits the legacy `udid` key (dual-emitted since the `deviceId` transition); `deviceId` is the canonical key in `devices --json`, `daemon stop/status --json`, and Viewer API responses. Inputs (daemon wire decode, Viewer API requests) still accept `udid` as a deprecated alias, to be removed in a future release.
@@ -30,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The root `sim-use --help` abstract no longer claims the tool is iOS-Simulator-only; it now mentions Android emulators/devices as well.
+- iOS taps resolved through accessibility (`tap @N` / `#N` / `#<id>` / the `--label` family, batch tap steps, `paste --via-menu` targets and edit-menu items) now land correctly when the simulator or the app is rotated (#34). AX frames are reported in the app's UI space while HID events are interpreted in the device-native portrait framebuffer; sim-use now self-calibrates the orientation per command with 1–3 accessibility hit-test probes and transforms AX-derived coordinates before dispatch. Explicit `-x/-y` coordinates keep their raw framebuffer semantics. When calibration cannot be confirmed (empty or fully symmetric screens) the command falls back to portrait and surfaces an `orientation_calibration_fallback` advisory.
+- `describe-ui` quadtree recovery no longer silently drops whole regions on rotated simulators — the same #34 coordinate mismatch corrupted its coverage bookkeeping (live repro: the entire Settings sidebar vanished from the outline on an upside-down iPad).
+- `describe-ui --point` no longer overwrites the `@N` alias snapshot with a single-element table, so `tap @N` keeps resolving against the last full outline after a point query.
 - `android swipe` invoked directly now enforces the same coordinate rules as the other surfaces: negative coordinates and identical start/end points are rejected at validate time instead of being forwarded to the bridge.
 - Swipe coordinates are validated as finite and ≤ 100000 on all surfaces, so values like `inf`, `nan`, or `1e19` fail with a clean validation error instead of trapping the daemon in the Double→Int conversion.
 - The top-level `swipe` and `android swipe` no longer disagree on fractional Android coordinates (truncation vs rounding); both round half away from zero via shared accessors.

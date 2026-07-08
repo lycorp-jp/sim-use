@@ -47,4 +47,30 @@ struct CommandAdvisoryContractTests {
         #expect(decoded.commandAdvisory == nil)
         #expect(decoded.stepsExecuted == 3)
     }
+
+    @Test("describe-ui result encodes without the advisory and decodes it as nil")
+    func describeUIResult() throws {
+        let result = IOSSimDescribeUICommand.ExecutionResult(
+            platform: "ios",
+            raw: nil,
+            outline: "App: X  10x20\n",
+            entries: [],
+            lists: [],
+            screen: .init(x: 0, y: 0, width: 10, height: 20),
+            appLabel: "X",
+            appPackage: "com.x",
+            orientation: "portrait-upside-down",
+            commandAdvisory: contractAdvisory
+        )
+        #expect(result.commandAdvisory == contractAdvisory)
+
+        let json = try encodedJSON(result)
+        #expect(!json.contains("dvisory"), "advisory leaked into the encoded data payload: \(json)")
+        #expect(json.contains(#""orientation":"portrait-upside-down""#))
+
+        let decoded = try JSONDecoder().decode(IOSSimDescribeUICommand.ExecutionResult.self, from: Data(json.utf8))
+        #expect(decoded.commandAdvisory == nil)
+        #expect(decoded.orientation == "portrait-upside-down")
+        #expect(decoded.appLabel == "X")
+    }
 }

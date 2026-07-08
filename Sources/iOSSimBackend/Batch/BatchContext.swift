@@ -27,8 +27,17 @@ public final class BatchContext {
     public let waitTimeout: TimeInterval
     public let pollInterval: TimeInterval
 
+    /// Computes the orientation calibration for a fetched tree.
+    /// Injectable so batch calibration semantics (once per run) can be
+    /// unit-tested without a booted simulator.
+    public typealias Calibrator = @MainActor (String, [AccessibilityElement], SimUseLogger) async -> OrientationCalibration
+
     private let fetchElements: ElementFetcher
+    private let calibrator: Calibrator
     private var cachedRoots: [AccessibilityElement]?
+    /// One calibration per batch run: a batch is a single command
+    /// execution, and per-command is the calibration cache boundary.
+    private var cachedCalibration: OrientationCalibration?
     /// 1-based step number, advanced by `beginStep()`. Used to prefix
     /// recorded advisories so a multi-step run says which step warned
     /// (matching the "Step N failed" convention of the error path).
@@ -48,6 +57,9 @@ public final class BatchContext {
         pollInterval: TimeInterval = 0.25,
         fetchElements: @escaping ElementFetcher = { udid, logger in
             try await AccessibilityFetcher.fetchAccessibilityElements(for: udid, logger: logger)
+        },
+        calibrator: @escaping Calibrator = { udid, roots, logger in
+            await OrientationCalibrator.calibrate(udid: udid, roots: roots, logger: logger)
         }
     ) {
         self.simulatorUDID = simulatorUDID
@@ -57,6 +69,7 @@ public final class BatchContext {
         self.waitTimeout = waitTimeout
         self.pollInterval = pollInterval
         self.fetchElements = fetchElements
+        self.calibrator = calibrator
     }
 
     /// Marks a step boundary. `.perStep` drops its snapshot here so the
@@ -94,5 +107,21 @@ public final class BatchContext {
             cachedRoots = roots
             return roots
         }
+    }
+
+    /// Returns the batch-wide orientation calibration, computing it
+    /// lazily on the first AX-resolved step. A calibration advisory is
+    /// recorded once at compute time — the run warns a single time, not
+    /// on every step that reuses the cached result.
+    public func orientationCalibration(roots: [AccessibilityElement], logger: SimUseLogger) async -> OrientationCalibration {
+        if let cachedCalibration {
+            return cachedCalibration
+        }
+        let calibration = await calibrator(simulatorUDID, roots, logger)
+        cachedCalibration = calibration
+        if let advisory = calibration.advisory {
+            recordAdvisory(advisory)
+        }
+        return calibration
     }
 }

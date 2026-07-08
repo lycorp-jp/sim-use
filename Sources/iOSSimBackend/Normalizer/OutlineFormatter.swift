@@ -49,7 +49,15 @@ public enum OutlineFormatter {
     ///   which app is on screen (issue #81). Defaults to nil, which
     ///   preserves the legacy tree-derived label for callers that don't
     ///   resolve the foreground.
-    public static func render(tree: [AccessibilityElement], foregroundBundleId: String? = nil) -> Outline {
+    /// - Parameter orientationTag: non-portrait calibrated orientation
+    ///   (issue #34), appended to the `App:` header so agents reading
+    ///   the outline know the device is rotated. Pass nil for portrait —
+    ///   the common-case header stays byte-identical to the legacy form.
+    public static func render(
+        tree: [AccessibilityElement],
+        foregroundBundleId: String? = nil,
+        orientationTag: String? = nil
+    ) -> Outline {
         let root = pickRoot(tree)
         let isApplicationRoot = root?.type == "Application"
 
@@ -160,7 +168,7 @@ public enum OutlineFormatter {
             ))
         }
 
-        let text = renderText(appLabel: appLabel, screen: screen, entries: entries)
+        let text = renderText(appLabel: appLabel, screen: screen, entries: entries, orientationTag: orientationTag)
         return Outline(text: text, entries: entries, lists: lists, screen: screen, appLabel: appLabel)
     }
 
@@ -363,14 +371,20 @@ public enum OutlineFormatter {
         public let label: String?
     }
 
-    private static func renderText(appLabel: String, screen: Outline.Frame, entries: [Outline.Entry]) -> String {
+    private static func renderText(
+        appLabel: String,
+        screen: Outline.Frame,
+        entries: [Outline.Entry],
+        orientationTag: String? = nil
+    ) -> String {
         var output = ""
         // Two header shapes: a real Application root carries its frame,
         // so we use the familiar "App: <label>  WxH" form. A --point
         // subtree has no screen context — we emit "Subtree: <label>"
         // without a dimension suffix that would only read as `0x0`.
         if screen.width > 0, screen.height > 0 {
-            output.append("App: \(appLabel)  \(screen.width)x\(screen.height)\n")
+            let suffix = orientationTag.map { "  (\($0))" } ?? ""
+            output.append("App: \(appLabel)  \(screen.width)x\(screen.height)\(suffix)\n")
         } else {
             output.append("Subtree: \(appLabel)\n")
         }

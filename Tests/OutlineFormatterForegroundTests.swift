@@ -40,6 +40,18 @@ private let emptyLabelTree = #"""
 @Suite("OutlineFormatter — foreground reconciliation")
 struct OutlineFormatterForegroundTests {
 
+    @Test("Orientation tag appends to the header; nil keeps the legacy form")
+    func orientationTagInHeader() throws {
+        let tagged = OutlineFormatter.render(
+            tree: try decodeTree(staleLabelTree),
+            orientationTag: "landscape-right"
+        )
+        #expect(tagged.text.hasPrefix("App: LINE Dev  402x874  (landscape-right)\n"))
+
+        let untagged = OutlineFormatter.render(tree: try decodeTree(staleLabelTree))
+        #expect(untagged.text.hasPrefix("App: LINE Dev  402x874\n"))
+    }
+
     @Test("Resolved SpringBoard bundle overrides a stale app label in the header")
     func springBoardOverridesStaleLabel() throws {
         let outline = OutlineFormatter.render(
