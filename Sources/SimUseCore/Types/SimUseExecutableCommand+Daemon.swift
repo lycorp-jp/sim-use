@@ -14,10 +14,15 @@ extension SimUseExecutableCommand {
     /// is idempotent for explicit `--udid` invocations and necessary
     /// when the daemon happens to dispatch a command that came in
     /// without the resolved value baked in.
-    public mutating func executeAsDaemonResponse(id: String?, advisory: ProcessAdvisory? = nil) async throws -> Data {
+    public mutating func executeAsDaemonResponse(id: String?, processAdvisory: ProcessAdvisory? = nil) async throws -> Data {
         try resolveDeferredArguments()
         let result = try await execute()
-        let envelope = DaemonSuccessResponse(id: id, data: result, advisory: advisory)
+        let envelope = DaemonSuccessResponse(
+            id: id,
+            data: result,
+            processAdvisory: processAdvisory,
+            advisory: (result as? CommandAdvisoryProviding)?.commandAdvisory
+        )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         return try encoder.encode(envelope)

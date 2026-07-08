@@ -98,13 +98,24 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         return filter.isEmpty ? nil : filter
     }
 
-    public struct ExecutionResult: Codable {
+    public struct ExecutionResult: Codable, CommandAdvisoryProviding {
         public let x: Double
         public let y: Double
+        /// Excluded from the encoded `data` payload via `CodingKeys`
+        /// (the default value keeps decode synthesis working) — the
+        /// envelope hoists it to the top-level `advisory` key. See
+        /// `CommandAdvisoryProviding` for the contract.
+        public var commandAdvisory: CommandAdvisory? = nil
 
-        public init(x: Double, y: Double) {
+        public init(x: Double, y: Double, commandAdvisory: CommandAdvisory? = nil) {
             self.x = x
             self.y = y
+            self.commandAdvisory = commandAdvisory
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case x
+            case y
         }
     }
 
@@ -254,6 +265,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
 
         let resolvedPoint: (x: Double, y: Double)
         let resolvedDescription: String
+        let resolvedAdvisory: CommandAdvisory?
 
         if let alias {
             switch OutlineAliasResolver.parse(alias) {
@@ -262,6 +274,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
                     let resolved = try OutlineAliasResolver.resolve(alias, udid: device.resolved)
                     resolvedPoint = resolved.point
                     resolvedDescription = resolved.humanDescription
+                    resolvedAdvisory = nil
                 } catch {
                     if !jsonOutput {
                         print("Warning: \(error.localizedDescription) No tap performed.", to: &standardError)
@@ -274,7 +287,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
                 // handling. No alias cache read — the selector is
                 // self-contained and works across multiple snapshots.
                 do {
-                    resolvedPoint = try await AccessibilityPoller.resolveWithPolling(
+                    let target = try await AccessibilityPoller.resolveWithPollingTarget(
                         query: .id(uniqueId),
                         simulatorUDID: device.resolved,
                         waitTimeout: waitTimeout,
@@ -283,6 +296,8 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
                         frameFilter: frameFilter,
                         logger: logger
                     )
+                    resolvedPoint = (x: target.x, y: target.y)
+                    resolvedAdvisory = target.advisory
                     resolvedDescription = "#\(uniqueId) (AXUniqueId) at (\(resolvedPoint.x), \(resolvedPoint.y))"
                 } catch let error as ElementResolutionError {
                     if !jsonOutput {
@@ -296,6 +311,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         } else if let pointX, let pointY {
             resolvedPoint = (x: pointX, y: pointY)
             resolvedDescription = "(\(pointX), \(pointY))"
+            resolvedAdvisory = nil
         } else {
             let query: AccessibilityQuery
             if let elementID {
@@ -313,7 +329,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             }
 
             do {
-                resolvedPoint = try await AccessibilityPoller.resolveWithPolling(
+                let target = try await AccessibilityPoller.resolveWithPollingTarget(
                     query: query,
                     simulatorUDID: device.resolved,
                     waitTimeout: waitTimeout,
@@ -322,6 +338,8 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
                     frameFilter: frameFilter,
                     logger: logger
                 )
+                resolvedPoint = (x: target.x, y: target.y)
+                resolvedAdvisory = target.advisory
             } catch let error as ElementResolutionError {
                 if !jsonOutput {
                     print("Warning: \(error.localizedDescription) No tap performed.", to: &standardError)
@@ -403,7 +421,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         }
 
         logger.info().log("Tap completed successfully")
-        return ExecutionResult(x: resolvedPoint.x, y: resolvedPoint.y)
+        return ExecutionResult(x: resolvedPoint.x, y: resolvedPoint.y, commandAdvisory: resolvedAdvisory)
     }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {

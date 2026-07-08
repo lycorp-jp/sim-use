@@ -8,6 +8,15 @@ public enum AccessibilityQuery {
     case value(String)
     case labelContains(String)
     case labelRegex(pattern: String)
+
+    public var tapAdvisoryQuery: String? {
+        switch self {
+        case .label(let value), .value(let value), .labelContains(let value):
+            return value
+        case .id, .labelRegex:
+            return nil
+        }
+    }
 }
 
 public enum ElementResolutionError: LocalizedError, HintProviding {
@@ -263,6 +272,27 @@ public struct AccessibilityTargetResolver {
         elementType: String? = nil,
         frameFilter: FrameFilter? = nil
     ) throws -> (x: Double, y: Double) {
+        let target = try resolveTarget(
+            roots: roots,
+            query: query,
+            elementType: elementType,
+            frameFilter: frameFilter
+        )
+        return (x: target.x, y: target.y)
+    }
+
+    public struct ResolvedTarget {
+        public let x: Double
+        public let y: Double
+        public let advisory: CommandAdvisory?
+    }
+
+    public static func resolveTarget(
+        roots: [AccessibilityElement],
+        query: AccessibilityQuery,
+        elementType: String? = nil,
+        frameFilter: FrameFilter? = nil
+    ) throws -> ResolvedTarget {
         var allElements = roots.flatMap { $0.flattened() }
 
         if let elementType {
@@ -272,8 +302,8 @@ public struct AccessibilityTargetResolver {
         if let frameFilter, !frameFilter.isEmpty {
             let effective: FrameFilter
             if frameFilter.hasRelativeBounds {
-                guard let screen = roots.first?.frame else {
-                    throw ElementResolutionError.invalidFrame(reason: "--frame uses relative bounds but the AX root has no frame to resolve against.")
+                guard let screen = AXDisplayFrame.frame(in: roots) else {
+                    throw ElementResolutionError.invalidFrame(reason: "--frame uses relative bounds but no AX root has a usable frame to resolve against.")
                 }
                 effective = frameFilter.resolved(screen: screen)
             } else {
@@ -293,7 +323,10 @@ public struct AccessibilityTargetResolver {
 
         let centerX = frame.x + (frame.width / 2.0)
         let centerY = frame.y + (frame.height / 2.0)
-        return (x: centerX, y: centerY)
+        let advisory = query.tapAdvisoryQuery.flatMap {
+            FullScreenTapAdvisory.advisory(matched: frame, roots: roots, query: $0)
+        }
+        return ResolvedTarget(x: centerX, y: centerY, advisory: advisory)
     }
 
     private static func matchElement(

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import ArgumentParser
 import Foundation
+import SimUseCore
 
 public enum AXCachePolicy: String, CaseIterable, ExpressibleByArgument, Sendable {
     case perBatch
@@ -28,6 +29,15 @@ public final class BatchContext {
 
     private let fetchElements: ElementFetcher
     private var cachedRoots: [AccessibilityElement]?
+    /// 1-based step number, advanced by `beginStep()`. Used to prefix
+    /// recorded advisories so a multi-step run says which step warned
+    /// (matching the "Step N failed" convention of the error path).
+    private var currentStepNumber = 0
+    /// Command advisories recorded while converting steps (e.g. a tap
+    /// selector resolving to a near-full-screen element). Collected here
+    /// because `BatchPrimitive`s carry only HID work — the batch command
+    /// merges these into its `ExecutionResult` after the run.
+    public private(set) var commandAdvisories: [CommandAdvisory] = []
 
     public init(
         simulatorUDID: String,
@@ -53,9 +63,19 @@ public final class BatchContext {
     /// next selector resolution refetches; `.perBatch` keeps the snapshot
     /// for the whole run and `.none` never caches in the first place.
     public func beginStep() {
+        currentStepNumber += 1
         if axCachePolicy == .perStep {
             cachedRoots = nil
         }
+    }
+
+    /// Record a per-command advisory raised while converting the current
+    /// step, prefixed with the step number when the run has entered one.
+    public func recordAdvisory(_ advisory: CommandAdvisory) {
+        let message = currentStepNumber > 0
+            ? "Step \(currentStepNumber): \(advisory.message)"
+            : advisory.message
+        commandAdvisories.append(CommandAdvisory(kind: advisory.kind, message: message))
     }
 
     /// Returns the AX roots honouring the cache policy. `forceRefresh`

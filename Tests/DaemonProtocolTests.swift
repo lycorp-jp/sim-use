@@ -109,7 +109,7 @@ struct DaemonSuccessResponseTests {
 
     @Test("Advisory is omitted from the envelope when nil")
     func advisoryOmittedWhenNil() throws {
-        let resp = DaemonSuccessResponse(data: Payload(foo: "bar", count: 3), advisory: nil)
+        let resp = DaemonSuccessResponse(data: Payload(foo: "bar", count: 3), processAdvisory: nil)
         let text = jsonString(try encoderStable().encode(resp))
         #expect(text == #"{"data":{"count":3,"foo":"bar"},"ok":true}"#)
     }
@@ -119,10 +119,53 @@ struct DaemonSuccessResponseTests {
         let event = ProcessEvent(kind: .disappeared, bundleId: "com.x", pid: 100, confidence: .high)
         let resp = DaemonSuccessResponse(
             data: Payload(foo: "bar", count: 3),
-            advisory: ProcessAdvisory(events: [event], pending: [])
+            processAdvisory: ProcessAdvisory(events: [event], pending: [])
         )
         let text = jsonString(try encoderStable().encode(resp))
         #expect(text == #"{"data":{"count":3,"foo":"bar"},"ok":true,"process":{"events":[{"bundleId":"com.x","confidence":"high","kind":"disappeared","pid":100}],"pending":[]}}"#)
+    }
+
+    @Test("Command advisory nests under the advisory key when present")
+    func commandAdvisoryNestsUnderAdvisory() throws {
+        let resp = DaemonSuccessResponse(
+            data: Payload(foo: "bar", count: 3),
+            advisory: CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
+        )
+        let text = jsonString(try encoderStable().encode(resp))
+        #expect(text == #"{"advisory":{"kind":"full_screen_tap_target","message":"check target"},"data":{"count":3,"foo":"bar"},"ok":true}"#)
+    }
+}
+
+// MARK: - DaemonClientSuccessPayload
+
+@Suite("DaemonClientSuccessPayload decoding")
+struct DaemonClientSuccessPayloadTests {
+    private struct Payload: Decodable, Equatable {
+        let foo: String
+    }
+
+    @Test("Decodes data plus a known command advisory")
+    func decodesKnownAdvisory() throws {
+        let wire = Data(#"{"advisory":{"kind":"full_screen_tap_target","message":"m"},"data":{"foo":"bar"},"ok":true}"#.utf8)
+        let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<Payload>.self, from: wire)
+        #expect(payload.data == Payload(foo: "bar"))
+        #expect(payload.advisory == CommandAdvisory(kind: .fullScreenTapTarget, message: "m"))
+    }
+
+    @Test("An unknown advisory kind from a newer daemon is dropped, not fatal")
+    func unknownAdvisoryKindIsDropped() throws {
+        let wire = Data(#"{"advisory":{"kind":"from_the_future","message":"m"},"data":{"foo":"bar"},"ok":true}"#.utf8)
+        let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<Payload>.self, from: wire)
+        #expect(payload.data == Payload(foo: "bar"))
+        #expect(payload.advisory == nil)
+    }
+
+    @Test("Absent advisory decodes as nil")
+    func absentAdvisoryIsNil() throws {
+        let wire = Data(#"{"data":{"foo":"bar"},"ok":true}"#.utf8)
+        let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<Payload>.self, from: wire)
+        #expect(payload.advisory == nil)
+        #expect(payload.processAdvisory == nil)
     }
 }
 

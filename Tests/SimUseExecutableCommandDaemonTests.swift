@@ -46,6 +46,25 @@ private struct FakeDaemonCommand: SimUseExecutableCommand {
     }
 }
 
+private struct FakeAdvisoryCommand: SimUseExecutableCommand {
+    static let configuration = CommandConfiguration(commandName: "fake-advisory-cmd")
+
+    @Flag(name: .customLong("json"))
+    var jsonOutput: Bool = false
+
+    func execute() async throws -> FakeResult {
+        FakeResult()
+    }
+
+    func format(_ result: FakeResult) -> CommandOutput { CommandOutput() }
+
+    struct FakeResult: Codable, CommandAdvisoryProviding {
+        var commandAdvisory: CommandAdvisory? {
+            CommandAdvisory(kind: .fullScreenTapTarget, message: "check target")
+        }
+    }
+}
+
 private enum ResolverProbe: LocalizedError {
     case simulated
     var errorDescription: String? { "simulated resolver failure" }
@@ -78,5 +97,13 @@ struct DaemonExecuteOrderTests {
         } catch let error as ResolverProbe {
             #expect(error == .simulated)
         }
+    }
+
+    @Test("daemon response carries command advisory outside data")
+    func commandAdvisoryIsTopLevel() async throws {
+        var cmd = FakeAdvisoryCommand()
+        let data = try await cmd.executeAsDaemonResponse(id: nil)
+        let text = try #require(String(data: data, encoding: .utf8))
+        #expect(text == #"{"advisory":{"kind":"full_screen_tap_target","message":"check target"},"data":{},"ok":true}"#)
     }
 }

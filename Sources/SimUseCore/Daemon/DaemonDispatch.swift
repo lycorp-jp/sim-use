@@ -164,7 +164,7 @@ public enum DaemonDispatch {
 
         let advisory = processAdvisory(for: executable)
         do {
-            let data = try await executable.executeAsDaemonResponse(id: request.id, advisory: advisory)
+            let data = try await executable.executeAsDaemonResponse(id: request.id, processAdvisory: advisory)
             return Outcome(responseData: data, shouldStopDaemon: false)
         } catch {
             let kind = DaemonErrorKind.classify(error)

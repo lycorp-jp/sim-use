@@ -80,7 +80,11 @@ extension SimUseExecutableCommand {
                 try resolveDeferredArguments()
                 await clientPreflight()
                 let resolved = try await resolveExecutionResult()
-                try emitJSONSuccess(resolved.result, advisory: resolved.advisory)
+                try emitJSONSuccess(
+                    resolved.result,
+                    processAdvisory: resolved.processAdvisory,
+                    advisory: resolved.advisory
+                )
             } catch {
                 emitJSONError(error)
                 Darwin.exit(1)
@@ -96,9 +100,12 @@ extension SimUseExecutableCommand {
                 // command output (e.g. the describe-ui App header) so an
                 // agent driving via the default text surface can't miss a
                 // crash signal (issue #81).
-                if let advisory = resolved.advisory,
-                   let banner = ProcessAdvisoryRenderer.banner(for: advisory) {
+                if let processAdvisory = resolved.processAdvisory,
+                   let banner = ProcessAdvisoryRenderer.banner(for: processAdvisory) {
                     FileHandle.standardOutput.write(Data((banner + "\n").utf8))
+                }
+                if let advisory = resolved.advisory {
+                    FileHandle.standardOutput.write(Data((CommandAdvisoryRenderer.banner(for: advisory) + "\n").utf8))
                 }
                 let output = format(result)
                 let tFormatted = DispatchTime.now()
@@ -137,11 +144,16 @@ extension SimUseExecutableCommand {
     /// Failures inside the daemon path are *not* retried in-process:
     /// they are surfaced verbatim so the user sees the same error the
     /// daemon would have produced.
-    private func resolveExecutionResult() async throws -> (result: ExecutionResult, advisory: ProcessAdvisory?) {
+    private func resolveExecutionResult() async throws -> (
+        result: ExecutionResult,
+        processAdvisory: ProcessAdvisory?,
+        advisory: CommandAdvisory?
+    ) {
         guard shouldUseDaemon, let udid = simulatorUDIDForDaemon else {
             // In-process (standalone) path has no persistent tracker, so
             // it carries no cross-command process advisory.
-            return (try await execute(), nil)
+            let result = try await execute()
+            return (result, nil, (result as? CommandAdvisoryProviding)?.commandAdvisory)
         }
 
         let perf = ProcessInfo.processInfo.environment["SIM_USE_CLIENT_PERF"] == "1"
@@ -173,10 +185,12 @@ extension SimUseExecutableCommand {
         let t1 = DispatchTime.now()
 
         let result: ExecutionResult
-        let advisory: ProcessAdvisory?
+        let processAdvisory: ProcessAdvisory?
+        let advisory: CommandAdvisory?
         do {
             let payload = try JSONDecoder().decode(DaemonClientSuccessPayload<ExecutionResult>.self, from: responseData)
             result = payload.data
+            processAdvisory = payload.processAdvisory
             advisory = payload.advisory
         } catch {
             throw DaemonClientError.malformedResponse(underlying: error)
@@ -192,7 +206,7 @@ extension SimUseExecutableCommand {
             ))
         }
 
-        return (result, advisory)
+        return (result, processAdvisory, advisory)
     }
 
     /// Is this command eligible for daemon dispatch *right now*?
@@ -232,8 +246,16 @@ extension SimUseExecutableCommand {
         return result
     }
 
-    private func emitJSONSuccess(_ result: ExecutionResult, advisory: ProcessAdvisory?) throws {
-        try JSONEnvelopeWriter.writeSuccess(result, advisory: advisory)
+    private func emitJSONSuccess(
+        _ result: ExecutionResult,
+        processAdvisory: ProcessAdvisory?,
+        advisory: CommandAdvisory?
+    ) throws {
+        try JSONEnvelopeWriter.writeSuccess(
+            result,
+            processAdvisory: processAdvisory,
+            advisory: advisory
+        )
     }
 
     private func emitJSONError(_ error: Error) {
@@ -250,13 +272,23 @@ public struct DaemonClientSuccessPayload<T: Decodable>: Decodable {
     /// Process-liveness advisory carried under the `process` key, when
     /// the daemon attached one (issue #81). Absent on responses that
     /// predate the field or carry no event.
-    public let advisory: ProcessAdvisory?
+    public let processAdvisory: ProcessAdvisory?
+    /// Per-command advisory carried under the `advisory` key.
+    public let advisory: CommandAdvisory?
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.data = try container.decode(T.self, forKey: .data)
-        self.advisory = try container.decodeIfPresent(ProcessAdvisory.self, forKey: .process)
+        self.processAdvisory = try container.decodeIfPresent(ProcessAdvisory.self, forKey: .process)
+        // A malformed advisory must never fail the whole payload: the
+        // command has already executed and the advisory is purely
+        // informational. A newer daemon can emit a CommandAdvisory.Kind
+        // this client's closed enum doesn't know (version probe failure
+        // or SIM_USE_DAEMON_VERSION_CHECK=0 skips the restart gate);
+        // decode it tolerantly instead of surfacing malformedResponse
+        // for a command that succeeded.
+        self.advisory = (try? container.decodeIfPresent(CommandAdvisory.self, forKey: .advisory)) ?? nil
     }
 
-    private enum CodingKeys: String, CodingKey { case data, process }
+    private enum CodingKeys: String, CodingKey { case data, process, advisory }
 }
