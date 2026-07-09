@@ -8,8 +8,8 @@ import SimUseCore
 /// against a fresh snapshot, then dispatches `/tap` at the element's
 /// own center (no walk-up, per kickoff gotcha #4).
 ///
-/// Coordinate fallback (`-x`/`-y`) is provided for ad-hoc / cross-test
-/// use; selector-based addressing is preferred.
+/// Coordinate fallback (`-x`/`-y` or `--point x,y`) is provided for
+/// ad-hoc / cross-test use; selector-based addressing is preferred.
 public struct AndroidTapCommand: SimUseExecutableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "tap",
@@ -25,6 +25,11 @@ public struct AndroidTapCommand: SimUseExecutableCommand {
     public var x: Int?
     @Option(name: [.customShort("y"), .customLong("y")], help: "Tap y coordinate (pixels). Accepts -y or --y.")
     public var y: Int?
+    @Option(name: .customLong("point"), help: ArgumentHelp(
+        "Tap coordinate pair (pixels) — same semantics as -x/-y; specify only one form.",
+        valueName: "x,y"
+    ))
+    public var point: CoordinatePair?
 
     @Option(name: .customLong("id"), help: "Match uniqueId or resource_id short-name.")
     public var id: String?
@@ -88,6 +93,9 @@ public struct AndroidTapCommand: SimUseExecutableCommand {
     public var simulatorUDIDForDaemon: String? { device.resolved }
 
     public func validate() throws {
+        _ = try TapCoordinateResolver.resolve(
+            x: x.map(Double.init), y: y.map(Double.init), point: point
+        )
         if let duration {
             guard duration >= 0 && duration <= 10.0 else {
                 throw ValidationError("--duration must be between 0 and 10 seconds.")
@@ -100,10 +108,14 @@ public struct AndroidTapCommand: SimUseExecutableCommand {
     }
 
     public func execute() async throws -> ExecutionResult {
+        let explicit = try TapCoordinateResolver.resolve(
+            x: x.map(Double.init), y: y.map(Double.init), point: point
+        )
         let result = try Self.performTap(
             udid: device.resolved,
             alias: alias,
-            x: x, y: y,
+            x: explicit.map { Int($0.x.rounded()) },
+            y: explicit.map { Int($0.y.rounded()) },
             selector: selector(),
             duration: duration
         )

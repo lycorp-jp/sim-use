@@ -52,7 +52,7 @@ struct LongPress: SimUseExecutableCommand {
     )
 
     @Argument(help: ArgumentHelp(
-        "Shortcut alias for the element to long-press. `@N` selects the N-th entry of the most recent `describe-ui` snapshot; `#N` selects the N-th cell of the dominant detected list; `#N@M` selects the N-th cell of the M-th list (1-indexed, M=1 = dominant); `#<id>` resolves an AXUniqueId via the live AX tree. Exclusive with -x/-y and --id/--label/--value.",
+        "Shortcut alias for the element to long-press. `@N` selects the N-th entry of the most recent `describe-ui` snapshot; `#N` selects the N-th cell of the dominant detected list; `#N@M` selects the N-th cell of the M-th list (1-indexed, M=1 = dominant); `#<id>` resolves an AXUniqueId via the live AX tree. Exclusive with --point/-x/-y and --id/--label/--value.",
         valueName: "alias"
     ))
     var alias: String?
@@ -63,13 +63,19 @@ struct LongPress: SimUseExecutableCommand {
     @Option(name: [.customShort("y"), .customLong("y")], help: "The Y coordinate of the long-press. Accepts -y or --y.")
     var pointY: Double?
 
-    @Option(name: [.customLong("id")], help: "Long-press the center of the element matching AXUniqueId/resource-id literally. For the N-th outline entry, use the positional `@N` alias instead — `--id 42` matches the identifier string '42', NOT outline alias @42. Ignored if -x and -y are provided.")
+    @Option(name: .customLong("point"), help: ArgumentHelp(
+        "The point to long-press as a coordinate pair — same semantics as -x/-y; specify only one form.",
+        valueName: "x,y"
+    ))
+    var point: CoordinatePair?
+
+    @Option(name: [.customLong("id")], help: "Long-press the center of the element matching AXUniqueId/resource-id literally. For the N-th outline entry, use the positional `@N` alias instead — `--id 42` matches the identifier string '42', NOT outline alias @42. Ignored if explicit coordinates (-x/-y or --point) are provided.")
     var elementID: String?
 
-    @Option(name: [.customLong("label")], help: "Long-press the center of the element matching AXLabel (accessibilityLabel). Ignored if -x and -y are provided.")
+    @Option(name: [.customLong("label")], help: "Long-press the center of the element matching AXLabel (accessibilityLabel). Ignored if explicit coordinates (-x/-y or --point) are provided.")
     var elementLabel: String?
 
-    @Option(name: [.customLong("value")], help: "Long-press the center of the element matching AXValue (the current value of a control). Ignored if -x and -y are provided.")
+    @Option(name: [.customLong("value")], help: "Long-press the center of the element matching AXValue (the current value of a control). Ignored if explicit coordinates (-x/-y or --point) are provided.")
     var elementValue: String?
 
     @Option(name: [.customLong("label-contains")], help: "Long-press the element whose AXLabel contains this case-sensitive substring. Useful when labels carry dynamic state (counters, timestamps). Mutually exclusive with --id/--label/--value/--label-regex.")
@@ -133,7 +139,7 @@ struct LongPress: SimUseExecutableCommand {
         // the [0, 10] range so the validator accepts it.
         try IOSSimTapCommand.validateOptions(
             alias: alias,
-            pointX: pointX, pointY: pointY,
+            pointX: pointX, pointY: pointY, point: point,
             elementID: elementID,
             elementLabel: elementLabel,
             elementValue: elementValue,
@@ -171,6 +177,7 @@ struct LongPress: SimUseExecutableCommand {
         sub.alias = alias
         sub.pointX = pointX
         sub.pointY = pointY
+        sub.point = point
         sub.elementID = elementID
         sub.elementLabel = elementLabel
         sub.elementValue = elementValue
@@ -211,11 +218,12 @@ struct LongPress: SimUseExecutableCommand {
             elementType: elementType,
             frame: frameFilter
         )
+        let explicit = try TapCoordinateResolver.resolve(x: pointX, y: pointY, point: point)
         let result = try AndroidTapCommand.performTap(
             udid: device.resolved,
             alias: alias,
-            x: pointX.map { Int($0.rounded()) },
-            y: pointY.map { Int($0.rounded()) },
+            x: explicit.map { Int($0.x.rounded()) },
+            y: explicit.map { Int($0.y.rounded()) },
             selector: selector,
             duration: duration,
             multiTouch: multiTouch

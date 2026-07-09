@@ -29,7 +29,7 @@ struct DescribeUI: SimUseExecutableCommand {
             valueName: "x,y"
         )
     )
-    var point: String?
+    var point: CoordinatePair?
 
     @Option(
         name: .customLong("max-probes"),
@@ -84,7 +84,7 @@ struct DescribeUI: SimUseExecutableCommand {
     var simulatorUDIDForDaemon: String? { device.resolved }
 
     func validate() throws {
-        _ = try IOSSimDescribeUICommand.parsePoint(point)
+        try IOSSimDescribeUICommand.validatePoint(point)
         try IOSSimDescribeUICommand.validateOptions(
             maxProbes: maxProbes,
             minCellSize: minCellSize,

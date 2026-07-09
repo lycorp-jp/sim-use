@@ -50,23 +50,38 @@ struct DescribeUIForwarderTests {
         }
     }
 
-    @Test("Malformed --point is rejected")
+    @Test("Malformed --point is rejected at parse time")
     func malformedPointRejected() {
+        // The `x,y` grammar lives on `CoordinatePair` (issue #25) —
+        // ArgumentParser rejects a malformed value before validate().
+        #expect(throws: (any Error).self) {
+            _ = try IOSSimDescribeUICommand.parse([
+                "--point", "not-a-point",
+                "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0",
+            ])
+        }
+    }
+
+    @Test("Negative --point is rejected by shared validation")
+    func negativePointRejected() {
         do {
-            _ = try IOSSimDescribeUICommand.parsePoint("not-a-point")
+            try IOSSimDescribeUICommand.validatePoint(CoordinatePair(x: -1, y: 5))
             Issue.record("expected ValidationError")
         } catch let error as ValidationError {
-            #expect(error.message.contains("--point must be in the form x,y"))
+            #expect(error.message.contains("non-negative"))
         } catch {
             Issue.record("unexpected error type \(type(of: error))")
         }
     }
 
-    @Test("Well-formed --point parses to non-negative coords")
+    @Test("Well-formed --point parses to coords, tolerating spaces")
     func validPointParses() throws {
-        let p = try IOSSimDescribeUICommand.parsePoint("12.5, 36.0")
-        #expect(p?.x == 12.5)
-        #expect(p?.y == 36.0)
+        let parsed = try IOSSimDescribeUICommand.parse([
+            "--point", "12.5, 36.0",
+            "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0",
+        ])
+        #expect(parsed.point?.x == 12.5)
+        #expect(parsed.point?.y == 36.0)
     }
 
     // MARK: - Symmetric forwarder contract
@@ -97,8 +112,8 @@ struct DescribeUIForwarderTests {
         let topLevel = try DescribeUI.parse(argv)
         let subCmd = try IOSSimDescribeUICommand.parse(argv)
 
-        #expect(topLevel.point == "100,200")
-        #expect(subCmd.point == "100,200")
+        #expect(topLevel.point == CoordinatePair(x: 100, y: 200))
+        #expect(subCmd.point == CoordinatePair(x: 100, y: 200))
         #expect(topLevel.maxProbes == 500)
         #expect(subCmd.maxProbes == 500)
         #expect(topLevel.minCellSize == 20)

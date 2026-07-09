@@ -24,7 +24,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             valueName: "x,y"
         )
     )
-    public var point: String?
+    public var point: CoordinatePair?
 
     @Option(
         name: .customLong("max-probes"),
@@ -154,7 +154,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
     public var simulatorUDIDForDaemon: String? { device.resolved }
 
     public func validate() throws {
-        _ = try Self.parsePoint(point)
+        try Self.validatePoint(point)
         try Self.validateOptions(
             maxProbes: maxProbes,
             minCellSize: minCellSize,
@@ -185,29 +185,21 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         }
     }
 
-    /// Shared `--point` parser. Returns `nil` when no point was passed;
-    /// throws a ValidationError with the canonical message otherwise.
-    public static func parsePoint(_ point: String?) throws -> AccessibilityPoint? {
-        guard let point else { return nil }
-        let coordinates = point
-            .split(separator: ",", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        guard coordinates.count == 2,
-              let x = Double(coordinates[0]),
-              let y = Double(coordinates[1]),
-              x.isFinite, y.isFinite,
-              x >= 0, y >= 0
-        else {
-            throw ValidationError("--point must be in the form x,y using non-negative numbers.")
+    /// Shared `--point` range check, delegated to by the top-level
+    /// forwarder. `CoordinatePair` already enforces the `x,y` grammar
+    /// and finiteness at parse time; hit-testing additionally only
+    /// makes sense for non-negative screen coordinates.
+    public static func validatePoint(_ point: CoordinatePair?) throws {
+        if let point, point.x < 0 || point.y < 0 {
+            throw ValidationError("--point coordinates must be non-negative.")
         }
-        return AccessibilityPoint(x: x, y: y)
     }
 
     public func execute() async throws -> ExecutionResult {
         let logger = SimUseLogger()
         try await performGlobalSetup(logger: logger)
 
-        let parsedPoint = try Self.parsePoint(point)
+        let parsedPoint = point.map { AccessibilityPoint(x: $0.x, y: $0.y) }
         let fetchResult = try await AccessibilityFetcher.fetchAccessibilityInfo(
             for: device.resolved,
             point: parsedPoint,
