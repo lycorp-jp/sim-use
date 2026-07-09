@@ -84,3 +84,4 @@ Sources/SimUse/Resources/skills/sim-use/
 
 Sources/SimUse/Resources/viewer/*
 !Sources/SimUse/Resources/viewer/.gitkeep
+*.profraw
