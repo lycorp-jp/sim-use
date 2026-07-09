@@ -135,10 +135,15 @@ public struct AndroidTapCommand: SimUseExecutableCommand {
     /// reused on the iOS side.
     ///
     /// `multiTouch` carries `--fingers` / `--x2` / `--y2` /
-    /// `--finger-distance`. When `fingers == 2`, the dispatch becomes
-    /// a two-stroke `/gesture` with both strokes starting at the
-    /// resolved target / explicit second-finger placement; otherwise
-    /// the original single-stroke path is unchanged.
+    /// `--finger-distance` from the top-level forwarder. When
+    /// `fingers == 2`, the dispatch becomes a two-stroke `/gesture`
+    /// with both strokes starting at the resolved target / explicit
+    /// second-finger placement; otherwise the original single-stroke
+    /// path is unchanged. `nil` means single-touch — the parameter is
+    /// optional (not a `MultiTouchOptions()` default) because a
+    /// directly-initialized `ParsableArguments` value traps on first
+    /// property read ("can't read a value from a parsable argument
+    /// definition"), which crashed every `sim-use android tap`.
     public static func performTap(
         udid: String,
         alias: String?,
@@ -146,7 +151,7 @@ public struct AndroidTapCommand: SimUseExecutableCommand {
         y: Int?,
         selector: AndroidSelector,
         duration: Double? = nil,
-        multiTouch: MultiTouchOptions = MultiTouchOptions(),
+        multiTouch: MultiTouchOptions? = nil,
         controller: AndroidDeviceController = AndroidDeviceController()
     ) throws -> (x: Int, y: Int, description: String) {
         let target = try AndroidTargetResolver.resolve(
@@ -157,7 +162,7 @@ public struct AndroidTapCommand: SimUseExecutableCommand {
             controller: controller
         )
         let client = controller.bridge(serial: udid)
-        if multiTouch.fingers == 2 {
+        if let multiTouch, multiTouch.fingers == 2 {
             let finger1 = (x: Double(target.x), y: Double(target.y))
             let finger2 = multiTouch.fingerTwoPoint(forFinger1: finger1)
             let display = try client.displayInfo()

@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ios stream-video` with the BGRA pixel format no longer exits 0 when the underlying stream fails to start or dies mid-stream; startup and mid-stream errors now terminate the streaming loop and surface as a non-zero exit instead of a stderr-only message.
 - `record-video`'s stop watchdog no longer exits 0 when video finalization overruns its grace window, which could report success for a truncated/unplayable MP4. It now warns on stderr and exits 70 (`EX_SOFTWARE`), and the grace window is 3 s (was 1.5 s).
 - Viewer API no longer reports success when the underlying sim-use invocation exits non-zero without a parseable JSON envelope; the subprocess's stderr is now surfaced in the error response instead of a generic JSON-parse failure.
+- `sim-use android tap` no longer crashes on every invocation with ArgumentParser's "can't read a value from a parsable argument definition" fatal. `performTap`'s default `MultiTouchOptions()` was a directly-initialized `ParsableArguments` value, and the first `.fingers` read trapped before anything was dispatched; the parameter is now optional with `nil` meaning single-touch. The top-level `sim-use tap` routed to Android was unaffected (it passes its parsed options through).
 
 ### Removed
 

@@ -184,7 +184,7 @@ struct TapForwarderTests {
             Int?, Int?,
             AndroidSelector,
             Double?,
-            MultiTouchOptions,
+            MultiTouchOptions?,
             AndroidDeviceController
         ) throws -> (x: Int, y: Int, description: String) = AndroidTapCommand.performTap
 
@@ -203,6 +203,38 @@ struct TapForwarderTests {
             elementType: nil,
             frame: nil
         )
+    }
+
+    @Test("performTap without multiTouch throws instead of trapping")
+    func androidTapDefaultMultiTouchDoesNotTrap() {
+        // Regression for the `sim-use android tap` crash: the old
+        // `multiTouch: MultiTouchOptions = MultiTouchOptions()` default
+        // was a directly-initialized ParsableArguments value, and the
+        // first `.fingers` read inside performTap hit ArgumentParser's
+        // "can't read a value from a parsable argument definition"
+        // fatal — before the bridge was ever dialled. With the optional
+        // default the unreachable device must surface as a thrown
+        // BridgeError (adb missing or device not found, depending on
+        // the host), never a process trap.
+        #expect(throws: (any Error).self) {
+            _ = try AndroidTapCommand.performTap(
+                udid: "nonexistent-serial-0000",
+                alias: nil,
+                x: 100, y: 200,
+                selector: AndroidSelector(
+                    id: nil,
+                    label: nil,
+                    labelContains: nil,
+                    labelRegex: nil,
+                    value: nil,
+                    valueContains: nil,
+                    valueRegex: nil,
+                    elementType: nil,
+                    frame: nil
+                ),
+                duration: nil
+            )
+        }
     }
 
     @Test("ArgumentParser parses both top-level Tap and IOSSimTapCommand with same flags")
