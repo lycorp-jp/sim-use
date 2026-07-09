@@ -40,7 +40,12 @@ Run these checks. Abort with a clear error if any fails.
    - `feat:` → minor
    - Only `fix:` / `chore:` / `docs:` → patch
 4. Draft CHANGELOG entry from commits. Group by: `### Added` / `### Changed` / `### Fixed` / `### Removed`. Omit pure refactor/chore/test commits. Match existing CHANGELOG style.
-5. Also prepare the `bridge/app/build.gradle.kts` version bump: `versionName` → new version, `versionCode` += 1.
+5. **Backlink every entry to its pull request(s) and thank external contributors.** This is part of how the project builds its contributor community — never skip it.
+   - Append the PR reference(s) at the end of each entry: ` (#NN)`. When the work arrived through an original PR plus an internal hardening/follow-up PR, reference both: ` (#NN, #MM)`.
+   - When any referenced PR was authored by an external contributor (not the maintainer), turn the reference into thanks: ` (#NN — thanks @user!)`. Entries whose PRs involve only the maintainer keep the bare number.
+   - Mapping technique: `git blame` the `[Unreleased]` lines, then `git log --merges --ancestry-path <sha>..main` — the earliest merge is the introducing PR. Watch for externally-authored PRs that GitHub marked merged because their commits landed via an internal branch (no own merge commit); credit the original PR alongside the one that carried it.
+   - Cross-check the reverse direction: every merged PR with user-facing impact should have an entry. A contributor's fix missing from the CHANGELOG means missing credit — add the entry.
+6. Also prepare the `bridge/app/build.gradle.kts` version bump: `versionName` → new version, `versionCode` += 1.
 
 If the user specified a version (e.g. `/release 0.10.0`), use that verbatim.
 
@@ -49,7 +54,7 @@ If the user specified a version (e.g. `/release 0.10.0`), use that verbatim.
 Show:
 - Previous tag → next version
 - Commit list (one line each)
-- Proposed CHANGELOG diff
+- Proposed CHANGELOG diff (entries must carry their PR backlinks and contributor thanks from Step 2.5)
 - Release shape: notarized (default) or ad-hoc fallback (if Step 1.8 failed)
 
 Ask: **"Ship vX.Y.Z with this CHANGELOG?"**
