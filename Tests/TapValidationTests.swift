@@ -222,4 +222,135 @@ struct TapFrameValidationTests {
             _ = try tryParseTap(["#someButton", "--frame", "minY=0.5r"])
         }
     }
+
+    @Test("--frame combined with --point is rejected")
+    func frameWithPointRejected() throws {
+        do {
+            _ = try tryParseTap(["--point", "100,200", "--frame", "minY=0.5r"])
+            Issue.record("Expected validation error")
+        } catch {
+            let message = String(describing: error)
+            #expect(message.contains("--frame"))
+            #expect(message.contains("--point"))
+        }
+    }
+}
+
+@Suite("Tap coordinate form validation")
+struct TapCoordinateFormValidationTests {
+    @Test("--point alone validates")
+    func pointAlone() throws {
+        #expect(throws: Never.self) {
+            _ = try tryParseTap(["--point", "100,200"])
+        }
+    }
+
+    @Test("-x/-y pair still validates")
+    func legacyPair() throws {
+        #expect(throws: Never.self) {
+            _ = try tryParseTap(["-x", "100", "-y", "200"])
+        }
+    }
+
+    @Test("--point mixed with -x is rejected")
+    func pointMixedWithX() throws {
+        do {
+            _ = try tryParseTap(["--point", "100,200", "-x", "50"])
+            Issue.record("Expected validation error")
+        } catch {
+            #expect(String(describing: error).contains("only one tap coordinate form"))
+        }
+    }
+
+    @Test("--point mixed with -y is rejected")
+    func pointMixedWithY() throws {
+        do {
+            _ = try tryParseTap(["--point", "100,200", "-y", "50"])
+            Issue.record("Expected validation error")
+        } catch {
+            #expect(String(describing: error).contains("only one tap coordinate form"))
+        }
+    }
+
+    @Test("lone -x is rejected")
+    func loneX() throws {
+        do {
+            _ = try tryParseTap(["-x", "100"])
+            Issue.record("Expected validation error")
+        } catch {
+            #expect(String(describing: error).contains("Both -x and -y"))
+        }
+    }
+
+    @Test("alias plus --point is rejected")
+    func aliasPlusPoint() throws {
+        do {
+            _ = try tryParseTap(["@1", "--point", "100,200"])
+            Issue.record("Expected validation error")
+        } catch {
+            #expect(String(describing: error).contains("--point"))
+        }
+    }
+
+    @Test("--point wins over selectors (both accepted, coordinate branch)")
+    func pointWithSelectorValidates() throws {
+        // Mirrors the long-standing `-x/-y` + selector behavior: the
+        // coordinate form wins and the selector is ignored, so the
+        // combination must keep validating.
+        #expect(throws: Never.self) {
+            _ = try tryParseTap(["--point", "100,200", "--label", "Send"])
+        }
+    }
+
+    @Test("malformed --point is rejected at parse time")
+    func malformedPoint() throws {
+        #expect(throws: (any Error).self) {
+            _ = try tryParseTap(["--point", "not-a-point"])
+        }
+    }
+
+    @Test("negative --point is rejected")
+    func negativePoint() throws {
+        // `=`-joined form: a bare `-5,200` value would be read as an
+        // option prefix by ArgumentParser before validation runs.
+        do {
+            _ = try tryParseTap(["--point=-5,200"])
+            Issue.record("Expected validation error")
+        } catch {
+            #expect(String(describing: error).contains("non-negative"))
+        }
+    }
+
+    @Test("non-finite -x is rejected instead of trapping downstream")
+    func nonFiniteX() throws {
+        // ArgumentParser's Double happily parses "inf"; before the
+        // shared resolver this passed the `>= 0` check and trapped the
+        // Double→Int conversion on the Android forward path.
+        do {
+            _ = try tryParseTap(["-x", "inf", "-y", "200"])
+            Issue.record("Expected validation error")
+        } catch {
+            #expect(String(describing: error).contains("finite"))
+        }
+    }
+
+    @Test("nan -y is rejected")
+    func nanY() throws {
+        do {
+            _ = try tryParseTap(["-x", "100", "-y", "nan"])
+            Issue.record("Expected validation error")
+        } catch {
+            #expect(String(describing: error).contains("finite"))
+        }
+    }
+
+    @Test("absurdly large coordinate is rejected")
+    func hugeCoordinate() throws {
+        do {
+            _ = try tryParseTap(["-x", "1e19", "-y", "200"])
+            Issue.record("Expected validation error")
+        } catch {
+            #expect(String(describing: error).contains("at most"))
+        }
+    }
 }

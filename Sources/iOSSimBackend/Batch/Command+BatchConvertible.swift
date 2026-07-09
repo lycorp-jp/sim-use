@@ -36,11 +36,11 @@ private func buildDelayedEvent(
 extension IOSSimTapCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
         // Dispatch coordinates: framebuffer space for AX-resolved
-        // selectors (issue #34), raw for explicit x/y.
+        // selectors (issue #34), raw for explicit --point/-x/-y.
         let resolvedPoint: (x: Double, y: Double)
 
-        if let pointX, let pointY {
-            resolvedPoint = (pointX, pointY)
+        if let explicit = try TapCoordinateResolver.resolve(x: pointX, y: pointY, point: point) {
+            resolvedPoint = (explicit.x, explicit.y)
         } else {
             let query: AccessibilityQuery
             if let elementID {

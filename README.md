@@ -63,12 +63,12 @@ Multiple selector styles for different needs:
 | `@N` alias | `tap @9` | Speed — cached from last `ui` |
 | `#<id>` | `tap #settingsButton` | Stability — survives layout changes |
 | `--label` | `tap --label "General"` | Scripted flows with `--wait-timeout` |
-| `-x -y` | `tap -x 100 -y 200` | Last resort — no AX data |
+| `-x -y` / `--point` | `tap --point 100,200` | Last resort — no AX data |
 
 AX-derived selectors work in any orientation: sim-use self-calibrates the
 current rotation on each command and maps outline coordinates onto the
-framebuffer before dispatching (iOS). Explicit `-x/-y` is always interpreted
-in the device-native portrait space.
+framebuffer before dispatching (iOS). Explicit `-x/-y`/`--point` is always
+interpreted in the device-native portrait space.
 
 
 ## Why sim-use
@@ -153,6 +153,7 @@ UDID="B34FF305-5EA8-412B-943F-1D0371CA17FF"
 
 ```bash
 sim-use tap -x 100 -y 200 --device $UDID
+sim-use tap --point 100,200 --device $UDID                    # same, pair form
 sim-use tap @5 --device $UDID                                 # alias cache
 sim-use tap "#3" --device $UDID                               # 3rd cell of the dominant list
 sim-use tap "#2@2" --device $UDID                             # 2nd cell of the 2nd detected list

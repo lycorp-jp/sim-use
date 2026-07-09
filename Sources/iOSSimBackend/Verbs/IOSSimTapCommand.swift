@@ -16,7 +16,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
     )
 
     @Argument(help: ArgumentHelp(
-        "Shortcut alias for the element to tap. `@N` selects the N-th entry of the most recent `describe-ui` snapshot; `#N` selects the N-th cell of the dominant detected list; `#N@M` selects the N-th cell of the M-th list (1-indexed, M=1 = dominant); `#<id>` resolves an AXUniqueId via the live AX tree. Exclusive with -x/-y and --id/--label/--value.",
+        "Shortcut alias for the element to tap. `@N` selects the N-th entry of the most recent `describe-ui` snapshot; `#N` selects the N-th cell of the dominant detected list; `#N@M` selects the N-th cell of the M-th list (1-indexed, M=1 = dominant); `#<id>` resolves an AXUniqueId via the live AX tree. Exclusive with --point/-x/-y and --id/--label/--value.",
         valueName: "alias"
     ))
     public var alias: String?
@@ -27,13 +27,19 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
     @Option(name: [.customShort("y"), .customLong("y")], help: "The Y coordinate of the point to tap. Accepts -y or --y.")
     public var pointY: Double?
 
-    @Option(name: [.customLong("id")], help: "Tap the center of the element matching AXUniqueId/resource-id literally. For the N-th outline entry, use the positional `@N` alias instead — `--id 42` matches the identifier string '42', NOT outline alias @42. Ignored if -x and -y are provided.")
+    @Option(name: .customLong("point"), help: ArgumentHelp(
+        "The point to tap as a coordinate pair — same semantics as -x/-y; specify only one form.",
+        valueName: "x,y"
+    ))
+    public var point: CoordinatePair?
+
+    @Option(name: [.customLong("id")], help: "Tap the center of the element matching AXUniqueId/resource-id literally. For the N-th outline entry, use the positional `@N` alias instead — `--id 42` matches the identifier string '42', NOT outline alias @42. Ignored if explicit coordinates (-x/-y or --point) are provided.")
     public var elementID: String?
 
-    @Option(name: [.customLong("label")], help: "Tap the center of the element matching AXLabel (accessibilityLabel). Ignored if -x and -y are provided.")
+    @Option(name: [.customLong("label")], help: "Tap the center of the element matching AXLabel (accessibilityLabel). Ignored if explicit coordinates (-x/-y or --point) are provided.")
     public var elementLabel: String?
 
-    @Option(name: [.customLong("value")], help: "Tap the center of the element matching AXValue (the current value of a control). Ignored if -x and -y are provided.")
+    @Option(name: [.customLong("value")], help: "Tap the center of the element matching AXValue (the current value of a control). Ignored if explicit coordinates (-x/-y or --point) are provided.")
     public var elementValue: String?
 
     @Option(name: [.customLong("label-contains")], help: "Tap the element whose AXLabel contains this case-sensitive substring. Useful when labels carry dynamic state (counters, timestamps). Mutually exclusive with --id/--label/--value/--label-regex.")
@@ -122,7 +128,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
     public func validate() throws {
         try Self.validateOptions(
             alias: alias,
-            pointX: pointX, pointY: pointY,
+            pointX: pointX, pointY: pointY, point: point,
             elementID: elementID,
             elementLabel: elementLabel,
             elementValue: elementValue,
@@ -145,6 +151,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         alias: String?,
         pointX: Double?,
         pointY: Double?,
+        point: CoordinatePair?,
         elementID: String?,
         elementLabel: String?,
         elementValue: String?,
@@ -164,6 +171,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             var conflicts: [String] = []
             if pointX != nil { conflicts.append("-x") }
             if pointY != nil { conflicts.append("-y") }
+            if point != nil { conflicts.append("--point") }
             if elementID != nil { conflicts.append("--id") }
             if elementLabel != nil { conflicts.append("--label") }
             if elementValue != nil { conflicts.append("--value") }
@@ -172,13 +180,8 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             if !conflicts.isEmpty {
                 throw ValidationError("Alias '\(alias)' cannot be combined with \(conflicts.joined(separator: ", ")).")
             }
-        } else if pointX != nil || pointY != nil {
-            guard let pointX, let pointY else {
-                throw ValidationError("Both -x and -y must be provided together.")
-            }
-            guard pointX >= 0, pointY >= 0 else {
-                throw ValidationError("Coordinates must be non-negative values.")
-            }
+        } else if pointX != nil || pointY != nil || point != nil {
+            _ = try TapCoordinateResolver.resolve(x: pointX, y: pointY, point: point)
         } else {
             let selectors: [(String, String?)] = [
                 ("--id", elementID),
@@ -189,7 +192,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             ]
             let provided = selectors.filter { $0.1 != nil }
             if provided.isEmpty {
-                throw ValidationError("Either provide an `@N` / `#N` / `#N@M` alias, both -x/-y, or use --id/--label/--value/--label-contains/--label-regex to tap an element.")
+                throw ValidationError("Either provide an `@N` / `#N` / `#N@M` alias, coordinates (--point x,y or both -x/-y), or use --id/--label/--value/--label-contains/--label-regex to tap an element.")
             }
             if provided.count > 1 {
                 let names = provided.map(\.0).joined(separator: ", ")
@@ -244,8 +247,8 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
                 throw ValidationError(error.message)
             }
 
-            if pointX != nil || pointY != nil {
-                throw ValidationError("--frame cannot be combined with explicit -x/-y coordinates (those bypass the AX tree).")
+            if pointX != nil || pointY != nil || point != nil {
+                throw ValidationError("--frame cannot be combined with explicit -x/-y/--point coordinates (those bypass the AX tree).")
             }
             if let alias, case .some(let parsed) = OutlineAliasResolver.parse(alias) {
                 switch parsed {
@@ -323,9 +326,9 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             case nil:
                 throw CLIError(errorDescription: "Internal error: alias '\(alias)' passed validation but could not be parsed.")
             }
-        } else if let pointX, let pointY {
-            resolvedPoint = (x: pointX, y: pointY)
-            resolvedDescription = "(\(pointX), \(pointY))"
+        } else if let explicit = try TapCoordinateResolver.resolve(x: pointX, y: pointY, point: point) {
+            resolvedPoint = (x: explicit.x, y: explicit.y)
+            resolvedDescription = "(\(explicit.x), \(explicit.y))"
             resolvedAdvisory = nil
             calibration = nil
         } else {

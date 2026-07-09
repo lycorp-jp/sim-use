@@ -92,4 +92,4 @@ sim-use ios batch --device SIMULATOR_UDID \
 
 The second step polls for up to 5 seconds for `WelcomeMessage` to appear after the login tap triggers navigation.
 
-If label selectors are ambiguous and sim-use reports no `AXUniqueId` values for matches, switch that step to coordinates (`tap -x/-y`).
+If label selectors are ambiguous and sim-use reports no `AXUniqueId` values for matches, switch that step to coordinates (`tap --point x,y` or `-x/-y`).

@@ -18,9 +18,12 @@ struct DescribeUICommandSurfaceTests {
 
     @Test("Invalid --point format fails with guidance")
     func invalidPointFormatFails() async throws {
+        // `--point` is a `CoordinatePair` (issue #25), so a malformed
+        // value fails at parse time with ArgumentParser's standard
+        // invalid-value diagnostic naming the flag.
         let result = try await TestHelpers.runSimUseCommandAllowFailure("describe-ui --udid invalid --point nope")
         #expect(result.exitCode != 0)
-        #expect(result.output.contains("--point must be in the form x,y using non-negative numbers."))
+        #expect(result.output.contains("The value 'nope' is invalid for '--point <x,y>'"))
     }
 }
 

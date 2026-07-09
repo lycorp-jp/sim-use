@@ -78,7 +78,7 @@ struct TapForwarderTests {
         do {
             try IOSSimTapCommand.validateOptions(
                 alias: nil,
-                pointX: nil, pointY: nil,
+                pointX: nil, pointY: nil, point: nil,
                 elementID: "Some",
                 elementLabel: "Other",
                 elementValue: nil,
@@ -100,7 +100,7 @@ struct TapForwarderTests {
         do {
             try IOSSimTapCommand.validateOptions(
                 alias: "@2",
-                pointX: 100, pointY: 200,
+                pointX: 100, pointY: 200, point: nil,
                 elementID: nil,
                 elementLabel: nil,
                 elementValue: nil,
@@ -124,7 +124,7 @@ struct TapForwarderTests {
         do {
             try IOSSimTapCommand.validateOptions(
                 alias: nil,
-                pointX: nil, pointY: nil,
+                pointX: nil, pointY: nil, point: nil,
                 elementID: "X",
                 elementLabel: nil,
                 elementValue: nil,
@@ -148,7 +148,7 @@ struct TapForwarderTests {
         do {
             try IOSSimTapCommand.validateOptions(
                 alias: nil,
-                pointX: nil, pointY: nil,
+                pointX: nil, pointY: nil, point: nil,
                 elementID: "   ",
                 elementLabel: nil,
                 elementValue: nil,
@@ -237,6 +237,22 @@ struct TapForwarderTests {
         #expect(subCmd.duration == 0.05)
         #expect(topLevel.jsonOutput == true)
         #expect(subCmd.jsonOutput == true)
+    }
+
+    @Test("--point parses on every tap surface")
+    func pointFlagParsesEverywhere() throws {
+        // Issue #25: the coordinate-pair form must exist on the
+        // top-level, iOS, and Android surfaces plus long-press. Batch
+        // is covered transitively — `BatchStepParser` parses tap steps
+        // through `IOSSimTapCommand` itself.
+        let expected = CoordinatePair(x: 100, y: 200)
+        let iosArgv = ["--point", "100,200", "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0"]
+        #expect(try Tap.parse(iosArgv).point == expected)
+        #expect(try IOSSimTapCommand.parse(iosArgv).point == expected)
+        #expect(try LongPress.parse(iosArgv).point == expected)
+
+        let androidArgv = ["--point", "100,200", "--udid", "emulator-5554"]
+        #expect(try AndroidTapCommand.parse(androidArgv).point == expected)
     }
 
     @Test("AndroidTapCommand parses --duration and rejects out-of-range")

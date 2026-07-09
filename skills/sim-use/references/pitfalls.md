@@ -30,9 +30,9 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 **Recipes:**
 1. Normally nothing to do — selectors work in any orientation, and outline/tap coordinates always read in UI space (what you see).
-2. The calibration-fallback advisory means the mapping could not be verified (empty or symmetric screen) and portrait was assumed; re-run `ui` and retry, or use explicit `-x/-y`.
+2. The calibration-fallback advisory means the mapping could not be verified (empty or symmetric screen) and portrait was assumed; re-run `ui` and retry, or use explicit `-x/-y`/`--point`.
 3. A "snapshot was captured at WxH…" advisory means the device rotated after the last `ui`; re-run `ui` to refresh the `@N` table.
-4. Explicit `-x/-y` (and `--target-x/y`) are never transformed — they are device-native portrait coordinates by contract.
+4. Explicit `-x/-y`/`--point` (and `--target-x/y`) are never transformed — they are device-native portrait coordinates by contract.
 5. `batch` calibrates once per run. If a step rotates the device (or navigates to a screen that forces a different orientation), later selector steps may mis-target — split the flow into separate batches around the rotation.
 
 ## System layer detection
