@@ -60,10 +60,12 @@ Temporary Items
 bridge/.gradle/
 bridge/build/
 bridge/app/build/
+bridge/playground/build/
 bridge/local.properties
 bridge/.idea/
 bridge/*.iml
 bridge/app/*.iml
+bridge/playground/*.iml
 bridge/captures/
 
 # The bridge APK is a build output, not a source artifact. The Swift
@@ -85,3 +87,10 @@ Sources/SimUse/Resources/skills/sim-use/
 Sources/SimUse/Resources/viewer/*
 !Sources/SimUse/Resources/viewer/.gitkeep
 *.profraw
+
+# Agent-eval run artifacts (reports, transcripts, screenshots).
+/e2e/agent-evals/reports/
+
+# Python bytecode from eval harness.
+__pycache__/
+*.pyc

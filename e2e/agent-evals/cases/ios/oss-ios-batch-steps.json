@@ -1,0 +1,25 @@
+{
+  "id": "oss-ios-batch-steps",
+  "platform": "ios",
+  "tags": [
+    "release"
+  ],
+  "reset": "R1",
+  "timeout_s": 480,
+  "precondition": {
+    "screen": "tap-test"
+  },
+  "title": "Use ios batch for a scripted multi-tap",
+  "instruction": "The Playground app is showing its Tap Test screen. Using a single `sim-use ios batch` invocation (not separate tap commands), tap the center of the tap test area twice with a short sleep between the taps. Then report the tap count.",
+  "verify": [
+    {
+      "type": "element_exists",
+      "outline_regex": "Tap Count: 2\\b"
+    },
+    {
+      "type": "transcript_regex",
+      "pattern": "ios batch",
+      "expect": true
+    }
+  ]
+}

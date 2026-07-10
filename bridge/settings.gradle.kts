@@ -16,3 +16,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "sim-use-device-bridge"
 include(":app")
+// Test-fixture app driven by the Android E2E suites. Not bundled into
+// the CLI — built on demand by scripts/build-playground-android.sh.
+include(":playground")

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/button_test_caption"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingBottom="8dp"
+        android:text="Press the hardware Back key to increment the counter"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/back_press_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Back presses: 0"
+        android:textSize="16sp" />
+</LinearLayout>

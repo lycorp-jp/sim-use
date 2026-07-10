@@ -10,7 +10,7 @@ struct KeyTests {
         try await TestHelpers.launchPlaygroundApp(to: "key-press")
 
         // Act
-        try await TestHelpers.runSimUseCommand("key 4", simulatorUDID: defaultSimulatorUDID)
+        try await TestHelpers.runSimUseCommand("ios key 4", simulatorUDID: defaultSimulatorUDID)
         try await Task.sleep(nanoseconds: 1_000_000_000)    
 
         // Assert
@@ -25,7 +25,7 @@ struct KeyTests {
         try await TestHelpers.launchPlaygroundApp(to: "key-press")
 
         // Act
-        try await TestHelpers.runSimUseCommand("key 40", simulatorUDID: defaultSimulatorUDID)
+        try await TestHelpers.runSimUseCommand("ios key 40", simulatorUDID: defaultSimulatorUDID)
         try await Task.sleep(nanoseconds: 1_000_000_000)
 
         // Assert
@@ -41,7 +41,7 @@ struct KeyTests {
 
         // Act
         let startTime = Date()
-        try await TestHelpers.runSimUseCommand("key 4 --duration 2", simulatorUDID: defaultSimulatorUDID)
+        try await TestHelpers.runSimUseCommand("ios key 4 --duration 2", simulatorUDID: defaultSimulatorUDID)
         let endTime = Date()
 
         // Assert

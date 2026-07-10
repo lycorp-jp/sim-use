@@ -10,7 +10,7 @@ struct KeySequenceTests {
         try await TestHelpers.launchPlaygroundApp(to: "key-sequence")
 
         // Act
-        try await TestHelpers.runSimUseCommand("key-sequence --keycodes 11,8,15,15,18", simulatorUDID: defaultSimulatorUDID)
+        try await TestHelpers.runSimUseCommand("ios key-sequence --keycodes 11,8,15,15,18", simulatorUDID: defaultSimulatorUDID)
         try await Task.sleep(nanoseconds: 1_000_000_000)
 
         // Assert
@@ -28,7 +28,7 @@ struct KeySequenceTests {
 
         // Act
         let startTime = Date()
-        try await TestHelpers.runSimUseCommand("key-sequence --keycodes 4,5 --delay 0.5", simulatorUDID: defaultSimulatorUDID)
+        try await TestHelpers.runSimUseCommand("ios key-sequence --keycodes 4,5 --delay 0.5", simulatorUDID: defaultSimulatorUDID)
         let endTime = Date()
         try await Task.sleep(nanoseconds: 500_000_000)
 
@@ -47,7 +47,7 @@ struct KeySequenceTests {
     func emptyKeycodeSequence() async throws {
         try await TestHelpers.launchPlaygroundApp(to: "key-sequence")
         await #expect(throws: (any Error).self) {
-            try await TestHelpers.runSimUseCommand("key-sequence --keycodes \"\"", simulatorUDID: defaultSimulatorUDID)
+            try await TestHelpers.runSimUseCommand("ios key-sequence --keycodes \"\"", simulatorUDID: defaultSimulatorUDID)
         }
     }
 
@@ -55,7 +55,7 @@ struct KeySequenceTests {
     func invalidKeycode() async throws {
         try await TestHelpers.launchPlaygroundApp(to: "key-sequence")
         await #expect(throws: (any Error).self) {
-            try await TestHelpers.runSimUseCommand("key-sequence --keycodes 11,256,15", simulatorUDID: defaultSimulatorUDID)
+            try await TestHelpers.runSimUseCommand("ios key-sequence --keycodes 11,256,15", simulatorUDID: defaultSimulatorUDID)
         }
     }
 
@@ -63,7 +63,7 @@ struct KeySequenceTests {
     func negativeDelay() async throws {
         try await TestHelpers.launchPlaygroundApp(to: "key-sequence")
         await #expect(throws: (any Error).self) {
-            try await TestHelpers.runSimUseCommand("key-sequence --keycodes 11,8,15,15,18 --delay -0.5", simulatorUDID: defaultSimulatorUDID)
+            try await TestHelpers.runSimUseCommand("ios key-sequence --keycodes 11,8,15,15,18 --delay -0.5", simulatorUDID: defaultSimulatorUDID)
         }
     }
 
@@ -72,7 +72,7 @@ struct KeySequenceTests {
         try await TestHelpers.launchPlaygroundApp(to: "key-sequence")
         let keycodes = Array(repeating: "4", count: 101).joined(separator: ",")
         await #expect(throws: (any Error).self) {
-            try await TestHelpers.runSimUseCommand("key-sequence --keycodes \(keycodes)", simulatorUDID: defaultSimulatorUDID)
+            try await TestHelpers.runSimUseCommand("ios key-sequence --keycodes \(keycodes)", simulatorUDID: defaultSimulatorUDID)
         }
     }
 }

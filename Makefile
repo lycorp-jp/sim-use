@@ -1,4 +1,4 @@
-.PHONY: help build test e2e clean viewer sync-skills
+.PHONY: help build test e2e e2e-android clean viewer sync-skills
 
 # pipefail below needs bash; macOS /bin/sh is bash-in-posix-mode but
 # being explicit costs nothing.
@@ -29,6 +29,7 @@ help:
 	@echo "  make viewer  Rebuild the Viewer SPA into Sources/SimUse/Resources/viewer/"
 	@echo "  make test    Run unit tests (no simulator needed)"
 	@echo "  make e2e     Run end-to-end tests on a booted simulator"
+	@echo "  make e2e-android  Run Android E2E tests on a connected device/emulator"
 	@echo "  make clean   Clean Swift build artifacts"
 
 # The bundled skill lives in skills/sim-use (source of truth) and is
@@ -56,6 +57,11 @@ test: sync-skills
 
 e2e:
 	./scripts/test-runner.sh
+
+# Android device E2E: builds the CLI + playground fixture, installs it on
+# ANDROID_SERIAL (default emulator-5554), and runs the Android suites.
+e2e-android:
+	./scripts/test-runner-android.sh
 
 clean:
 	swift package clean

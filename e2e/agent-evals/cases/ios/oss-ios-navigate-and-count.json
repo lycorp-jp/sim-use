@@ -1,0 +1,18 @@
+{
+  "id": "oss-ios-navigate-and-count",
+  "platform": "ios",
+  "tags": [
+    "release"
+  ],
+  "reset": "R1",
+  "timeout_s": 480,
+  "title": "Navigate from main menu without a deep link",
+  "instruction": "The Playground app just launched at its main menu. Find and open the Tap Test screen from the menu, tap the test area once, and report the tap count.",
+  "verify": [
+    {
+      "type": "element_exists",
+      "outline_regex": "Tap Count: 1\\b"
+    }
+  ],
+  "notes": "No screen precondition on purpose — exercises observe→navigate."
+}

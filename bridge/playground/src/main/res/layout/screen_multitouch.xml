@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/pinch_scale"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Scale: 1.00"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/rotation_angle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Rotation: 0"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/pointer_count_max"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Pointers: 0"
+        android:textSize="16sp" />
+
+    <View
+        android:id="@+id/multi_touch_area"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:background="#FFE0B2"
+        android:clickable="true"
+        android:contentDescription="multi touch area"
+        android:focusable="true"
+        android:importantForAccessibility="yes" />
+</LinearLayout>

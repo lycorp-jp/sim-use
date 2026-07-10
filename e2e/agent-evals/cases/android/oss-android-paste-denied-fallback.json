@@ -1,0 +1,26 @@
+{
+  "id": "oss-android-paste-denied-fallback",
+  "platform": "android",
+  "tags": [
+    "release"
+  ],
+  "reset": "R1",
+  "timeout_s": 420,
+  "precondition": {
+    "screen": "text-input"
+  },
+  "title": "Paste is denied on Android; agent must fall back to type",
+  "instruction": "The Playground app is showing its text input screen. Put the exact text sim-use eval into the text field and confirm the field shows it.",
+  "verify": [
+    {
+      "type": "element_exists",
+      "outline_regex": "sim-use eval"
+    },
+    {
+      "type": "transcript_regex",
+      "pattern": "sim-use[^\\n]*type",
+      "expect": true
+    }
+  ],
+  "notes": "Requires the Android playground (bridge/playground) installed on the emulator."
+}

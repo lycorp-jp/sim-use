@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/swipe_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Swipes: 0"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/last_swipe_direction"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Direction: -"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/last_swipe_distance"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Distance: -"
+        android:textSize="16sp" />
+
+    <View
+        android:id="@+id/swipe_test_area"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:background="#C8E6C9"
+        android:clickable="true"
+        android:contentDescription="swipe test area"
+        android:focusable="true"
+        android:importantForAccessibility="yes" />
+</LinearLayout>

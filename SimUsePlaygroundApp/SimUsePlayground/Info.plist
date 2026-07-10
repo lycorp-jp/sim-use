@@ -20,6 +20,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SimUsePlayground requests location only to exercise the iOS system permission prompt for sim-use E2E tests.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 </dict>

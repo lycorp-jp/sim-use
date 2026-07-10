@@ -322,12 +322,16 @@ run_tests() {
             "DescribeUITests"
             "GestureTests"
             "InitTests"
+            "KeyboardStateTests"
             "KeyComboTests"
             "KeySequenceTests"
             "KeyTests"
             "ListSimulatorsTests"
+            "OrientationTests"
+            "PasteTests"
+            "PermissionAlertTests"
             "RecordVideoTests"
-            "StreamVideoDebugTests"
+            "StreamVideoDebugTest"
             "StreamVideoTests"
             "SwipeTests"
             "TapTests"
@@ -335,16 +339,33 @@ run_tests() {
             "TypeTests"
         )
 
+        # Run every suite even after a failure so a single red suite does not
+        # hide the state of the rest; report the full map at the end.
+        local failed_suites=()
+        local passed_suites=()
         echo ""
         for suite in "${suites[@]}"; do
             print_header "Running $suite"
-            if ! run_swift_test "$suite"; then
+            if run_swift_test "$suite"; then
+                passed_suites+=("$suite")
+            else
                 print_error "$suite failed"
-                exit 1
+                failed_suites+=("$suite")
             fi
         done
 
-        print_success "All test suites passed"
+        print_header "E2E suite results"
+        for suite in "${passed_suites[@]}"; do
+            print_success "$suite"
+        done
+        for suite in "${failed_suites[@]}"; do
+            print_error "$suite"
+        done
+        if [[ ${#failed_suites[@]} -gt 0 ]]; then
+            print_error "${#failed_suites[@]} of ${#suites[@]} suites failed"
+            exit 1
+        fi
+        print_success "All ${#suites[@]} test suites passed"
         return
     fi
 

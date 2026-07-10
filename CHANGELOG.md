@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Android Playground fixture app (`bridge/playground`, `com.linecorp.simuse.playground`) and Android device E2E suites (AndroidTap/SwipeScroll/Type/KeyboardState/MultiTouch/Button/DescribeUI) gated by `SIM_USE_E2E_ANDROID=1` + `ANDROID_SERIAL`. `make e2e-android` builds the APK, installs it, runs `sim-use android init`, and executes the suites one-by-one with a pass/fail summary (`scripts/build-playground-android.sh`, `scripts/test-runner-android.sh`).
+- iOS Playground gains three screens with matching E2E suites: `paste-test` + PasteTests (Cmd+V and `--via-menu` paths, unicode, `--replace`, Allow-Paste alert handling), `orientation-test` + OrientationTests (AX-selector taps land correctly after programmatic rotation — exercises orientation self-calibration), and `permissions-test` + PermissionAlertTests (real location permission alert raised, classified via the `App: SpringBoard` header, dismissed through sim-use on both allow and deny paths).
+- Agent-eval harness (`e2e/agent-evals/`): natural-language cases executed by a headless `claude -p` agent using the bundled skill (`skills/sim-use/`) against the Playground apps, judged by deterministic device-side post-condition checks. Catches skill-prose drift and verb-steering regressions the scripted suites cannot (e.g. `paste` vs US-ASCII `type`, Android paste-denied fallback).
+- E2E confidence-suite design note under `docs/ai/`; the release skill's pre-flight now requires green `make e2e` / `make e2e-android` runs.
+
+### Changed
+
+- `scripts/test-runner.sh` keeps running after a failed suite and prints a full pass/fail map at the end (a release gate needs the whole picture, not the first crash). The hardcoded suite list gained the missing `KeyboardStateTests` and the new suites, and the misnamed `StreamVideoDebugTests` entry — which silently matched zero tests — now points at the real `StreamVideoDebugTest` suite.
+
+### Fixed
+
+- Four E2E suites (KeyTests, KeyComboTests, KeySequenceTests, StreamVideoTests) still invoked the pre-0.5.x top-level verb forms and had failed ever since the five iOS-only verbs moved under the `ios` namespace; they now call `sim-use ios <verb>`.
+- KeyComboTests' Cmd+A test asserted a cleared text field reads nil/empty — an empty `UITextField` exposes its placeholder as the accessibility value, so the assertion could never pass. It now accepts the placeholder form.
+
 ## [0.10.0] - 2026-07-09
 
 ### Added

@@ -24,6 +24,15 @@ Run these checks. Abort with a clear error if any fails.
    ```
    If it exists, verify it's clean and pull latest.
 7. Android bridge toolchain: `scripts/build-bridge.sh --check` succeeds.
+7.5. **E2E confidence suites are green** (see `docs/ai/xxxx-e2e-confidence-suite/`):
+   ```bash
+   make e2e            # iOS scripted E2E vs Playground (booted simulator)
+   make e2e-android    # Android scripted E2E vs Playground (emulator/device)
+   ```
+   Both print a full pass/fail map and keep going past failures. Any red
+   suite blocks the release unless the user explicitly waives it at Step 3.
+   Optional but recommended when skill prose changed this release:
+   `python3 e2e/agent-evals/run.py --platform ios --tags quick`.
 8. Signing + notarization readiness:
    ```bash
    security find-identity -v -p codesigning | grep -F "NAVER Japan K.K. (GFPYJQXRSN)"

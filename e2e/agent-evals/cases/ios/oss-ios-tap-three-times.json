@@ -1,0 +1,21 @@
+{
+  "id": "oss-ios-tap-three-times",
+  "platform": "ios",
+  "tags": [
+    "quick",
+    "release"
+  ],
+  "reset": "R1",
+  "timeout_s": 360,
+  "precondition": {
+    "screen": "tap-test"
+  },
+  "title": "Tap the test area exactly three times",
+  "instruction": "The Playground app is showing its Tap Test screen. Tap inside the tap test area exactly 3 times, then report the tap count shown on screen.",
+  "verify": [
+    {
+      "type": "element_exists",
+      "outline_regex": "Tap Count: 3\\b"
+    }
+  ]
+}
