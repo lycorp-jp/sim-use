@@ -75,11 +75,16 @@ def resolve_device(platform: str, cli_device: str) -> str:
         if d.get("platform") == platform
         and d.get("state", "").lower() in ("booted", "device")
     ]
-    if len(candidates) == 1:
-        return candidates[0]["udid"]
+    # `deviceId` is the canonical key in `devices --json` (the legacy `udid`
+    # key was dropped in 0.10.0).
+    ids = [d.get("deviceId") for d in candidates if d.get("deviceId")]
+    if len(ids) == 1:
+        return ids[0]
+    if not ids:
+        sys.exit(f"no reachable {platform} device found; boot one or pass --device")
     sys.exit(
-        f"cannot auto-resolve a single {platform} device "
-        f"({len(candidates)} candidates); pass --device"
+        f"cannot auto-resolve a single {platform} device — "
+        f"{len(ids)} candidates: {', '.join(ids)}. Pass --device <id>."
     )
 
 
