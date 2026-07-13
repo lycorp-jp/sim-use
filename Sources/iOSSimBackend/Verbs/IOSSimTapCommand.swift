@@ -50,8 +50,12 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
     public var simulatorUDIDForDaemon: String? { device.resolved }
 
     public var frameFilter: AccessibilityTargetResolver.FrameFilter? {
-        // Validation guarantees parse success; force-try keeps execute()
-        // free of throws-only-for-validate paths.
+        Self.frameFilter(from: targeting)
+    }
+
+    static func frameFilter(from targeting: TapTargetingOptions) -> AccessibilityTargetResolver.FrameFilter? {
+        // Validation guarantees parse success; force-try keeps the
+        // execution path free of throws-only-for-validate branches.
         let filter = (try? AccessibilityTargetResolver.FrameFilter(specs: targeting.frameSpecs)) ?? .init()
         return filter.isEmpty ? nil : filter
     }
@@ -91,8 +95,37 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
     }
 
     public func execute() async throws -> ExecutionResult {
+        try await Self.performTap(
+            alias: alias,
+            targeting: targeting,
+            timing: timing,
+            duration: duration,
+            multiTouch: multiTouch,
+            device: device,
+            json: json
+        )
+    }
+
+    /// Typed executor entry point — the iOS mirror of
+    /// `AndroidTapCommand.performTap`. Both `sim-use ios tap` (via
+    /// `execute()` above) and the top-level `tap` / `long-press`
+    /// forwarders call this directly with their parsed groups, so no
+    /// backend command instance is ever hand-built and the
+    /// wrapper-definition trap (#41/#42) cannot occur on this path.
+    /// Callers are expected to have run the shared validators first.
+    public static func performTap(
+        alias: String?,
+        targeting: TapTargetingOptions,
+        timing: TapTimingOptions,
+        duration: Double?,
+        multiTouch: MultiTouchOptions,
+        device: DeviceOptions,
+        json: JSONOutputOptions
+    ) async throws -> ExecutionResult {
         let logger = SimUseLogger()
-        try await setup(logger: logger)
+        let jsonOutput = json.enabled
+        let frameFilter = Self.frameFilter(from: targeting)
+        try await performEssentialSetup(logger: logger)
         try await performGlobalSetup(logger: logger)
 
         let resolvedPoint: (x: Double, y: Double)

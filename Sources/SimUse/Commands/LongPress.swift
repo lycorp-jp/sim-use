@@ -111,29 +111,22 @@ struct LongPress: SimUseExecutableCommand {
         .line("✓ Long-press at (\(result.x), \(result.y)) completed successfully")
     }
 
-    /// iOS path: hand off to `IOSSimTapCommand` with `--duration`
-    /// carried through. That sub-command already splits the HID event
-    /// into down → sleep → up when duration > 0, which is exactly the
-    /// long-press recipe.
+    /// iOS path: hand off to the tap executor with `--duration` carried
+    /// through — it already splits the HID event into down → sleep → up
+    /// when duration > 0, which is exactly the long-press recipe. The
+    /// parsed groups are handed over as values, so no backend command
+    /// instance is hand-built and there is no per-field copy to
+    /// forget (#42).
     private func executeIOSSim() async throws -> ExecutionResult {
-        let sub = makeIOSSubcommand()
-        return try await sub.execute()
-    }
-
-    /// Construct the backend command and copy every parsed flag across.
-    /// A missed field stays in ArgumentParser's wrapper-definition state
-    /// and traps on first read (#42) — pinned by
-    /// `ForwarderInitializationGuardTests`.
-    func makeIOSSubcommand() -> IOSSimTapCommand {
-        var sub = IOSSimTapCommand()
-        sub.alias = alias
-        sub.targeting = targeting
-        sub.duration = duration
-        sub.timing = timing
-        sub.multiTouch = multiTouch
-        sub.device = device
-        sub.json = json
-        return sub
+        try await IOSSimTapCommand.performTap(
+            alias: alias,
+            targeting: targeting,
+            timing: timing,
+            duration: duration,
+            multiTouch: multiTouch,
+            device: device,
+            json: json
+        )
     }
 
     /// Android path: same selector resolution as `tap`, then a

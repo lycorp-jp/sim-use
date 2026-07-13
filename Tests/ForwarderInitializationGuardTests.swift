@@ -14,6 +14,12 @@ import Testing
 // value from a parsable argument definition" — at runtime, on a device,
 // where no unit test used to look.
 //
+// The tap family (`tap` / `long-press`) has no guard test here by
+// design: it forwards through `IOSSimTapCommand.performTap`, handing
+// its parsed groups over as values — no backend instance is ever
+// hand-built on that path. Verbs migrated to that executor pattern
+// drop out of this suite together with their copy code.
+//
 // Each test parses a valid argv, calls the forwarder's
 // `makeIOSSubcommand()`, and audits the result with `Mirror`: every
 // ArgumentParser property wrapper must be out of definition state.
@@ -128,16 +134,6 @@ struct ForwarderInitializationGuardTests {
     @Test("audit passes a directly parsed command")
     func auditPassesParsedCommand() throws {
         assertFullyInitialized(try IOSSimTapCommand.parse(["@1", "--udid", iosUDID]))
-    }
-
-    @Test("tap forwarder copies every field")
-    func tap() throws {
-        assertFullyInitialized(try Tap.parse(["@1", "--udid", iosUDID]).makeIOSSubcommand())
-    }
-
-    @Test("long-press forwarder copies every field")
-    func longPress() throws {
-        assertFullyInitialized(try LongPress.parse(["@1", "--udid", iosUDID]).makeIOSSubcommand())
     }
 
     @Test("paste forwarder copies every field")
