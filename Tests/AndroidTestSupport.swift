@@ -184,9 +184,14 @@ enum AndroidE2E {
     /// wrong value simply never satisfies the predicate and the caller's
     /// `#expect` on the returned outline fails.
     @discardableResult
+    // Default timeout is generous: Android accessibility text is
+    // eventually-consistent (TYPE_VIEW_TEXT_CHANGED events are coalesced and
+    // the a11y node cache can lag an action by seconds, more so on a loaded or
+    // cold emulator), so a positive "wait until X appears" poll needs headroom.
+    // The predicate short-circuits, so fast machines pay nothing.
     static func waitForOutline(
         includeOffscreen: Bool = false,
-        timeout: TimeInterval = 8,
+        timeout: TimeInterval = 12,
         pollInterval: TimeInterval = 0.4,
         where predicate: (AndroidOutline) -> Bool
     ) async throws -> AndroidOutline {

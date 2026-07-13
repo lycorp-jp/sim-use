@@ -10,11 +10,19 @@ struct AndroidTypeTests {
         try await AndroidE2E.run("tap '#focus_button'")
         try await Task.sleep(nanoseconds: 1_000_000_000)
 
+        // The two types must follow in quick succession: `type` appends at the
+        // caret, but only while the caret sits at the end — if the IME commits
+        // and the field's selection resets between them (which happens once the
+        // first type fully settles), the second type replaces instead. So keep
+        // the gap short and do NOT wait for "abc" to settle. The generous final
+        // timeout absorbs the a11y lag (the field holds "abcde" well before
+        // describe-ui shows it, sometimes by several seconds on a loaded/cold
+        // emulator).
         try await AndroidE2E.run("type \"abc\"")
         try await Task.sleep(nanoseconds: 800_000_000)
         try await AndroidE2E.run("type \"de\"")
 
-        let ui = try await AndroidE2E.waitForOutline {
+        let ui = try await AndroidE2E.waitForOutline(timeout: 20) {
             AndroidE2E.trailingValue($0.label(resourceId: "text_echo")) == "abcde"
         }
         #expect(AndroidE2E.trailingValue(ui.label(resourceId: "text_echo")) == "abcde")
