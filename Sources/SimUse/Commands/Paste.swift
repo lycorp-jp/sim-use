@@ -141,11 +141,7 @@ struct Paste: SimUseExecutableCommand {
         // iOS-only soft-keyboard probe — Android goes through
         // ACTION_PASTE and has no equivalent HID-keyboard trap.
         guard !PlatformRouter.looksLikeAndroid(device.resolved) else { return }
-        var sub = IOSSimPasteCommand()
-        sub.viaMenu = viaMenu
-        sub.device = device
-        sub.json = json
-        await sub.clientPreflight()
+        await makeIOSSubcommand().clientPreflight()
     }
 
     func execute() async throws -> ExecutionResult {
@@ -158,6 +154,18 @@ struct Paste: SimUseExecutableCommand {
     }
 
     private func executeIOSSim() async throws -> ExecutionResult {
+        let sub = makeIOSSubcommand()
+        return try await sub.execute()
+    }
+
+    /// Construct the backend command and copy every parsed flag across.
+    /// A missed field stays in ArgumentParser's wrapper-definition state
+    /// and traps on first read (#42) — pinned by
+    /// `ForwarderInitializationGuardTests`. Also feeds `clientPreflight`,
+    /// which previously copied only the three fields it read — a full
+    /// copy means the preflight can never trap if it starts reading
+    /// another field.
+    func makeIOSSubcommand() -> IOSSimPasteCommand {
         var sub = IOSSimPasteCommand()
         sub.text = text
         sub.useStdin = useStdin
@@ -171,7 +179,7 @@ struct Paste: SimUseExecutableCommand {
         sub.menuTimeout = menuTimeout
         sub.device = device
         sub.json = json
-        return try await sub.execute()
+        return sub
     }
 
     private func executeAndroid() throws -> ExecutionResult {

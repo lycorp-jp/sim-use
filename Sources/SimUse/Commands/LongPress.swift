@@ -173,6 +173,15 @@ struct LongPress: SimUseExecutableCommand {
     /// into down → sleep → up when duration > 0, which is exactly the
     /// long-press recipe.
     private func executeIOSSim() async throws -> ExecutionResult {
+        let sub = makeIOSSubcommand()
+        return try await sub.execute()
+    }
+
+    /// Construct the backend command and copy every parsed flag across.
+    /// A missed field stays in ArgumentParser's wrapper-definition state
+    /// and traps on first read (#42) — pinned by
+    /// `ForwarderInitializationGuardTests`.
+    func makeIOSSubcommand() -> IOSSimTapCommand {
         var sub = IOSSimTapCommand()
         sub.alias = alias
         sub.pointX = pointX
@@ -193,7 +202,7 @@ struct LongPress: SimUseExecutableCommand {
         sub.multiTouch = multiTouch
         sub.device = device
         sub.json = json
-        return try await sub.execute()
+        return sub
     }
 
     /// Android path: same selector resolution as `tap`, then a

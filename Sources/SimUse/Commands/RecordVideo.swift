@@ -78,6 +78,15 @@ struct RecordVideo: SimUseExecutableCommand {
     }
 
     private func executeIOSSim() async throws -> ExecutionResult {
+        let sub = makeIOSSubcommand()
+        return try await sub.execute()
+    }
+
+    /// Construct the backend command and copy every parsed flag across.
+    /// A missed field stays in ArgumentParser's wrapper-definition state
+    /// and traps on first read (#42) — pinned by
+    /// `ForwarderInitializationGuardTests`.
+    func makeIOSSubcommand() -> IOSSimRecordVideoCommand {
         var sub = IOSSimRecordVideoCommand()
         sub.fps = fps
         sub.quality = quality
@@ -85,7 +94,7 @@ struct RecordVideo: SimUseExecutableCommand {
         sub.output = output
         sub.device = device
         sub.json = json
-        return try await sub.execute()
+        return sub
     }
 
     // MARK: - Android

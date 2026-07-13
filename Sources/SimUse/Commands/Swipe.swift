@@ -80,6 +80,15 @@ struct Swipe: SimUseExecutableCommand {
     }
 
     private func executeIOSSim() async throws -> ExecutionResult {
+        let sub = makeIOSSubcommand()
+        return try await sub.execute()
+    }
+
+    /// Construct the backend command and copy every parsed flag across.
+    /// A missed field stays in ArgumentParser's wrapper-definition state
+    /// and traps on first read (#42) — pinned by
+    /// `ForwarderInitializationGuardTests`.
+    func makeIOSSubcommand() -> IOSSimSwipeCommand {
         var sub = IOSSimSwipeCommand()
         sub.coordinates = coordinates
         sub.duration = duration
@@ -88,7 +97,7 @@ struct Swipe: SimUseExecutableCommand {
         sub.postDelay = postDelay
         sub.device = device
         sub.json = json
-        return try await sub.execute()
+        return sub
     }
 
     /// Android dispatch. `duration` (iOS seconds) is re-mapped to

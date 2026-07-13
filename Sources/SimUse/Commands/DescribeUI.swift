@@ -107,6 +107,15 @@ struct DescribeUI: SimUseExecutableCommand {
     }
 
     private func executeIOSSim() async throws -> ExecutionResult {
+        let sub = makeIOSSubcommand()
+        return try await sub.execute()
+    }
+
+    /// Construct the backend command and copy every parsed flag across.
+    /// A missed field stays in ArgumentParser's wrapper-definition state
+    /// and traps on first read (#42) — pinned by
+    /// `ForwarderInitializationGuardTests`.
+    func makeIOSSubcommand() -> IOSSimDescribeUICommand {
         var sub = IOSSimDescribeUICommand()
         sub.point = point
         sub.maxProbes = maxProbes
@@ -115,7 +124,7 @@ struct DescribeUI: SimUseExecutableCommand {
         sub.seedCellHeight = seedCellHeight
         sub.device = device
         sub.json = json
-        return try await sub.execute()
+        return sub
     }
 
     /// Android dispatch: routes through `AndroidDescribeUICommand.performDescribeUI`

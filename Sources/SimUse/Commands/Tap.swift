@@ -182,14 +182,21 @@ struct Tap: SimUseExecutableCommand {
         .line("✓ Tap at (\(result.x), \(result.y)) completed successfully")
     }
 
-    /// Forward to the iOS Simulator backend.
-    /// Constructs an `IOSSimTapCommand`, copies the resolved flags
-    /// across, and runs its `execute()`. Validation has already passed
-    /// on the top-level struct, so the sub-command's `validate()` is
-    /// intentionally skipped — ArgumentParser only calls `validate()`
+    /// Forward to the iOS Simulator backend. Validation has already
+    /// passed on the top-level struct, so the sub-command's `validate()`
+    /// is intentionally skipped — ArgumentParser only calls `validate()`
     /// on the root parsed command, and re-running it here would double
     /// up the work for no benefit.
     private func executeIOSSim() async throws -> ExecutionResult {
+        let sub = makeIOSSubcommand()
+        return try await sub.execute()
+    }
+
+    /// Construct the backend command and copy every parsed flag across.
+    /// A missed field stays in ArgumentParser's wrapper-definition state
+    /// and traps on first read (#42) — pinned by
+    /// `ForwarderInitializationGuardTests`.
+    func makeIOSSubcommand() -> IOSSimTapCommand {
         var sub = IOSSimTapCommand()
         sub.alias = alias
         sub.pointX = pointX
@@ -210,7 +217,7 @@ struct Tap: SimUseExecutableCommand {
         sub.multiTouch = multiTouch
         sub.device = device
         sub.json = json
-        return try await sub.execute()
+        return sub
     }
 
     /// Forward to the Android backend. Symmetric to `executeIOSSim` —
