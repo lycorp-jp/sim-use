@@ -10,7 +10,7 @@ state; they are not the subject under test.
 | Layer | What it verifies | Fixture | Run with |
 |---|---|---|---|
 | Unit (`make test`) | parsing, dispatch, protocol — no device | fixtures/golden files | CI + local |
-| iOS scripted E2E | every iOS verb/argument surface | `SimUsePlaygroundApp` | `make e2e` |
+| iOS scripted E2E | every iOS verb/argument surface | `SimUsePlaygroundApp` | `make e2e-ios` (~15 min) |
 | Android scripted E2E | every Android verb surface + bridge | `bridge/playground` module | `make e2e-android` |
 | Agent evals | skill prose + agent-in-the-loop usability | Playground apps | `e2e/agent-evals/run.py` |
 
@@ -72,7 +72,7 @@ finishes, never from the agent's own claims. See `e2e/agent-evals/README.md`.
 
 ```bash
 make test          # unit
-make e2e           # iOS scripted E2E (booted simulator)
-make e2e-android   # Android scripted E2E (emulator/device)
+make e2e           # iOS + Android scripted E2E in sequence (~20+ min; iOS alone ~15 min)
+# (make e2e-ios / make e2e-android to run one platform)
 python3 e2e/agent-evals/run.py --tags quick   # agent smoke
 ```

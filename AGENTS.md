@@ -35,6 +35,21 @@ swift test --filter TapTests     # run a single test suite
 
 When [xcsift](https://github.com/ldomaradzki/xcsift) is installed (`brew install xcsift` — optional, never required), `make build` / `make test` condense swift output into a TOON summary plus a coverage report. `SIM_USE_XCSIFT=0 make test` forces plain swift output.
 
+### End-to-end tests (live device)
+
+```bash
+make e2e            # BOTH iOS + Android in sequence (needs a booted sim AND an emulator)
+make e2e-ios        # iOS only — booted simulator + Playground fixture
+make e2e-android    # Android only — reachable device/emulator + Playground fixture
+make eval           # agent evals (real `claude -p` cost; prompts before running)
+```
+
+E2E suites compile always but skip unless `SIM_USE_E2E=1` (iOS) / `SIM_USE_E2E_ANDROID=1` (Android) is set — `make test` never touches a device, which is why CI needs no simulator. The runners set those vars for you.
+
+**Budget the time: a full green `make e2e-ios` run is ~15 minutes.** The iOS suites drive real HID gestures and wait on simulator animations/keyboard settling, so per-suite waits dominate — this is expected, not a hang. `make e2e` (both platforms) is ~20+ min. When you only touched one platform, run just that platform's target. The runners keep going past a failed suite and print a full pass/fail map at the end, so read the summary rather than assuming the first red aborted the rest.
+
+Agent-facing behaviour (the bundled skill) has its own natural-language eval layer — see `e2e/agent-evals/README.md` and `docs/ai/xxxx-e2e-confidence-suite/`.
+
 ### Verifying a change
 
 After any non-trivial change, at minimum:

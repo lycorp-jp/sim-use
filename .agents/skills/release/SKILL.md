@@ -26,11 +26,12 @@ Run these checks. Abort with a clear error if any fails.
 7. Android bridge toolchain: `scripts/build-bridge.sh --check` succeeds.
 7.5. **E2E confidence suites are green** (see `docs/ai/xxxx-e2e-confidence-suite/`):
    ```bash
-   make e2e            # iOS scripted E2E vs Playground (booted simulator)
-   make e2e-android    # Android scripted E2E vs Playground (emulator/device)
+   make e2e            # iOS + Android scripted E2E vs Playground, in sequence
    ```
-   Both print a full pass/fail map and keep going past failures. Any red
-   suite blocks the release unless the user explicitly waives it at Step 3.
+   (`make e2e-ios` / `make e2e-android` run one platform each.) A full green
+   iOS pass alone is ~15 min, so budget ~20+ min. It prints a full pass/fail
+   map and keeps going past failures. Any red suite blocks the release unless
+   the user explicitly waives it at Step 3.
    Optional but recommended when skill prose changed this release (real
    `claude -p` cost): `make eval ARGS="-y -t quick"`.
 8. Signing + notarization readiness:

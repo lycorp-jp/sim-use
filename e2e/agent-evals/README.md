@@ -5,8 +5,9 @@ Natural-language eval cases for the **bundled agent skill**
 Playground fixture apps. Deterministic post-condition checks decide PASS/FAIL
 — the agent's own success claim is recorded but never trusted.
 
-The scripted E2E suites (`make e2e`, `make e2e-android`) verify that each CLI
-verb works; this layer verifies the piece those suites cannot: that an agent
+The scripted E2E suites (`make e2e-ios`, `make e2e-android`, or `make e2e` for
+both) verify that each CLI verb works; this layer verifies the piece those
+suites cannot: that an agent
 reading SKILL.md actually reaches for the right verbs and survives the
 documented pitfalls (US-ASCII `type` vs `paste`, alias staleness, scroll
 direction semantics, daemon hiccups). A failure here with a green scripted

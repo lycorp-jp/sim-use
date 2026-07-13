@@ -1,4 +1,4 @@
-.PHONY: help build test e2e e2e-android eval clean viewer sync-skills
+.PHONY: help build test e2e e2e-ios e2e-android eval clean viewer sync-skills
 
 # pipefail below needs bash; macOS /bin/sh is bash-in-posix-mode but
 # being explicit costs nothing.
@@ -28,7 +28,8 @@ help:
 	@echo "  make build   Build sim-use"
 	@echo "  make viewer  Rebuild the Viewer SPA into Sources/SimUse/Resources/viewer/"
 	@echo "  make test    Run unit tests (no simulator needed)"
-	@echo "  make e2e     Run end-to-end tests on a booted simulator"
+	@echo "  make e2e     Run BOTH iOS + Android E2E suites in sequence (~15 min iOS alone)"
+	@echo "  make e2e-ios      Run iOS E2E tests on a booted simulator (~15 min for a full green run)"
 	@echo "  make e2e-android  Run Android E2E tests on a connected device/emulator"
 	@echo "  make eval    Run agent evals (real \`claude -p\` cost; prompts first)"
 	@echo "  make clean   Clean Swift build artifacts"
@@ -56,7 +57,22 @@ viewer:
 test: sync-skills
 	@$(call run_swift,swift test --enable-code-coverage,--coverage)
 
+# Run both platforms in sequence (iOS then Android), continuing past a
+# platform failure so you get the full picture, and failing if either did.
+# Needs both a booted iOS simulator and a reachable Android device/emulator;
+# for one platform only, use e2e-ios / e2e-android. A full green iOS pass
+# alone is ~15 min, so budget ~20+ min for the combined run.
 e2e:
+	@fail=0; \
+	echo "== iOS E2E =="; ./scripts/test-runner.sh || fail=1; \
+	echo "== Android E2E =="; ./scripts/test-runner-android.sh || fail=1; \
+	if [ $$fail -ne 0 ]; then echo "❌ e2e: one or more platforms failed"; exit 1; fi; \
+	echo "✅ e2e: iOS + Android green"
+
+# iOS simulator E2E: builds the CLI + Playground fixture, installs it on the
+# booted simulator, and runs the iOS suites. A full green run is ~15 min
+# (each HID-driven suite waits on real simulator gestures/animations).
+e2e-ios:
 	./scripts/test-runner.sh
 
 # Android device E2E: builds the CLI + playground fixture, installs it on
