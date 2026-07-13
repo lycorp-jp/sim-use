@@ -1,0 +1,24 @@
+{
+  "id": "oss-ios-swipe-direction",
+  "platform": "ios",
+  "tags": [
+    "release"
+  ],
+  "reset": "R1",
+  "timeout_s": 360,
+  "precondition": {
+    "screen": "swipe-test"
+  },
+  "title": "Swipe left is detected as Left",
+  "instruction": "The Playground app is showing its Swipe Test screen (a full-screen overlay). Perform a clearly horizontal swipe to the LEFT inside the swipe area, then report the direction the app detected.",
+  "verify": [
+    {
+      "type": "element_exists",
+      "outline_regex": "Direction: Left"
+    },
+    {
+      "type": "element_exists",
+      "outline_regex": "Count: [1-9]"
+    }
+  ]
+}

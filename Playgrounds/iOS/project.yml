@@ -15,6 +15,7 @@ targets:
       properties:
         CFBundleDisplayName: SimUsePlayground
         UILaunchScreen: {}
+        NSLocationWhenInUseUsageDescription: "SimUsePlayground requests location only to exercise the iOS system permission prompt for sim-use E2E tests."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.cameroncooke.SimUsePlayground

@@ -1,0 +1,21 @@
+{
+  "id": "oss-android-scroll-list",
+  "platform": "android",
+  "tags": [
+    "release"
+  ],
+  "reset": "R1",
+  "timeout_s": 420,
+  "precondition": {
+    "screen": "scroll-test"
+  },
+  "title": "Scroll a long list downward",
+  "instruction": "The Playground app is showing a long numbered list. Scroll the list down far enough that Row 1 is no longer visible, then report the first row you can see.",
+  "verify": [
+    {
+      "type": "element_absent",
+      "outline_regex": "\\bRow 1\\b(?!\\d)"
+    }
+  ],
+  "notes": "Requires the Android playground (Playgrounds/Android) installed on the emulator."
+}

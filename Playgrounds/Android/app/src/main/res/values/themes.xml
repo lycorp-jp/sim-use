@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Framework Material theme so the fixture needs no AppCompat
+         dependency; NoActionBar keeps the accessibility tree free of a
+         system title bar that would otherwise pad describe-ui output. -->
+    <style name="Theme.SimusePlayground" parent="@android:style/Theme.Material.Light.NoActionBar" />
+</resources>

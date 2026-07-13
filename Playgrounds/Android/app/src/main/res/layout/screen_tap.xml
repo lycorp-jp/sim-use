@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="12dp">
+
+    <TextView
+        android:id="@+id/tap_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Taps: 0"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/last_tap_coordinates"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Tap: -"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/long_press_count"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Long presses: 0"
+        android:textSize="16sp" />
+
+    <TextView
+        android:id="@+id/last_long_press_coordinates"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Long press: -"
+        android:textSize="16sp" />
+
+    <View
+        android:id="@+id/tap_test_area"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:layout_weight="1"
+        android:background="#B3D4FC"
+        android:clickable="true"
+        android:contentDescription="tap test area"
+        android:focusable="true"
+        android:importantForAccessibility="yes" />
+</LinearLayout>

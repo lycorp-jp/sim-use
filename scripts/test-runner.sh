@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 # Configuration
 SIMULATOR_NAME="iPhone 17 Pro"
 SIMULATOR_UDID="${SIMULATOR_UDID:-}"
-PLAYGROUND_PROJECT="SimUsePlaygroundApp/SimUsePlayground.xcodeproj"
+PLAYGROUND_PROJECT="Playgrounds/iOS/SimUsePlayground.xcodeproj"
 PLAYGROUND_SCHEME="SimUsePlayground"
 BUNDLE_ID="com.cameroncooke.SimUsePlayground"
 
@@ -221,13 +221,13 @@ build_sim_use() {
 generate_playground_project() {
     print_header "Generating Playground Xcode Project"
 
-    if [[ ! -f "SimUsePlaygroundApp/project.yml" ]]; then
-        print_error "SimUsePlaygroundApp/project.yml not found."
+    if [[ ! -f "Playgrounds/iOS/project.yml" ]]; then
+        print_error "Playgrounds/iOS/project.yml not found."
         exit 1
     fi
 
     print_info "Running xcodegen..."
-    (cd SimUsePlaygroundApp && xcodegen generate)
+    (cd Playgrounds/iOS && xcodegen generate)
     print_success "Xcode project generated"
 }
 
@@ -322,12 +322,16 @@ run_tests() {
             "DescribeUITests"
             "GestureTests"
             "InitTests"
+            "KeyboardStateTests"
             "KeyComboTests"
             "KeySequenceTests"
             "KeyTests"
             "ListSimulatorsTests"
+            "OrientationTests"
+            "PasteTests"
+            "PermissionAlertTests"
             "RecordVideoTests"
-            "StreamVideoDebugTests"
+            "StreamVideoDebugTest"
             "StreamVideoTests"
             "SwipeTests"
             "TapTests"
@@ -335,16 +339,33 @@ run_tests() {
             "TypeTests"
         )
 
+        # Run every suite even after a failure so a single red suite does not
+        # hide the state of the rest; report the full map at the end.
+        local failed_suites=()
+        local passed_suites=()
         echo ""
         for suite in "${suites[@]}"; do
             print_header "Running $suite"
-            if ! run_swift_test "$suite"; then
+            if run_swift_test "$suite"; then
+                passed_suites+=("$suite")
+            else
                 print_error "$suite failed"
-                exit 1
+                failed_suites+=("$suite")
             fi
         done
 
-        print_success "All test suites passed"
+        print_header "E2E suite results"
+        for suite in "${passed_suites[@]}"; do
+            print_success "$suite"
+        done
+        for suite in "${failed_suites[@]}"; do
+            print_error "$suite"
+        done
+        if [[ ${#failed_suites[@]} -gt 0 ]]; then
+            print_error "${#failed_suites[@]} of ${#suites[@]} suites failed"
+            exit 1
+        fi
+        print_success "All ${#suites[@]} test suites passed"
         return
     fi
 

@@ -58,11 +58,21 @@ struct ContentView: View {
         // Input & Text
         case "text-input":
             TextInputView()
+        case "paste-test":
+            PasteTestView()
         case "key-press":
             KeyPressView()
         case "key-sequence":
             KeySequenceView()
-            
+
+        // Display
+        case "orientation-test":
+            OrientationTestView()
+
+        // System
+        case "permissions-test":
+            PermissionsTestView()
+
         // Hardware
         case "button-test":
             ButtonTestView()
@@ -89,8 +99,15 @@ struct MainMenuView: View {
         ]),
         ("Input & Text", [
             ("text-input", "Text Input", "Text typed by CLI commands"),
+            ("paste-test", "Paste Test", "Text pasted via the pasteboard"),
             ("key-press", "Key Press", "Detects CLI key events"),
             ("key-sequence", "Key Sequence", "Detects CLI key sequences")
+        ]),
+        ("Display", [
+            ("orientation-test", "Orientation Test", "Rotation + tap-by-id calibration")
+        ]),
+        ("System", [
+            ("permissions-test", "Permissions Test", "System permission prompt dismissal")
         ]),
         ("Hardware", [
             ("button-test", "Button Test", "Hardware button press detection")

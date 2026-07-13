@@ -72,13 +72,21 @@ orientation.
 ## Testing
 
 ```bash
-make test       # unit tests via swift test
-make e2e        # end-to-end tests against a booted simulator
+make test          # unit tests via swift test
+make e2e           # both iOS + Android E2E in sequence (~20+ min; needs sim AND emulator)
+make e2e-ios       # iOS E2E against a booted simulator (~15 min for a full green run)
+make e2e-android   # Android E2E against an emulator/device
 ```
 
 For the full build-and-test harness (simulator setup, the SimUsePlayground app,
 test-plan execution), use `./test-runner.sh` (run with `--help` for options
-such as build-only / test-only modes and verbose output).
+such as build-only / test-only modes and verbose output). The Android
+counterpart is `./scripts/test-runner-android.sh`, driving the
+`Playgrounds/Android` fixture app.
+
+Agent-facing behavior (the bundled skill under `skills/sim-use/`) has its own
+natural-language eval layer under `e2e/agent-evals/` — see its README. Run it
+when you change skill prose or agent-visible output.
 
 Please add or update tests for any behavior change, and make sure the suite
 passes locally before opening a pull request.
@@ -100,7 +108,8 @@ passes locally before opening a pull request.
 
 1. Fork the repository and create a topic branch.
 2. Make your change with tests, signed off per the DCO section above.
-3. Run `make test` (and `make e2e` if your change touches device behavior).
+3. Run `make test` (and `make e2e-ios` / `make e2e-android` — or `make e2e`
+   for both — if your change touches device behavior).
 4. Open a pull request describing the motivation and the change. Link any
    related issue.
 

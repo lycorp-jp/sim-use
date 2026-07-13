@@ -79,7 +79,7 @@ struct StreamVideoTests {
         let udid = try TestHelpers.requireSimulatorUDID()
 
         let simUsePath = try TestHelpers.getSimUsePath()
-        let fullCommand = "\(simUsePath) stream-video --format h264 --udid \(udid)"
+        let fullCommand = "\(simUsePath) ios stream-video --format h264 --udid \(udid)"
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -105,7 +105,7 @@ struct StreamVideoTests {
         scale: Double = 1.0,
         duration: TimeInterval = 2.0
     ) async throws -> (output: String, data: Data, dataString: String, dataSize: Int, exitCode: Int32) {
-        var command = "stream-video"
+        var command = "ios stream-video"
         command += " --format \(format)"
         command += " --fps \(fps)"
         command += " --quality \(quality) --scale \(scale)"

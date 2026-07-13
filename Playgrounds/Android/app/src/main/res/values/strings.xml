@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">sim-use Playground</string>
+
+    <!-- Echo-label formats. Every screen renders its state through these
+         so a describe-ui read can parse the effect of a sim-use command
+         off the trailing value. -->
+    <string name="fmt_taps">Taps: %1$d</string>
+    <string name="fmt_tap">Tap: %1$d,%2$d</string>
+    <string name="fmt_long_presses">Long presses: %1$d</string>
+    <string name="fmt_long_press">Long press: %1$d,%2$d</string>
+    <string name="fmt_swipes">Swipes: %1$d</string>
+    <string name="fmt_direction">Direction: %1$s</string>
+    <string name="fmt_distance">Distance: %1$d</string>
+    <string name="fmt_row">Row %1$d</string>
+    <string name="fmt_top_row">Top: Row %1$d</string>
+    <string name="fmt_chars">Chars: %1$d</string>
+    <string name="fmt_echo">Echo: %1$s</string>
+    <string name="fmt_scale">Scale: %1$s</string>
+    <string name="fmt_rotation">Rotation: %1$d</string>
+    <string name="fmt_pointers">Pointers: %1$d</string>
+    <string name="fmt_back_presses">Back presses: %1$d</string>
+</resources>
