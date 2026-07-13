@@ -31,8 +31,8 @@ Run these checks. Abort with a clear error if any fails.
    ```
    Both print a full pass/fail map and keep going past failures. Any red
    suite blocks the release unless the user explicitly waives it at Step 3.
-   Optional but recommended when skill prose changed this release:
-   `python3 e2e/agent-evals/run.py --platform ios --tags quick`.
+   Optional but recommended when skill prose changed this release (real
+   `claude -p` cost): `make eval ARGS="-y -t quick"`.
 8. Signing + notarization readiness:
    ```bash
    security find-identity -v -p codesigning | grep -F "NAVER Japan K.K. (GFPYJQXRSN)"

@@ -14,9 +14,21 @@ layer usually means skill-prose drift, not a CLI bug.
 
 ## Running
 
+Easiest — `make eval` checks the environment, prints a cost estimate, and
+asks before spending anything (each case makes real `claude -p` API calls):
+
 ```bash
-# Prereqs: Playground installed on the target device, `claude` CLI on PATH.
-scripts/test-runner.sh -b                      # build+install iOS playground
+make eval                                   # quick-tagged cases on every reachable platform
+make eval PLATFORM=ios TAGS=release         # one platform / tag
+make eval ARGS="-y -p android"              # -y skips the prompt (CI / release gate)
+```
+
+Prereq the wrapper reminds you about: the Playground fixture must be installed
+(`scripts/test-runner.sh -b` for iOS; `make e2e-android` for Android).
+
+Or call the runner directly for full control:
+
+```bash
 python3 e2e/agent-evals/run.py --platform ios --tags quick
 python3 e2e/agent-evals/run.py --platform android --device emulator-5554
 python3 e2e/agent-evals/run.py --list

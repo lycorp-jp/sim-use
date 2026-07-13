@@ -139,6 +139,8 @@ def main() -> int:
     parser.add_argument("--retries", type=int, default=0,
                         help="retry a FAILed case N times (flake control; default 0)")
     parser.add_argument("--list", action="store_true", help="list cases and exit")
+    parser.add_argument("--count", action="store_true",
+                        help="print the number of cases the filters select and exit")
     args = parser.parse_args()
 
     if args.list:
@@ -157,6 +159,11 @@ def main() -> int:
         [c for c in args.cases.split(",") if c] or None,
         [t for t in args.tags.split(",") if t] or None,
     )
+
+    if args.count:
+        print(len(cases))
+        return 0
+
     if not cases:
         sys.exit("no cases matched")
 
