@@ -1,10 +1,31 @@
 # Tap-family shared OptionGroups and forwarder copy elimination
 
-Plan for issue #42 — consolidate the tap-family flag surface into shared
-`OptionGroup`s and remove the forwarder copy hazard. Written before
-implementation; sections marked *(plan)* describe intended work, not
-shipped behavior. Prerequisites #40 (`tap --point`) and #41 (`android tap`
-direct-init trap) are both merged.
+Plan and work record for issue #42 — consolidate the tap-family flag
+surface into shared `OptionGroup`s and remove the forwarder copy hazard.
+Written before implementation and kept as the design rationale; all
+three steps below are implemented (the *(plan)* markers record what was
+intended — the shipped code matches). Prerequisites #40 (`tap --point`)
+and #41 (`android tap` direct-init trap) are both merged.
+
+## Outcome
+
+- Step 1 (guardrail), Step 2 (shared groups), Step 3 (executor entry
+  point) landed as three commits on one branch. Net effect: the three
+  tap surfaces share one declaration of 14 flags; the tap family
+  forwards parsed groups by value through
+  `IOSSimTapCommand.performTap` (no construct-and-assign left); the 11
+  verbs still on the copy pattern are pinned by the reflection guard.
+- Verification: unit suite 1079 (baseline) → 1094 green; before/after
+  `--help` golden diff showed only the two documented deltas (wording,
+  ordering); live spot-check on a booted simulator covered
+  `tap --point`, `tap @N`, `long-press` by selector, and both `--json`
+  envelope paths; full E2E run green before the PR.
+- Implementation findings worth keeping: ArgumentParser runs a group's
+  protocol `validate()` witness when the group is parsed *standalone*
+  (it wraps it in a synthetic root command) but not when nested — the
+  explicit per-surface calls remain load-bearing. `Paste.clientPreflight`
+  turned out to be a deliberately partial copy (three fields); it now
+  reuses the full-copy `makeIOSSubcommand()`.
 
 ## Problem
 
