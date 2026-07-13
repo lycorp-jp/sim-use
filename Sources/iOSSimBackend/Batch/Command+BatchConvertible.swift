@@ -39,19 +39,19 @@ extension IOSSimTapCommand: BatchConvertible {
         // selectors (issue #34), raw for explicit --point/-x/-y.
         let resolvedPoint: (x: Double, y: Double)
 
-        if let explicit = try TapCoordinateResolver.resolve(x: pointX, y: pointY, point: point) {
+        if let explicit = try TapCoordinateResolver.resolve(x: targeting.pointX, y: targeting.pointY, point: targeting.point) {
             resolvedPoint = (explicit.x, explicit.y)
         } else {
             let query: AccessibilityQuery
-            if let elementID {
+            if let elementID = targeting.elementID {
                 query = .id(elementID)
-            } else if let elementLabel {
+            } else if let elementLabel = targeting.elementLabel {
                 query = .label(elementLabel)
-            } else if let elementValue {
+            } else if let elementValue = targeting.elementValue {
                 query = .value(elementValue)
-            } else if let labelContains {
+            } else if let labelContains = targeting.labelContains {
                 query = .labelContains(labelContains)
-            } else if let labelRegex {
+            } else if let labelRegex = targeting.labelRegex {
                 query = .labelRegex(pattern: labelRegex)
             } else {
                 throw CLIError(errorDescription: "Unexpected state: no coordinates and no element query.")
@@ -62,7 +62,7 @@ extension IOSSimTapCommand: BatchConvertible {
                 simulatorUDID: context.simulatorUDID,
                 waitTimeout: context.waitTimeout,
                 pollInterval: context.pollInterval,
-                elementType: elementType,
+                elementType: targeting.elementType,
                 frameFilter: frameFilter,
                 rootsProvider: { forceRefresh in
                     let roots = try await context.accessibilityRoots(logger: logger, forceRefresh: forceRefresh)
@@ -87,20 +87,20 @@ extension IOSSimTapCommand: BatchConvertible {
             // sleep → up so UIKit recognisers see a real hold. Pre/post
             // delays bracket the whole sequence as host sleeps.
             var primitives: [BatchPrimitive] = []
-            if let preDelay, preDelay > 0 {
+            if let preDelay = timing.preDelay, preDelay > 0 {
                 primitives.append(.hostSleep(preDelay))
             }
             primitives.append(.hidBarrier(.touchDownAt(x: resolvedPoint.x, y: resolvedPoint.y)))
             primitives.append(.hostSleep(duration))
             primitives.append(.hidBarrier(.touchUpAt(x: resolvedPoint.x, y: resolvedPoint.y)))
-            if let postDelay, postDelay > 0 {
+            if let postDelay = timing.postDelay, postDelay > 0 {
                 primitives.append(.hostSleep(postDelay))
             }
             return primitives
         }
 
         let tapEvent = FBSimulatorHIDEvent.tapAt(x: resolvedPoint.x, y: resolvedPoint.y)
-        return [.hidMergeable(buildDelayedEvent(preDelay: preDelay, mainEvent: tapEvent, postDelay: postDelay))]
+        return [.hidMergeable(buildDelayedEvent(preDelay: timing.preDelay, mainEvent: tapEvent, postDelay: timing.postDelay))]
     }
 }
 

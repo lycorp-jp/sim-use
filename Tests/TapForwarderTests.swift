@@ -10,9 +10,11 @@ import Testing
 // Pins the contract between the top-level `Tap` and the
 // `IOSSimTapCommand` it forwards to:
 //
-//   * Both surfaces validate input through one shared rules table
-//     (`IOSSimTapCommand.validateOptions`). The top-level command's
-//     `validate()` is required to delegate, not to re-implement.
+//   * Both surfaces validate input through the shared group validators
+//     (`TapTargetingOptions.validate(alias:)` /
+//     `TapTimingOptions.validate()`). Cross-surface message equality is
+//     pinned by `TapValidationParityTests`; the cases below pin the
+//     rules themselves at the group level.
 //   * `PlatformRouter.resolve(udid:)` is what picks the branch in
 //     `Tap.execute()`. The test cases below cover the two real-world
 //     UDID shapes plus the empty / typo case (defers to iOS so the
@@ -69,48 +71,29 @@ struct TapForwarderTests {
 
     // MARK: - Validation parity
 
-    @Test("Top-level Tap validation delegates to IOSSimTapCommand")
-    func topLevelTapDelegatesValidation() throws {
-        // Construct a Tap with conflicting selectors. The top-level
-        // `validate()` should throw the same message
-        // `IOSSimTapCommand.validateOptions` would throw — proves
-        // the delegation is not a re-implementation.
+    @Test("Shared targeting validator rejects conflicting selectors")
+    func conflictingSelectorsRejected() throws {
+        // The rules live on the shared group — parse a targeting group
+        // with conflicting selectors and run the validator directly.
+        // (Direct `TapTargetingOptions()` construction would trap on
+        // first read — the #41/#42 failure class — so tests go through
+        // `parse` like every real surface does.)
+        let targeting = try TapTargetingOptions.parse(["--id", "Some", "--label", "Other"])
         do {
-            try IOSSimTapCommand.validateOptions(
-                alias: nil,
-                pointX: nil, pointY: nil, point: nil,
-                elementID: "Some",
-                elementLabel: "Other",
-                elementValue: nil,
-                labelContains: nil,
-                labelRegex: nil,
-                preDelay: nil, postDelay: nil, duration: nil,
-                waitTimeout: 0,
-                pollInterval: 0.25,
-                frameSpecs: []
-            )
+            try targeting.validate(alias: nil)
             Issue.record("expected a ValidationError")
         } catch let error as ValidationError {
             #expect(error.message.contains("Use only one of"))
+        } catch {
+            Issue.record("expected ValidationError, got \(type(of: error))")
         }
     }
 
     @Test("Alias-with-coordinates is rejected by shared validator")
-    func aliasWithCoordsConflict() {
+    func aliasWithCoordsConflict() throws {
+        let targeting = try TapTargetingOptions.parse(["-x", "100", "-y", "200"])
         do {
-            try IOSSimTapCommand.validateOptions(
-                alias: "@2",
-                pointX: 100, pointY: 200, point: nil,
-                elementID: nil,
-                elementLabel: nil,
-                elementValue: nil,
-                labelContains: nil,
-                labelRegex: nil,
-                preDelay: nil, postDelay: nil, duration: nil,
-                waitTimeout: 0,
-                pollInterval: 0.25,
-                frameSpecs: []
-            )
+            try targeting.validate(alias: "@2")
             Issue.record("expected a ValidationError")
         } catch let error as ValidationError {
             #expect(error.message.contains("Alias '@2' cannot be combined"))
@@ -121,44 +104,24 @@ struct TapForwarderTests {
 
     @Test("Wait timeout requires positive poll interval")
     func waitTimeoutRequiresPollInterval() {
+        // `TapTimingOptions.validate()` is the ParsableArguments
+        // witness, and a *standalone* `parse` of the group wraps it in
+        // a synthetic root command — so the rule fires during parse
+        // (unlike when the group is nested in a command, where the
+        // command's explicit `timing.validate()` call is load-bearing).
         do {
-            try IOSSimTapCommand.validateOptions(
-                alias: nil,
-                pointX: nil, pointY: nil, point: nil,
-                elementID: "X",
-                elementLabel: nil,
-                elementValue: nil,
-                labelContains: nil,
-                labelRegex: nil,
-                preDelay: nil, postDelay: nil, duration: nil,
-                waitTimeout: 5,
-                pollInterval: 0,
-                frameSpecs: []
-            )
-            Issue.record("expected a ValidationError")
-        } catch let error as ValidationError {
-            #expect(error.message.contains("--poll-interval"))
+            _ = try TapTimingOptions.parse(["--wait-timeout", "5", "--poll-interval", "0"])
+            Issue.record("expected a validation failure")
         } catch {
-            Issue.record("expected ValidationError, got \(type(of: error))")
+            #expect(TapTimingOptions.message(for: error).contains("--poll-interval"))
         }
     }
 
     @Test("Empty selector value is rejected")
-    func emptySelectorValueRejected() {
+    func emptySelectorValueRejected() throws {
+        let targeting = try TapTargetingOptions.parse(["--id", "   "])
         do {
-            try IOSSimTapCommand.validateOptions(
-                alias: nil,
-                pointX: nil, pointY: nil, point: nil,
-                elementID: "   ",
-                elementLabel: nil,
-                elementValue: nil,
-                labelContains: nil,
-                labelRegex: nil,
-                preDelay: nil, postDelay: nil, duration: nil,
-                waitTimeout: 0,
-                pollInterval: 0.25,
-                frameSpecs: []
-            )
+            try targeting.validate(alias: nil)
             Issue.record("expected a ValidationError")
         } catch let error as ValidationError {
             #expect(error.message.contains("must not be empty"))
@@ -259,12 +222,12 @@ struct TapForwarderTests {
         let subCmd = try IOSSimTapCommand.parse(argv)
 
         // Cross-check a sample of fields landed in both structs.
-        #expect(topLevel.labelContains == "foo")
-        #expect(subCmd.labelContains == "foo")
-        #expect(topLevel.elementType == "Button")
-        #expect(subCmd.elementType == "Button")
-        #expect(topLevel.frameSpecs == ["minX=10,maxX=200"])
-        #expect(subCmd.frameSpecs == ["minX=10,maxX=200"])
+        #expect(topLevel.targeting.labelContains == "foo")
+        #expect(subCmd.targeting.labelContains == "foo")
+        #expect(topLevel.targeting.elementType == "Button")
+        #expect(subCmd.targeting.elementType == "Button")
+        #expect(topLevel.targeting.frameSpecs == ["minX=10,maxX=200"])
+        #expect(subCmd.targeting.frameSpecs == ["minX=10,maxX=200"])
         #expect(topLevel.duration == 0.05)
         #expect(subCmd.duration == 0.05)
         #expect(topLevel.jsonOutput == true)
@@ -279,9 +242,9 @@ struct TapForwarderTests {
         // through `IOSSimTapCommand` itself.
         let expected = CoordinatePair(x: 100, y: 200)
         let iosArgv = ["--point", "100,200", "--udid", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0"]
-        #expect(try Tap.parse(iosArgv).point == expected)
-        #expect(try IOSSimTapCommand.parse(iosArgv).point == expected)
-        #expect(try LongPress.parse(iosArgv).point == expected)
+        #expect(try Tap.parse(iosArgv).targeting.point == expected)
+        #expect(try IOSSimTapCommand.parse(iosArgv).targeting.point == expected)
+        #expect(try LongPress.parse(iosArgv).targeting.point == expected)
 
         let androidArgv = ["--point", "100,200", "--udid", "emulator-5554"]
         #expect(try AndroidTapCommand.parse(androidArgv).point == expected)
@@ -338,12 +301,12 @@ struct TapForwarderTests {
         let topTap = try Tap.parse(argv)
         let topLong = try LongPress.parse(argv)
 
-        #expect(topLong.labelContains == topTap.labelContains)
-        #expect(topLong.elementType == topTap.elementType)
-        #expect(topLong.frameSpecs == topTap.frameSpecs)
-        #expect(topLong.preDelay == topTap.preDelay)
-        #expect(topLong.waitTimeout == topTap.waitTimeout)
-        #expect(topLong.pollInterval == topTap.pollInterval)
+        #expect(topLong.targeting.labelContains == topTap.targeting.labelContains)
+        #expect(topLong.targeting.elementType == topTap.targeting.elementType)
+        #expect(topLong.targeting.frameSpecs == topTap.targeting.frameSpecs)
+        #expect(topLong.timing.preDelay == topTap.timing.preDelay)
+        #expect(topLong.timing.waitTimeout == topTap.timing.waitTimeout)
+        #expect(topLong.timing.pollInterval == topTap.timing.pollInterval)
         #expect(topLong.jsonOutput == topTap.jsonOutput)
 
         // Default --duration: Tap leaves it nil (no hold), long-press
