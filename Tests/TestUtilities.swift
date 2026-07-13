@@ -416,6 +416,21 @@ struct TestHelpers {
         // Launch to specific screen
         _ = try await CommandRunner.run("xcrun simctl launch \(udid) com.cameroncooke.SimUsePlayground --launch-arg \"screen=\(screen)\"")
         try await Task.sleep(nanoseconds: 2_000_000_000)
+
+        // Resilience: a system alert (e.g. a permission prompt left by an
+        // earlier suite) is presented by SpringBoard and survives an app
+        // terminate/relaunch, covering the playground and swallowing every
+        // subsequent gesture. If one is frontmost, dismiss it by tapping the
+        // first alert button (list scope 1) and relaunch once so suites stay
+        // independent regardless of run order.
+        let simUsePath = try getSimUsePath()
+        let (head, _) = try await CommandRunner.run("\(simUsePath) describe-ui --udid \(udid)", allowFailure: true)
+        if head.contains("App: SpringBoard") {
+            _ = try? await CommandRunner.run("\(simUsePath) tap '#1@1' --udid \(udid)", allowFailure: true)
+            try await Task.sleep(nanoseconds: 500_000_000)
+            _ = try await CommandRunner.run("xcrun simctl launch \(udid) com.cameroncooke.SimUsePlayground --launch-arg \"screen=\(screen)\"")
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+        }
     }
     
     static func getUIState(simulatorUDID: String? = nil) async throws -> UIElement {
