@@ -22,5 +22,5 @@
       "expect": true
     }
   ],
-  "notes": "Requires the Android playground (bridge/playground) installed on the emulator."
+  "notes": "Requires the Android playground (Playgrounds/Android) installed on the emulator."
 }

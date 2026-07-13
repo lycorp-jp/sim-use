@@ -23,7 +23,7 @@ Each sim-use command has its own dedicated test file:
 Android device E2E suites live alongside them (`AndroidTestSupport.swift` +
 `AndroidTapTests`, `AndroidSwipeScrollTests`, `AndroidTypeTests`,
 `AndroidKeyboardStateTests`, `AndroidMultiTouchTests`, `AndroidButtonTests`,
-`AndroidDescribeUITests`) and drive the `bridge/playground` fixture app on an
+`AndroidDescribeUITests`) and drive the `Playgrounds/Android` fixture app on an
 emulator/device.
 
 ## Running Tests
@@ -65,7 +65,7 @@ swift test --verbose
 - Simulator E2E tests require `SIM_USE_E2E=1` and a booted iOS simulator
 - Set `SIMULATOR_UDID` with: `sim-use list-simulators` or `xcrun simctl list devices`
 - `swift test` without `SIM_USE_E2E=1` runs non-E2E tests only
-- Some tests use the SimUsePlaygroundApp for validation
+- Some tests use the iOS Playground app (`Playgrounds/iOS`) for validation
 - Each test file is self-contained and executable
 - `PasteTests`: the default Cmd+V cases only land when the simulator has a
   hardware keyboard connected (I/O > Keyboard > Connect Hardware Keyboard);
@@ -101,5 +101,5 @@ All tests validate:
 - ✅ Command execution (exit codes)
 - ✅ Basic functionality
 - ✅ Edge cases and error conditions
-- ✅ Integration with SimUsePlaygroundApp where applicable
+- ✅ Integration with the Playground app where applicable
 - ✅ Input validation and error handling

@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 # Configuration
 SIMULATOR_NAME="iPhone 17 Pro"
 SIMULATOR_UDID="${SIMULATOR_UDID:-}"
-PLAYGROUND_PROJECT="SimUsePlaygroundApp/SimUsePlayground.xcodeproj"
+PLAYGROUND_PROJECT="Playgrounds/iOS/SimUsePlayground.xcodeproj"
 PLAYGROUND_SCHEME="SimUsePlayground"
 BUNDLE_ID="com.cameroncooke.SimUsePlayground"
 
@@ -221,13 +221,13 @@ build_sim_use() {
 generate_playground_project() {
     print_header "Generating Playground Xcode Project"
 
-    if [[ ! -f "SimUsePlaygroundApp/project.yml" ]]; then
-        print_error "SimUsePlaygroundApp/project.yml not found."
+    if [[ ! -f "Playgrounds/iOS/project.yml" ]]; then
+        print_error "Playgrounds/iOS/project.yml not found."
         exit 1
     fi
 
     print_info "Running xcodegen..."
-    (cd SimUsePlaygroundApp && xcodegen generate)
+    (cd Playgrounds/iOS && xcodegen generate)
     print_success "Xcode project generated"
 }
 

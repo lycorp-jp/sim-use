@@ -82,7 +82,7 @@ For the full build-and-test harness (simulator setup, the SimUsePlayground app,
 test-plan execution), use `./test-runner.sh` (run with `--help` for options
 such as build-only / test-only modes and verbose output). The Android
 counterpart is `./scripts/test-runner-android.sh`, driving the
-`bridge/playground` fixture app.
+`Playgrounds/Android` fixture app.
 
 Agent-facing behavior (the bundled skill under `skills/sim-use/`) has its own
 natural-language eval layer under `e2e/agent-evals/` — see its README. Run it

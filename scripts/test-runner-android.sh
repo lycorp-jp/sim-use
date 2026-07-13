@@ -25,7 +25,7 @@ NC='\033[0m' # No Color
 # Configuration
 ANDROID_SERIAL="${ANDROID_SERIAL:-emulator-5554}"
 PLAYGROUND_PACKAGE="com.linecorp.simuse.playground"
-PLAYGROUND_APK="bridge/playground/build/outputs/apk/debug/playground-debug.apk"
+PLAYGROUND_APK="Playgrounds/Android/app/build/outputs/apk/debug/app-debug.apk"
 
 ALL_SUITES=(
     "AndroidTapTests"

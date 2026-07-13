@@ -60,13 +60,20 @@ Temporary Items
 bridge/.gradle/
 bridge/build/
 bridge/app/build/
-bridge/playground/build/
 bridge/local.properties
 bridge/.idea/
 bridge/*.iml
 bridge/app/*.iml
-bridge/playground/*.iml
 bridge/captures/
+
+# Android playground fixture (standalone Gradle project under Playgrounds/).
+Playgrounds/Android/.gradle/
+Playgrounds/Android/build/
+Playgrounds/Android/app/build/
+Playgrounds/Android/local.properties
+Playgrounds/Android/.idea/
+Playgrounds/Android/**/*.iml
+Playgrounds/Android/captures/
 
 # The bridge APK is a build output, not a source artifact. The Swift
 # `AndroidBackend` target loads it from `Sources/AndroidBackend/Resources/`

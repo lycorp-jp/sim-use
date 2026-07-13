@@ -10,8 +10,8 @@ state; they are not the subject under test.
 | Layer | What it verifies | Fixture | Run with |
 |---|---|---|---|
 | Unit (`make test`) | parsing, dispatch, protocol — no device | fixtures/golden files | CI + local |
-| iOS scripted E2E | every iOS verb/argument surface | `SimUsePlaygroundApp` | `make e2e-ios` (~15 min) |
-| Android scripted E2E | every Android verb surface + bridge | `bridge/playground` module | `make e2e-android` |
+| iOS scripted E2E | every iOS verb/argument surface | `Playgrounds/iOS` | `make e2e-ios` (~15 min) |
+| Android scripted E2E | every Android verb surface + bridge | `Playgrounds/Android` | `make e2e-android` |
 | Agent evals | skill prose + agent-in-the-loop usability | Playground apps | `e2e/agent-evals/run.py` |
 
 The scripted layers are deterministic and gate releases. The agent-eval layer

@@ -14,7 +14,8 @@
 #
 #   Android SDK    ANDROID_SDK_ROOT → ANDROID_HOME → ~/Library/Android/sdk.
 #
-#   Gradle         bridge/gradlew (wrapper, preferred), else system `gradle`.
+#   Gradle         Playgrounds/Android/gradlew (wrapper, preferred), else
+#                  system `gradle`.
 #
 # Usage:
 #   scripts/build-playground-android.sh           # build the debug APK
@@ -22,8 +23,8 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
-bridge_dir="$repo_root/bridge"
-output_apk="$bridge_dir/playground/build/outputs/apk/debug/playground-debug.apk"
+project_dir="$repo_root/Playgrounds/Android"
+output_apk="$project_dir/app/build/outputs/apk/debug/app-debug.apk"
 
 check_only=false
 if [[ "${1:-}" == "--check" ]]; then
@@ -130,14 +131,14 @@ export ANDROID_SDK_ROOT="$ANDROID_SDK_RESOLVED"
 
 # ── Resolve Gradle ──────────────────────────────────────────────────
 gradle_cmd=""
-if [[ -x "$bridge_dir/gradlew" ]]; then
-  gradle_cmd="$bridge_dir/gradlew"
-  ok "  gradle: $bridge_dir/gradlew (wrapper)"
+if [[ -x "$project_dir/gradlew" ]]; then
+  gradle_cmd="$project_dir/gradlew"
+  ok "  gradle: $project_dir/gradlew (wrapper)"
 elif command -v gradle >/dev/null 2>&1; then
   gradle_cmd="gradle"
   ok "  gradle: system 'gradle' on PATH"
 else
-  fail "Neither bridge/gradlew nor system gradle found. The gradle wrapper should be committed; check 'git status' for bridge/gradle/wrapper/."
+  fail "Neither Playgrounds/Android/gradlew nor system gradle found. The gradle wrapper should be committed; check 'git status' for Playgrounds/Android/gradle/wrapper/."
 fi
 
 if [[ "$check_only" == "true" ]]; then
@@ -147,10 +148,10 @@ fi
 
 # ── Build APK ───────────────────────────────────────────────────────
 log "Assembling playground debug APK..."
-(cd "$bridge_dir" && "$gradle_cmd" :playground:assembleDebug)
+(cd "$project_dir" && "$gradle_cmd" :app:assembleDebug)
 
 if [[ ! -f "$output_apk" ]]; then
-  fail "APK not produced at $output_apk (gradle reported success but file is missing — inspect bridge/playground/build/outputs/)"
+  fail "APK not produced at $output_apk (gradle reported success but file is missing — inspect Playgrounds/Android/app/build/outputs/)"
 fi
 
 apk_bytes=$(wc -c < "$output_apk" | tr -d '[:space:]')
