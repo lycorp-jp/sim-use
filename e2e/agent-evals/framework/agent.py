@@ -124,6 +124,8 @@ def run_agent(
             for line in proc.stdout:
                 transcript.write(line)
                 event = _maybe_json(line)
+                if event:
+                    _emit_progress(event)
                 if event and event.get("type") == "result":
                     result_text = event.get("result") or ""
                     num_turns = event.get("num_turns")
@@ -149,6 +151,26 @@ def run_agent(
         num_turns=num_turns,
         total_cost_usd=total_cost,
     )
+
+
+def _emit_progress(event: dict) -> None:
+    """Print a compact per-step line so a long agent run doesn't look hung.
+    The full stream is still in the transcript file."""
+    kind = event.get("type")
+    if kind == "system" and event.get("subtype") == "init":
+        print("      · agent started (claude -p; first tokens can take ~10-30s)", flush=True)
+    elif kind == "assistant":
+        for block in event.get("message", {}).get("content", []):
+            if block.get("type") == "tool_use":
+                name = block.get("name", "tool")
+                inp = block.get("input", {}) or {}
+                detail = inp.get("command") or inp.get("selector") or inp.get("id") or ""
+                detail = " ".join(str(detail).split())[:72]
+                print(f"      · {name}{': ' + detail if detail else ''}", flush=True)
+            elif block.get("type") == "text":
+                snippet = " ".join(str(block.get("text", "")).split())[:80]
+                if snippet:
+                    print(f"      · 💬 {snippet}", flush=True)
 
 
 def _maybe_json(line: str) -> dict | None:
