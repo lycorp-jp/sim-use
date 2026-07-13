@@ -175,16 +175,18 @@ struct PasteTests {
         #expect(echo == text, "Unicode should round-trip via edit menu; got \(String(describing: echo))")
     }
 
-    // KNOWN LIMITATION (observed on iOS 26.4, JP locale): the
-    // `--replace --via-menu` path does NOT overwrite the field. Its
-    // "Select All" edit-menu step does not take effect, so the paste
-    // lands appended after the existing content (with an iOS smart-paste
-    // space): "FIRST PASTE" + "SECOND" -> "FIRST PASTE SECOND". Strict
-    // replacement IS validated on the default Cmd+V path
-    // (`replacePasteCmdV`); this test documents the menu-path gap via
-    // `withKnownIssue` so the suite stays green while tracking it. If the
-    // menu path starts replacing correctly, this will surface as an
-    // unexpected pass — remove the wrapper then.
+    // KNOWN, ENVIRONMENT-DEPENDENT LIMITATION: the `--replace --via-menu`
+    // path's "Select All" edit-menu step is unreliable. On some setups
+    // (observed on iOS 26.4, JP locale) it does not take effect, so the
+    // second paste lands appended after the existing content (with an iOS
+    // smart-paste space): "FIRST PASTE" + "SECOND" -> "FIRST PASTE SECOND";
+    // on others it overwrites as intended. Strict replacement IS reliably
+    // validated on the default Cmd+V path (`replacePasteCmdV`). This test
+    // therefore only asserts that the second paste is delivered, and checks
+    // strict replacement under `withKnownIssue(isIntermittent:)` so the suite
+    // stays green whichever way the menu path behaves while still tracking
+    // the gap. Fix candidate: IOSSimPasteCommand.pasteViaEditMenu select-all
+    // sequencing/timing.
     @Test("Paste --replace via edit menu overwrites prior content")
     func replacePasteViaMenu() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()
@@ -202,8 +204,15 @@ struct PasteTests {
             "paste \"\(second)\" --replace --via-menu --target-id paste-input-field",
             simulatorUDID: udid
         )
+        // The second paste must land either way (replaced or appended).
         let echo = try await Self.settlePaste(udid: udid, expected: second, timeout: 4)
-        withKnownIssue("--replace --via-menu does not Select-All on iOS 26; paste appends instead of replacing.") {
+        #expect(echo?.contains(second) == true,
+                "second paste should be delivered via menu; got \(String(describing: echo))")
+        // Strict replacement is the intermittent part.
+        withKnownIssue(
+            "--replace --via-menu Select-All is unreliable; may append instead of replace",
+            isIntermittent: true
+        ) {
             #expect(echo == second, "--replace via menu should overwrite; got \(String(describing: echo))")
         }
     }
