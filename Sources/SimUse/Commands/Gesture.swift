@@ -132,6 +132,15 @@ struct Gesture: SimUseExecutableCommand {
     }
 
     private func executeIOSSim() async throws -> ExecutionResult {
+        let sub = makeIOSSubcommand()
+        return try await sub.execute()
+    }
+
+    /// Construct the backend command and copy every parsed flag across.
+    /// A missed field stays in ArgumentParser's wrapper-definition state
+    /// and traps on first read (#42) — pinned by
+    /// `ForwarderInitializationGuardTests`.
+    func makeIOSSubcommand() -> IOSSimGestureCommand {
         var sub = IOSSimGestureCommand()
         sub.preset = preset
         sub.screenWidth = screenWidth
@@ -149,7 +158,7 @@ struct Gesture: SimUseExecutableCommand {
         sub.postDelay = postDelay
         sub.device = device
         sub.json = json
-        return try await sub.execute()
+        return sub
     }
 
     /// Android dispatch. Pre/post-delays use `Task.sleep` here (rather

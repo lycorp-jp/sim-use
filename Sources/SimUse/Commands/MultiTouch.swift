@@ -129,6 +129,15 @@ struct MultiTouch: SimUseExecutableCommand {
     }
 
     private func executeIOSSim() async throws -> ExecutionResult {
+        let sub = makeIOSSubcommand()
+        return try await sub.execute()
+    }
+
+    /// Construct the backend command and copy every parsed flag across.
+    /// A missed field stays in ArgumentParser's wrapper-definition state
+    /// and traps on first read (#42) — pinned by
+    /// `ForwarderInitializationGuardTests`.
+    func makeIOSSubcommand() -> IOSSimMultiTouchCommand {
         var sub = IOSSimMultiTouchCommand()
         sub.x1 = x1
         sub.y1 = y1
@@ -147,7 +156,7 @@ struct MultiTouch: SimUseExecutableCommand {
         sub.postDelay = postDelay
         sub.device = device
         sub.json = json
-        return try await sub.execute()
+        return sub
     }
 
     private func executeAndroid() async throws -> ExecutionResult {

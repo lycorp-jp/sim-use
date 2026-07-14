@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The tap family (`tap`, `long-press`, `ios tap`) declares its shared flags once via `TapTargetingOptions` / `TapTimingOptions` option groups instead of three hand-kept copies (#42). Flag names, defaults, validation messages, and `--json` envelopes are unchanged; the only user-visible deltas are in `--help` output, where per-verb wording ("Tap the center…" / "Long-press the center…") unifies to verb-neutral phrasing ("Target the center…") and the timing flags render as a contiguous block after `--duration`.
 - `make e2e` now runs both the iOS and Android E2E suites in sequence (continuing past a platform failure and failing if either did); the iOS-only target is `make e2e-ios`, Android-only stays `make e2e-android`.
 - `scripts/test-runner.sh` keeps running after a failed suite and prints a full pass/fail map at the end (a release gate needs the whole picture, not the first crash). The hardcoded suite list gained the missing `KeyboardStateTests` and the new suites, and the misnamed `StreamVideoDebugTests` entry — which silently matched zero tests — now points at the real `StreamVideoDebugTest` suite.
 

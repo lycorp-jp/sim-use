@@ -57,51 +57,7 @@ struct LongPress: SimUseExecutableCommand {
     ))
     var alias: String?
 
-    @Option(name: [.customShort("x"), .customLong("x")], help: "The X coordinate of the long-press. Accepts -x or --x.")
-    var pointX: Double?
-
-    @Option(name: [.customShort("y"), .customLong("y")], help: "The Y coordinate of the long-press. Accepts -y or --y.")
-    var pointY: Double?
-
-    @Option(name: .customLong("point"), help: ArgumentHelp(
-        "The point to long-press as a coordinate pair — same semantics as -x/-y; specify only one form.",
-        valueName: "x,y"
-    ))
-    var point: CoordinatePair?
-
-    @Option(name: [.customLong("id")], help: "Long-press the center of the element matching AXUniqueId/resource-id literally. For the N-th outline entry, use the positional `@N` alias instead — `--id 42` matches the identifier string '42', NOT outline alias @42. Ignored if explicit coordinates (-x/-y or --point) are provided.")
-    var elementID: String?
-
-    @Option(name: [.customLong("label")], help: "Long-press the center of the element matching AXLabel (accessibilityLabel). Ignored if explicit coordinates (-x/-y or --point) are provided.")
-    var elementLabel: String?
-
-    @Option(name: [.customLong("value")], help: "Long-press the center of the element matching AXValue (the current value of a control). Ignored if explicit coordinates (-x/-y or --point) are provided.")
-    var elementValue: String?
-
-    @Option(name: [.customLong("label-contains")], help: "Long-press the element whose AXLabel contains this case-sensitive substring. Useful when labels carry dynamic state (counters, timestamps). Mutually exclusive with --id/--label/--value/--label-regex.")
-    var labelContains: String?
-
-    @Option(name: [.customLong("label-regex")], help: "Long-press the element whose AXLabel matches this ICU regex. Anchor with ^/$ for exact match. Mutually exclusive with --id/--label/--value/--label-contains.")
-    var labelRegex: String?
-
-    @Option(name: [.customLong("element-type")], help: "Filter matches to elements of this accessibility type (e.g. Button, TextField). Narrows --id/--label/--value/--label-contains/--label-regex results when multiple elements match.")
-    var elementType: String?
-
-    @Option(
-        name: .customLong("frame"),
-        parsing: .singleValue,
-        help: ArgumentHelp(
-            "Geometric AND-filter on frame bounds. Repeatable. Each value is a comma-separated list of `key=value` pairs. Keys: minX, maxX, minY, maxY. Values are absolute pixels (e.g. 700) or 0..1 fractions of the screen with an `r` suffix (e.g. 0.6r). Combine with selectors to disambiguate when several elements share a label/pattern but live in different screen regions.",
-            valueName: "key=value[,key=value]"
-        )
-    )
-    var frameSpecs: [String] = []
-
-    @Option(name: .customLong("pre-delay"), help: "Delay before the long-press in seconds.")
-    var preDelay: Double?
-
-    @Option(name: .customLong("post-delay"), help: "Delay after the long-press in seconds.")
-    var postDelay: Double?
+    @OptionGroup var targeting: TapTargetingOptions
 
     @Option(
         name: .customLong("duration"),
@@ -111,11 +67,7 @@ struct LongPress: SimUseExecutableCommand {
     )
     var duration: Double = 0.8
 
-    @Option(name: .customLong("wait-timeout"), help: "Maximum seconds to poll for the element before failing (0 = no waiting, default). Only applies to --id/--label/--value/--label-contains/--label-regex targeting.")
-    var waitTimeout: Double = 0
-
-    @Option(name: .customLong("poll-interval"), help: "Seconds between accessibility tree polls when --wait-timeout is active (default: 0.25).")
-    var pollInterval: Double = 0.25
+    @OptionGroup var timing: TapTimingOptions
 
     @OptionGroup var multiTouch: MultiTouchOptions
 
@@ -133,25 +85,16 @@ struct LongPress: SimUseExecutableCommand {
 
     typealias ExecutionResult = IOSSimTapCommand.ExecutionResult
 
+    /// Same shared group validators as `Tap` / `IOSSimTapCommand` —
+    /// same selector / coordinate / delay constraints apply, and the
+    /// duration default (0.8) is in the [0, 10] range so the validator
+    /// accepts it. ArgumentParser does not auto-validate nested option
+    /// groups, so these explicit calls are load-bearing
+    /// (`TapValidationParityTests` pins that every surface makes them).
     func validate() throws {
-        // Delegate to the shared tap rules — same selector / coordinate
-        // / delay constraints apply. The duration default (0.8) is in
-        // the [0, 10] range so the validator accepts it.
-        try IOSSimTapCommand.validateOptions(
-            alias: alias,
-            pointX: pointX, pointY: pointY, point: point,
-            elementID: elementID,
-            elementLabel: elementLabel,
-            elementValue: elementValue,
-            labelContains: labelContains,
-            labelRegex: labelRegex,
-            preDelay: preDelay,
-            postDelay: postDelay,
-            duration: duration,
-            waitTimeout: waitTimeout,
-            pollInterval: pollInterval,
-            frameSpecs: frameSpecs
-        )
+        try targeting.validate(alias: alias)
+        try timing.validate()
+        try TapTimingOptions.validateDuration(duration)
         try multiTouch.validate()
     }
 
@@ -168,32 +111,22 @@ struct LongPress: SimUseExecutableCommand {
         .line("✓ Long-press at (\(result.x), \(result.y)) completed successfully")
     }
 
-    /// iOS path: hand off to `IOSSimTapCommand` with `--duration`
-    /// carried through. That sub-command already splits the HID event
-    /// into down → sleep → up when duration > 0, which is exactly the
-    /// long-press recipe.
+    /// iOS path: hand off to the tap executor with `--duration` carried
+    /// through — it already splits the HID event into down → sleep → up
+    /// when duration > 0, which is exactly the long-press recipe. The
+    /// parsed groups are handed over as values, so no backend command
+    /// instance is hand-built and there is no per-field copy to
+    /// forget (#42).
     private func executeIOSSim() async throws -> ExecutionResult {
-        var sub = IOSSimTapCommand()
-        sub.alias = alias
-        sub.pointX = pointX
-        sub.pointY = pointY
-        sub.point = point
-        sub.elementID = elementID
-        sub.elementLabel = elementLabel
-        sub.elementValue = elementValue
-        sub.labelContains = labelContains
-        sub.labelRegex = labelRegex
-        sub.elementType = elementType
-        sub.frameSpecs = frameSpecs
-        sub.preDelay = preDelay
-        sub.postDelay = postDelay
-        sub.duration = duration
-        sub.waitTimeout = waitTimeout
-        sub.pollInterval = pollInterval
-        sub.multiTouch = multiTouch
-        sub.device = device
-        sub.json = json
-        return try await sub.execute()
+        try await IOSSimTapCommand.performTap(
+            alias: alias,
+            targeting: targeting,
+            timing: timing,
+            duration: duration,
+            multiTouch: multiTouch,
+            device: device,
+            json: json
+        )
     }
 
     /// Android path: same selector resolution as `tap`, then a
@@ -204,21 +137,21 @@ struct LongPress: SimUseExecutableCommand {
     /// across calls).
     private func executeAndroid() throws -> ExecutionResult {
         let frameFilter: SelectorFrameFilter? = {
-            guard !frameSpecs.isEmpty else { return nil }
-            return (try? SelectorFrameFilter(specs: frameSpecs))
+            guard !targeting.frameSpecs.isEmpty else { return nil }
+            return (try? SelectorFrameFilter(specs: targeting.frameSpecs))
         }()
         let selector = AndroidSelector(
-            id: elementID,
-            label: elementLabel,
-            labelContains: labelContains,
-            labelRegex: labelRegex,
-            value: elementValue,
+            id: targeting.elementID,
+            label: targeting.elementLabel,
+            labelContains: targeting.labelContains,
+            labelRegex: targeting.labelRegex,
+            value: targeting.elementValue,
             valueContains: nil,
             valueRegex: nil,
-            elementType: elementType,
+            elementType: targeting.elementType,
             frame: frameFilter
         )
-        let explicit = try TapCoordinateResolver.resolve(x: pointX, y: pointY, point: point)
+        let explicit = try TapCoordinateResolver.resolve(x: targeting.pointX, y: targeting.pointY, point: targeting.point)
         let result = try AndroidTapCommand.performTap(
             udid: device.resolved,
             alias: alias,
