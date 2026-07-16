@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `sim-use viewer` now renders snapshots for rotated iOS Simulator windows; the Viewer API accepts the orientation suffix in `describe-ui` outline headers when extracting screen dimensions.
 - Four E2E suites (KeyTests, KeyComboTests, KeySequenceTests, StreamVideoTests) still invoked the pre-0.5.x top-level verb forms and had failed ever since the five iOS-only verbs moved under the `ios` namespace; they now call `sim-use ios <verb>`.
 - KeyComboTests' Cmd+A test asserted a cleared text field reads nil/empty — an empty `UITextField` exposes its placeholder as the accessibility value, so the assertion could never pass. It now accepts the placeholder form.
 

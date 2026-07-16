@@ -192,4 +192,23 @@ struct ViewerAPIHandlersTests {
         #expect(devices.count == 1)
         #expect(devices.first?["deviceId"] as? String == "ABC")
     }
+
+    @Test("snapshot: rotated iOS outline still carries screen dimensions")
+    func snapshotParsesRotatedScreenLine() async throws {
+        let envelope = """
+        {"ok":true,"data":{"platform":"ios","outline":"App: SampleApp  874x402  (landscape-right)\\n\\n[Top  y<120]\\n","entries":[],"lists":[]}}
+        """
+        let (handlers, cleanup) = try makeHandlers(stdout: envelope, exitCode: 0)
+        defer { cleanup() }
+
+        let response = await handlers.snapshot(getRequest(query: ["deviceId": "TEST-UDID"]))
+
+        #expect(response.status == 200)
+        let body = try jsonBody(response)
+        #expect(body["ok"] as? Bool == true)
+        let screen = try #require(body["screen"] as? [String: Any])
+        #expect(screen["appLabel"] as? String == "SampleApp")
+        #expect(screen["width"] as? Int == 874)
+        #expect(screen["height"] as? Int == 402)
+    }
 }
