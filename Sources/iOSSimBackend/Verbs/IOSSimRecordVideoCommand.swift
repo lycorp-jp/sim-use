@@ -220,11 +220,21 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
             }
         })
 
-        // Give the stream a moment to fail fast on an attach error before we
-        // commit to it — a failure here means H.264 streaming is unavailable.
-        try await Task.sleep(nanoseconds: 1_000_000_000)
-        if let error = streamError.first, !pipeline.firstFrameReceived {
-            throw StreamUnavailableError(underlying: (error as NSError).localizedDescription)
+        // Wait for the stream to actually start delivering before committing
+        // to it. FBSimulatorVideoStream occasionally attaches cleanly yet
+        // pushes no frames (cold start / wedged encoder); treating that as
+        // "unavailable" falls back to screenshot capture rather than producing
+        // an empty recording.
+        let firstFrameDeadline = Date().addingTimeInterval(2.0)
+        while !pipeline.firstFrameReceived {
+            if Task.isCancelled || cancellationFlag.isCancelled() { break }
+            if let error = streamError.first {
+                throw StreamUnavailableError(underlying: (error as NSError).localizedDescription)
+            }
+            if Date() >= firstFrameDeadline {
+                throw StreamUnavailableError(underlying: "no frames received within 2s of stream start")
+            }
+            try? await cancellableSleep(seconds: 0.05, flag: cancellationFlag)
         }
 
         try await runStreamPollLoop(pipeline: pipeline, streamError: streamError, cancellationFlag: cancellationFlag)
@@ -252,19 +262,12 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         streamError: FirstErrorBox,
         cancellationFlag: CancellationFlag
     ) async throws {
-        let startTime = Date()
-        var lastProgress = startTime
-        var warnedNoFrames = false
-
+        var lastProgress = Date()
         while true {
             if Task.isCancelled || cancellationFlag.isCancelled() { break }
             if streamError.first != nil { break }
 
             let now = Date()
-            if !warnedNoFrames, !pipeline.firstFrameReceived, now.timeIntervalSince(startTime) > 3 {
-                warnedNoFrames = true
-                FileHandle.standardError.write(Data("warning: no video frames received yet\n".utf8))
-            }
             if now.timeIntervalSince(lastProgress) >= 2 {
                 lastProgress = now
                 FileHandle.standardError.write(Data(String(format: "Captured %lld frames\n", pipeline.framesWritten).utf8))

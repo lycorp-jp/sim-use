@@ -2,6 +2,7 @@
 import Testing
 import Foundation
 import AVFoundation
+import os
 @testable import iOSSimBackend
 
 @Suite("H264MuxingPipeline chunked ingest")
@@ -12,14 +13,13 @@ struct H264MuxingPipelineTests {
     }
 
     /// Deterministic 10 fps clock so PTS assertions don't depend on wall time.
-    private final class FakeClock: @unchecked Sendable {
-        private let lock = NSLock()
-        private var t = 500.0
+    private final class FakeClock: Sendable {
+        private let time = OSAllocatedUnfairLock(initialState: 500.0)
         func tick() -> TimeInterval {
-            lock.lock(); defer { lock.unlock() }
-            let value = t
-            t += 0.1
-            return value
+            time.withLock { time in
+                defer { time += 0.1 }
+                return time
+            }
         }
     }
 

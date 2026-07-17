@@ -119,7 +119,9 @@ struct RecordVideoTests {
         let sentinel = tempDir.appendingPathComponent("sentinel.txt")
         try "sentinel".write(to: sentinel, atomically: true, encoding: .utf8)
 
-        let result = try await invokeRecordVideo(duration: 1.0, outputPath: tempDir.path)
+        // 3 s, not 1 s: this exercises directory handling, and the H.264
+        // stream needs a beat to attach and deliver its first frame.
+        let result = try await invokeRecordVideo(duration: 3.0, outputPath: tempDir.path)
 
         #expect(FileManager.default.fileExists(atPath: sentinel.path))
         #expect(result.exitCode == 0)

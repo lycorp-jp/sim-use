@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
+import os
 
 /// A long-running `adb` child process whose stdout is delivered
 /// incrementally as raw binary chunks — the streaming counterpart to
@@ -10,20 +11,23 @@ import Foundation
 /// Follows the same drain / termination-semaphore patterns as `Adb.run`
 /// (readabilityHandler to avoid the 64 KB pipe deadlock, exit-driven wakeup,
 /// ENOENT → `BridgeError.adbMissing`).
-public final class AdbStreamingProcess: @unchecked Sendable {
+public final class AdbStreamingProcess: Sendable {
+    /// The non-Sendable subprocess objects plus the byte tallies, confined
+    /// to the lock.
+    private struct State {
+        let process = Process()
+        let stdoutPipe = Pipe()
+        let stderrPipe = Pipe()
+        var stdoutByteCount: Int64 = 0
+        var stderrBuffer = Data()
+    }
+
     private let adbPath: String
     private let arguments: [String]
     private let onStdout: @Sendable (Data) -> Void
     private let onStderr: (@Sendable (String) -> Void)?
-
-    private let process = Process()
-    private let stdoutPipe = Pipe()
-    private let stderrPipe = Pipe()
+    private let state = OSAllocatedUnfairLock(initialState: State())
     private let exitSemaphore = DispatchSemaphore(value: 0)
-
-    private let lock = NSLock()
-    private var _stdoutByteCount: Int64 = 0
-    private var stderrBuffer = Data()
 
     public init(
         adbPath: String,
@@ -39,65 +43,60 @@ public final class AdbStreamingProcess: @unchecked Sendable {
 
     public func start() throws {
         let resolvedPath = Adb.resolveOnPATH(adbPath) ?? adbPath
-        process.executableURL = URL(fileURLWithPath: resolvedPath)
-        process.arguments = arguments
-        process.standardOutput = stdoutPipe
-        process.standardError = stderrPipe
+        try state.withLock { state in
+            state.process.executableURL = URL(fileURLWithPath: resolvedPath)
+            state.process.arguments = arguments
+            state.process.standardOutput = state.stdoutPipe
+            state.process.standardError = state.stderrPipe
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard let self, !chunk.isEmpty else { return }
-            self.lock.lock()
-            self._stdoutByteCount += Int64(chunk.count)
-            self.lock.unlock()
-            self.onStdout(chunk)
-        }
-        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            let chunk = handle.availableData
-            guard let self, !chunk.isEmpty else { return }
-            self.lock.lock()
-            self.stderrBuffer.append(chunk)
-            self.lock.unlock()
-        }
-
-        process.terminationHandler = { [exitSemaphore] _ in exitSemaphore.signal() }
-
-        do {
-            try process.run()
-        } catch {
-            let nsErr = error as NSError
-            let isMissing =
-                (nsErr.domain == NSCocoaErrorDomain && nsErr.code == 4) ||
-                (nsErr.domain == NSPOSIXErrorDomain && nsErr.code == Int(ENOENT))
-            if isMissing {
-                throw BridgeError.adbMissing
+            state.stdoutPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let chunk = handle.availableData
+                guard let self, !chunk.isEmpty else { return }
+                self.state.withLock { $0.stdoutByteCount += Int64(chunk.count) }
+                self.onStdout(chunk)
             }
-            throw BridgeError.transport(underlying: "Failed to spawn adb: \(error.localizedDescription)", serial: nil)
+            state.stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let chunk = handle.availableData
+                guard let self, !chunk.isEmpty else { return }
+                self.state.withLock { $0.stderrBuffer.append(chunk) }
+            }
+            state.process.terminationHandler = { [exitSemaphore] _ in exitSemaphore.signal() }
+
+            do {
+                try state.process.run()
+            } catch {
+                let nsErr = error as NSError
+                let isMissing =
+                    (nsErr.domain == NSCocoaErrorDomain && nsErr.code == 4) ||
+                    (nsErr.domain == NSPOSIXErrorDomain && nsErr.code == Int(ENOENT))
+                if isMissing {
+                    throw BridgeError.adbMissing
+                }
+                throw BridgeError.transport(underlying: "Failed to spawn adb: \(error.localizedDescription)", serial: nil)
+            }
         }
     }
 
     /// Send SIGINT — `screenrecord`'s clean-stop signal (flushes the encoder
     /// and finalizes its output before exiting).
     public func interrupt() {
-        guard process.isRunning else { return }
-        kill(process.processIdentifier, SIGINT)
+        state.withLock { state in
+            if state.process.isRunning { kill(state.process.processIdentifier, SIGINT) }
+        }
     }
 
     public func terminate() {
-        guard process.isRunning else { return }
-        process.terminate()
+        state.withLock { state in
+            if state.process.isRunning { state.process.terminate() }
+        }
     }
 
-    public var isRunning: Bool { process.isRunning }
+    public var isRunning: Bool { state.withLock { $0.process.isRunning } }
 
-    public var stdoutByteCount: Int64 {
-        lock.lock(); defer { lock.unlock() }
-        return _stdoutByteCount
-    }
+    public var stdoutByteCount: Int64 { state.withLock { $0.stdoutByteCount } }
 
     public var collectedStderr: String {
-        lock.lock(); defer { lock.unlock() }
-        return String(data: stderrBuffer, encoding: .utf8) ?? ""
+        state.withLock { String(data: $0.stderrBuffer, encoding: .utf8) ?? "" }
     }
 
     /// Block until the child exits (or `timeout` elapses), then detach the
@@ -107,30 +106,26 @@ public final class AdbStreamingProcess: @unchecked Sendable {
     public func waitForExit(timeout: TimeInterval) -> Int32? {
         let timedOut = exitSemaphore.wait(timeout: .now() + timeout) == .timedOut
         if timedOut {
-            process.terminate()
+            state.withLock { if $0.process.isRunning { $0.process.terminate() } }
             _ = exitSemaphore.wait(timeout: .now() + 0.5)
         }
 
-        stdoutPipe.fileHandleForReading.readabilityHandler = nil
-        stderrPipe.fileHandleForReading.readabilityHandler = nil
-
-        let residual = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        if !residual.isEmpty {
-            lock.lock()
-            _stdoutByteCount += Int64(residual.count)
-            lock.unlock()
-            onStdout(residual)
-        }
-        let residualErr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        if !residualErr.isEmpty {
-            lock.lock()
-            stderrBuffer.append(residualErr)
-            lock.unlock()
-        }
-        if let onStderr, !collectedStderr.isEmpty {
-            onStderr(collectedStderr)
+        let (residualOut, status): (Data, Int32) = state.withLock { state in
+            state.stdoutPipe.fileHandleForReading.readabilityHandler = nil
+            state.stderrPipe.fileHandleForReading.readabilityHandler = nil
+            let residual = state.stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+            let residualErr = state.stderrPipe.fileHandleForReading.readDataToEndOfFile()
+            state.stdoutByteCount += Int64(residual.count)
+            state.stderrBuffer.append(residualErr)
+            return (residual, state.process.terminationStatus)
         }
 
-        return timedOut ? nil : process.terminationStatus
+        if !residualOut.isEmpty { onStdout(residualOut) }
+        if let onStderr {
+            let stderr = collectedStderr
+            if !stderr.isEmpty { onStderr(stderr) }
+        }
+
+        return timedOut ? nil : status
     }
 }
