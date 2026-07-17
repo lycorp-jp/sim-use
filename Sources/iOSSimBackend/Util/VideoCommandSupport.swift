@@ -36,6 +36,25 @@ public final class CancellationFlag: @unchecked Sendable {
     }
 }
 
+/// A latch that transitions to "set" exactly once. Guarantees a
+/// `CheckedContinuation` is resumed a single time when two callbacks race
+/// (a completion handler versus a timeout).
+public final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+
+    public init() {}
+
+    /// Returns true the first time it is called, false thereafter.
+    public func trySet() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !fired else { return false }
+        fired = true
+        return true
+    }
+}
+
 /// Thread-safe, set-once error capture for callback-based FBFutures.
 ///
 /// The BGRA stream reports failures through `FBFuture` completion
@@ -403,7 +422,7 @@ public final class H264StreamRecorder: @unchecked Sendable {
         return pixelBuffer
     }
 
-    private static func estimateBitrate(width: Int, height: Int, fps: Int, quality: Int) -> Int {
+    public static func estimateBitrate(width: Int, height: Int, fps: Int, quality: Int) -> Int {
         let qualityFactor = max(0.1, min(Double(quality) / 100.0, 1.0))
         let bitsPerPixel = 0.1 + (0.4 * qualityFactor)
         let bitrate = Double(width * height) * bitsPerPixel * Double(fps)

@@ -7,10 +7,9 @@ import AVFoundation
 @Suite("Record Video Command Tests", .serialized, .enabled(if: isE2EEnabled))
 struct RecordVideoTests {
     // Regression for issue #35: under short-grace SIGTERM (process supervisor
-    // pattern) the mp4 must still finalise with a moov atom. The signal-to-
-    // finish path goes through a DispatchSource → Task → actor → loop pickup
-    // → recorder.finish() chain whose latency on master is ~70-180 ms; with a
-    // tight grace before SIGKILL the trailer is never written.
+    // pattern) the mp4 must still finalise with a moov atom. The stream path
+    // finishes the writer (moov) before stopping the stream, so the trailer is
+    // on disk before a tight SIGKILL can land.
     @Test("Record video survives short-grace SIGTERM with a valid mp4")
     func recordVideoShortGraceSIGTERM() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()
@@ -141,7 +140,7 @@ struct RecordVideoTests {
         process.arguments = [
             "record-video",
             "--udid", udid,
-            "--fps", "40"
+            "--fps", "70"
         ]
         let errorPipe = Pipe()
         process.standardError = errorPipe
@@ -153,7 +152,26 @@ struct RecordVideoTests {
         let errorOutput = String(data: errorPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
 
         #expect(process.terminationStatus != 0)
-        #expect(errorOutput.contains("FPS must be between 1 and 30"))
+        #expect(errorOutput.contains("FPS must be between 1 and 60"))
+    }
+
+    @Test("Explicit --fps records at that constant frame rate")
+    func recordVideoEagerFrameRate() async throws {
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sim-use-fps-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: outputURL) }
+
+        let result = try await invokeRecordVideo(fps: 20, duration: 4.0, outputPath: outputURL.path)
+        #expect(result.exitCode == 0)
+
+        let asset = AVURLAsset(url: result.outputURL)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try #require(tracks.first)
+        // Eager H.264 streaming lays frames out at the requested rate — far
+        // above the ~8-10 fps the old screenshot polling was capped at, and
+        // close to the requested 20 (a few percent under is normal).
+        let nominal = try await track.load(.nominalFrameRate)
+        #expect(nominal >= 16 && nominal <= 24, "expected ~20 fps, got \(nominal)")
     }
 
     // MARK: - Helpers
@@ -167,7 +185,7 @@ struct RecordVideoTests {
     }
 
     private func invokeRecordVideo(
-        fps: Int = 10,
+        fps: Int? = nil,
         quality: Int = 80,
         scale: Double = 1.0,
         duration: TimeInterval = 2.0,
@@ -182,14 +200,16 @@ struct RecordVideoTests {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: simUsePath)
-        process.arguments = [
-            "record-video",
-            "--udid", udid,
-            "--fps", "\(fps)",
+        var arguments = ["record-video", "--udid", udid]
+        if let fps {
+            arguments.append(contentsOf: ["--fps", "\(fps)"])
+        }
+        arguments.append(contentsOf: [
             "--quality", "\(quality)",
             "--scale", "\(scale)",
-            "--output", configuredOutputPath
-        ]
+            "--output", configuredOutputPath,
+        ])
+        process.arguments = arguments
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()

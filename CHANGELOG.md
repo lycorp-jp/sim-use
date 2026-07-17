@@ -17,12 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `record-video` now captures a real H.264 stream and muxes it straight into the MP4 (passthrough) instead of polling screenshots and re-encoding each frame. iOS drives `FBSimulatorVideoStream` in eager H.264 mode at a constant `--fps` (frames laid out at exactly `1/fps`, so the rate is honored and playback is smooth); Android pipes `adb screenrecord --output-format=h264` at its native variable frame rate, stitching across `screenrecord` restarts past the API < 34 per-invocation limit. `--fps` is now `1–60` (default 30, was `1–30` default 10) and is ignored on Android; `--quality`/`--scale` map to bitrate/size on both platforms. A mid-recording rotation stops Android capture (an MP4 track can't change frame size).
 - The tap family (`tap`, `long-press`, `ios tap`) declares its shared flags once via `TapTargetingOptions` / `TapTimingOptions` option groups instead of three hand-kept copies (#42). Flag names, defaults, validation messages, and `--json` envelopes are unchanged; the only user-visible deltas are in `--help` output, where per-verb wording ("Tap the center…" / "Long-press the center…") unifies to verb-neutral phrasing ("Target the center…") and the timing flags render as a contiguous block after `--duration`.
 - `make e2e` now runs both the iOS and Android E2E suites in sequence (continuing past a platform failure and failing if either did); the iOS-only target is `make e2e-ios`, Android-only stays `make e2e-android`.
 - `scripts/test-runner.sh` keeps running after a failed suite and prints a full pass/fail map at the end (a release gate needs the whole picture, not the first crash). The hardcoded suite list gained the missing `KeyboardStateTests` and the new suites, and the misnamed `StreamVideoDebugTests` entry — which silently matched zero tests — now points at the real `StreamVideoDebugTest` suite.
 
 ### Fixed
 
+- `record-video` frame rate is no longer capped at the ~8–10 fps the screenshot-polling loop topped out at (iOS honors `--fps` up to 60 with smooth constant-rate playback; an Android emulator captured ~50 fps under motion). Recording no longer burns CPU decoding/re-encoding every frame.
 - Four E2E suites (KeyTests, KeyComboTests, KeySequenceTests, StreamVideoTests) still invoked the pre-0.5.x top-level verb forms and had failed ever since the five iOS-only verbs moved under the `ios` namespace; they now call `sim-use ios <verb>`.
 - KeyComboTests' Cmd+A test asserted a cleared text field reads nil/empty — an empty `UITextField` exposes its placeholder as the accessibility value, so the assertion could never pass. It now accepts the placeholder form.
 

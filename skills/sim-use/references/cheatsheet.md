@@ -122,7 +122,8 @@ sim-use touch -x 150 -y 250 --down --up --delay 1.0  # long press
 
 ```bash
 sim-use screenshot --output shot.png
-sim-use record-video --output recording.mp4 --fps 15   # Ctrl+C to stop
+sim-use record-video --output recording.mp4             # H.264, 30 fps default; Ctrl+C to stop
+sim-use record-video --output smooth.mp4 --fps 60       # iOS: constant rate up to 60 fps (Android ignores --fps, native rate)
 sim-use ios stream-video --fps 10 --format mjpeg        # iOS only
 ```
 

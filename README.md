@@ -304,11 +304,27 @@ sim-use ios stream-video --device $UDID --fps 30 --format ffmpeg | \
   ffmpeg -f image2pipe -framerate 30 -i - -c:v libx264 -preset ultrafast out.mp4
 
 # Record MP4 directly (cross-platform)
-sim-use record-video --device $UDID --fps 15 --output recording.mp4
-sim-use record-video --device $UDID --fps 10 --quality 60 --scale 0.5 --output low-bw.mp4
+sim-use record-video --device $UDID --output recording.mp4            # 30 fps default
+sim-use record-video --device $UDID --fps 60 --output smooth.mp4      # up to 60 fps
+sim-use record-video --device $UDID --quality 60 --scale 0.5 --output low-bw.mp4
 ```
 
-Press Ctrl+C to stop; sim-use finalises the MP4 before exiting.
+`record-video` captures a real H.264 stream and muxes it straight into the
+MP4 (passthrough — no per-frame screenshot re-encoding):
+
+  * **iOS** drives `FBSimulatorVideoStream` in eager H.264 mode at a constant
+    `--fps` (default 30, max 60). Because the stream carries no timestamps,
+    frames are laid out at exactly `1/fps`, so playback is smooth and the
+    requested rate is honored.
+  * **Android** pipes `adb screenrecord --output-format=h264` at the device's
+    native variable frame rate, so `--fps` is ignored there; `--quality` maps
+    to bitrate and `--scale` to `--size`. Recordings past the per-invocation
+    limit on API < 34 are stitched across `screenrecord` restarts
+    automatically.
+
+Rotating the display mid-recording stops capture on Android (an MP4 track
+can't change frame size). Press Ctrl+C to stop; sim-use finalises the MP4
+before exiting.
 
 ### Accessibility inspection
 
