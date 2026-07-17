@@ -6,14 +6,17 @@ import FBSimulatorControl
 import AVFoundation
 import SimUseCore
 
-/// iOS Simulator backend for the `record-video` verb. The top-level
-/// cross-platform `record-video` forwards iOS UDIDs through here; the
-/// Android branch keeps its execute body inline in the forwarder
-/// because it cross-cuts AndroidBackend (for `Adb`) and iOSSimBackend
-/// (for `H264StreamRecorder` / `VideoFrameUtilities`). Only SimUse —
-/// the executable target — depends on both, so AndroidBackend cannot
-/// host the Android record-video orchestrator without dragging
-/// iOSSimBackend into its dep cone.
+/// iOS Simulator backend for the `record-video` verb. Recording drives
+/// `FBSimulatorVideoStream` in eager (fixed-rate) H.264 mode and muxes the
+/// resulting Annex-B elementary stream straight into an MP4 (passthrough, no
+/// re-encode). Because the stream carries no timestamps, presentation times
+/// are laid out as a constant frame rate (`--fps`) — this is what makes the
+/// requested frame rate honorable and keeps playback smooth (an eager
+/// stream's bytes arrive in bursts, so deriving PTS from arrival time would
+/// judder).
+///
+/// idb's lazy (damage-driven) mode is unused: it emits no frames on the
+/// modern Metal-backed simulator surface even during motion.
 public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "record-video",
@@ -27,10 +30,17 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         }
     }
 
+    /// Raised only when the H.264 video stream cannot be set up (private
+    /// CoreSimulator API unavailable, stream fails to start). Triggers the
+    /// screenshot-capture fallback; mid-recording failures propagate as-is.
+    private struct StreamUnavailableError: Error {
+        let underlying: String
+    }
+
     @OptionGroup public var device: DeviceOptions
 
-    @Option(help: "Frames per second (1-30, default: 10)")
-    public var fps: Int = 10
+    @Option(help: "Frames per second (1-60, default: 30).")
+    public var fps: Int?
 
     @Option(help: "Quality factor (1-100) controlling bitrate (default: 80)")
     public var quality: Int = 80
@@ -66,9 +76,11 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         try Self.validateOptions(fps: fps, quality: quality, scale: scale)
     }
 
-    public static func validateOptions(fps: Int, quality: Int, scale: Double) throws {
-        guard fps >= 1 && fps <= 30 else {
-            throw ValidationError("FPS must be between 1 and 30")
+    public static func validateOptions(fps: Int?, quality: Int, scale: Double) throws {
+        if let fps {
+            guard fps >= 1 && fps <= 60 else {
+                throw ValidationError("FPS must be between 1 and 60")
+            }
         }
         guard quality >= 1 && quality <= 100 else {
             throw ValidationError("Quality must be between 1 and 100")
@@ -111,23 +123,179 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         defer { signalObserver.invalidate() }
 
         do {
-            try await recordVideo(
+            try await recordVideoViaStream(
                 simulator: targetSimulator,
                 outputURL: outputURL,
-                fps: fps,
+                fps: fps ?? 30,
                 quality: quality,
                 scale: scale,
                 cancellationFlag: cancellationFlag
             )
             recordingFinished.cancel()
             return ExecutionResult(path: outputURL.path)
+        } catch let unavailable as StreamUnavailableError {
+            FileHandle.standardError.write(Data("warning: H.264 stream unavailable (\(unavailable.underlying)); falling back to screenshot capture\n".utf8))
+            do {
+                try await recordVideoViaScreenshots(
+                    simulator: targetSimulator,
+                    outputURL: outputURL,
+                    fps: fps ?? 10,
+                    quality: quality,
+                    scale: scale,
+                    cancellationFlag: cancellationFlag
+                )
+                recordingFinished.cancel()
+                return ExecutionResult(path: outputURL.path)
+            } catch {
+                recordingFinished.cancel()
+                throw CLIError(errorDescription: "Failed to record video: \(error.localizedDescription)")
+            }
         } catch {
             recordingFinished.cancel()
             throw CLIError(errorDescription: "Failed to record video: \(error.localizedDescription)")
         }
     }
 
-    private func recordVideo(
+    // MARK: - H.264 stream recording
+
+    private func recordVideoViaStream(
+        simulator: FBSimulator,
+        outputURL: URL,
+        fps: Int,
+        quality: Int,
+        scale: Double,
+        cancellationFlag: CancellationFlag
+    ) async throws {
+        let initialFrameData = try await VideoFrameUtilities.captureScreenshotData(from: simulator)
+        guard let initialImage = VideoFrameUtilities.makeCGImage(from: initialFrameData) else {
+            throw CLIError(errorDescription: "Failed to decode simulator screenshot")
+        }
+        let dimensions = VideoFrameUtilities.computeDimensions(for: initialImage, scale: scale)
+        let bitrate = H264StreamRecorder.estimateBitrate(
+            width: dimensions.width,
+            height: dimensions.height,
+            fps: fps,
+            quality: quality
+        )
+
+        // Constant-rate PTS layout — the eager stream is fixed-rate, so lay
+        // frames out at exactly 1/fps to keep playback smooth regardless of
+        // when the encoded bytes happen to arrive.
+        let recorder = try H264PassthroughRecorder(outputURL: outputURL, frameRate: fps)
+        var recorderFinalized = false
+        defer { if !recorderFinalized { recorder.invalidate() } }
+
+        let streamError = FirstErrorBox()
+        let pipeline = H264MuxingPipeline(recorder: recorder, onFatalError: { error in
+            streamError.set(error)
+            cancellationFlag.cancel()
+        })
+        let consumer = PipelineDataConsumer(pipeline: pipeline)
+
+        let config = FBVideoStreamConfiguration(
+            encoding: .H264,
+            framesPerSecond: NSNumber(value: fps),
+            compressionQuality: NSNumber(value: Double(quality) / 100.0),
+            scaleFactor: scale < 1.0 ? NSNumber(value: scale) : nil,
+            avgBitrate: NSNumber(value: bitrate),
+            keyFrameRate: NSNumber(value: 2)
+        )
+
+        let videoStream: FBVideoStream
+        do {
+            videoStream = try await FutureBridge.value(simulator.createStream(with: config))
+        } catch {
+            throw StreamUnavailableError(underlying: error.localizedDescription)
+        }
+
+        let startFuture = videoStream.startStreaming(consumer)
+        startFuture.onQueue(BridgeQueues.videoStreamQueue, notifyOfCompletion: { future in
+            if let error = future.error {
+                streamError.set(error)
+            }
+        })
+        videoStream.completed.onQueue(BridgeQueues.videoStreamQueue, notifyOfCompletion: { future in
+            if let error = future.error {
+                streamError.set(error)
+            }
+        })
+
+        // Wait for the stream to actually start delivering before committing
+        // to it. FBSimulatorVideoStream occasionally attaches cleanly yet
+        // pushes no frames (cold start / wedged encoder); treating that as
+        // "unavailable" falls back to screenshot capture rather than producing
+        // an empty recording.
+        let firstFrameDeadline = Date().addingTimeInterval(2.0)
+        while !pipeline.firstFrameReceived {
+            if Task.isCancelled || cancellationFlag.isCancelled() { break }
+            if let error = streamError.first {
+                throw StreamUnavailableError(underlying: (error as NSError).localizedDescription)
+            }
+            if Date() >= firstFrameDeadline {
+                throw StreamUnavailableError(underlying: "no frames received within 2s of stream start")
+            }
+            try? await cancellableSleep(seconds: 0.05, flag: cancellationFlag)
+        }
+
+        try await runStreamPollLoop(pipeline: pipeline, streamError: streamError, cancellationFlag: cancellationFlag)
+
+        // Finalize the MP4 before stopping the stream: the moov atom must be
+        // written before a supervisor's post-signal SIGKILL can land.
+        pipeline.finishIngest()
+        do {
+            try await recorder.finish(stopHostTime: ProcessInfo.processInfo.systemUptime)
+            recorderFinalized = true
+        } catch {
+            if let streamErr = streamError.first { throw streamErr }
+            throw error
+        }
+
+        await stopStreamBestEffort(videoStream)
+
+        if let error = streamError.first {
+            throw error
+        }
+    }
+
+    private func runStreamPollLoop(
+        pipeline: H264MuxingPipeline,
+        streamError: FirstErrorBox,
+        cancellationFlag: CancellationFlag
+    ) async throws {
+        var lastProgress = Date()
+        while true {
+            if Task.isCancelled || cancellationFlag.isCancelled() { break }
+            if streamError.first != nil { break }
+
+            let now = Date()
+            if now.timeIntervalSince(lastProgress) >= 2 {
+                lastProgress = now
+                FileHandle.standardError.write(Data(String(format: "Captured %lld frames\n", pipeline.framesWritten).utf8))
+            }
+            try? await cancellableSleep(seconds: 0.1, flag: cancellationFlag)
+        }
+    }
+
+    /// Stop the stream, waiting at most ~1 s. The MP4 is already finalized,
+    /// so this only politely releases the simulator's encoder.
+    private func stopStreamBestEffort(_ videoStream: FBVideoStream) async {
+        let once = OnceFlag()
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let resume = { if once.trySet() { continuation.resume() } }
+            BridgeQueues.videoStreamQueue.async {
+                videoStream.stopStreaming().onQueue(BridgeQueues.videoStreamQueue, notifyOfCompletion: { _ in resume() })
+            }
+            BridgeQueues.videoStreamQueue.asyncAfter(deadline: .now() + 1.0) { resume() }
+        }
+    }
+
+    // MARK: - Screenshot fallback
+
+    /// Last-resort recorder used only when the H.264 stream API is
+    /// unavailable (e.g. after an Xcode update breaks the private
+    /// CoreSimulator surface). Polls screenshots and re-encodes through
+    /// `H264StreamRecorder`; caps near ~8-10 fps.
+    private func recordVideoViaScreenshots(
         simulator: FBSimulator,
         outputURL: URL,
         fps: Int,
@@ -150,54 +318,27 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         )
         defer { recorder.invalidate() }
 
-        let frameInterval = 1.0 / Double(fps)
-        var frameCount: Int64 = 1
-        var lastLogFrame: Int64 = 0
-        let startTime = Date()
         var lastPresentationTime = CMTime.zero
-
+        let frameInterval = 1.0 / Double(fps)
         try recorder.append(image: initialImage, presentationTime: .zero)
         let writerStartTime = Date()
 
         while true {
-            if Task.isCancelled {
-                break
-            }
-            if cancellationFlag.isCancelled() {
-                break
-            }
-
+            if Task.isCancelled || cancellationFlag.isCancelled() { break }
             let frameStart = Date()
 
             do {
                 let frameData = try await VideoFrameUtilities.captureScreenshotData(from: simulator)
-                // A decode failure must still fall through to the
-                // frame-pacing sleep below — `continue` here would
-                // hot-spin the loop for as long as decoding keeps
-                // failing.
                 if let cgImage = VideoFrameUtilities.makeCGImage(from: frameData) {
                     let now = Date()
                     var presentationTime = CMTime(seconds: now.timeIntervalSince(writerStartTime), preferredTimescale: 600)
                     if presentationTime <= lastPresentationTime {
                         presentationTime = CMTimeAdd(lastPresentationTime, CMTime(value: 1, timescale: 600))
                     }
-
                     try recorder.append(image: cgImage, presentationTime: presentationTime)
                     lastPresentationTime = presentationTime
-                    frameCount += 1
-
-                    if frameCount - lastLogFrame >= Int64(fps) {
-                        lastLogFrame = frameCount
-                        let elapsed = Date().timeIntervalSince(startTime)
-                        let actualFPS = Double(frameCount) / max(elapsed, 0.0001)
-                        FileHandle.standardError.write(Data(String(format: "Captured %lld frames (%.1f FPS actual)\n", frameCount, actualFPS).utf8))
-                    }
-                } else {
-                    FileHandle.standardError.write(Data("Unable to decode screenshot frame\n".utf8))
                 }
             } catch let error as VideoWriterStallError {
-                // A stalled writer does not recover; abort the recording
-                // instead of re-logging the stall once per timeout forever.
                 throw error
             } catch {
                 FileHandle.standardError.write(Data("Error capturing frame: \(error.localizedDescription)\n".utf8))
@@ -261,5 +402,24 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         }
 
         return baseURL
+    }
+}
+
+/// Bridges `FBSimulatorVideoStream`'s H.264 byte callbacks into the shared
+/// muxing pipeline. Not a `FBDataConsumerSync`, so the passed data is
+/// heap-backed and safe to hand to the pipeline synchronously.
+private final class PipelineDataConsumer: NSObject, FBDataConsumer {
+    private let pipeline: H264MuxingPipeline
+
+    init(pipeline: H264MuxingPipeline) {
+        self.pipeline = pipeline
+    }
+
+    func consumeData(_ data: Data) {
+        pipeline.ingest(data)
+    }
+
+    func consumeEndOfFile() {
+        pipeline.finishIngest()
     }
 }

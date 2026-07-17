@@ -4,6 +4,7 @@ import FBSimulatorControl
 @preconcurrency import FBControlCore
 import AVFoundation
 import ImageIO
+import os
 #if os(macOS)
 import AppKit
 import SimUseCore
@@ -15,24 +16,37 @@ import SimUseCore
 /// that follows SIGTERM with a short-grace SIGKILL must reach
 /// `recorder.finish()` before the kill lands, otherwise the mp4 trailer
 /// (moov atom) is never written. An actor-backed flag adds ~10-100 ms of
-/// scheduler jitter on every cancel/check; using `NSLock` keeps the
+/// scheduler jitter on every cancel/check; `OSAllocatedUnfairLock` keeps the
 /// handler and loop pickup synchronous.
-public final class CancellationFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _value = false
+public final class CancellationFlag: Sendable {
+    private let value = OSAllocatedUnfairLock(initialState: false)
 
     public init() {}
 
     public func cancel() {
-        lock.lock()
-        defer { lock.unlock() }
-        _value = true
+        value.withLock { $0 = true }
     }
 
     public func isCancelled() -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        return _value
+        value.withLock { $0 }
+    }
+}
+
+/// A latch that transitions to "set" exactly once. Guarantees a
+/// `CheckedContinuation` is resumed a single time when two callbacks race
+/// (a completion handler versus a timeout).
+public final class OnceFlag: Sendable {
+    private let fired = OSAllocatedUnfairLock(initialState: false)
+
+    public init() {}
+
+    /// Returns true the first time it is called, false thereafter.
+    public func trySet() -> Bool {
+        fired.withLock { fired in
+            guard !fired else { return false }
+            fired = true
+            return true
+        }
     }
 }
 
@@ -43,26 +57,19 @@ public final class CancellationFlag: @unchecked Sendable {
 /// the stream runs until a signal arrives. The command loop polls this
 /// box instead, so the first failure terminates streaming and surfaces
 /// as a thrown error rather than being lost to stderr.
-public final class FirstErrorBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _error: Error?
+public final class FirstErrorBox: Sendable {
+    private let stored = OSAllocatedUnfairLock<Error?>(initialState: nil)
 
     public init() {}
 
     /// Records `error` unless one is already recorded; later calls are no-ops.
     public func set(_ error: Error) {
-        lock.lock()
-        defer { lock.unlock() }
-        if _error == nil {
-            _error = error
-        }
+        stored.withLock { if $0 == nil { $0 = error } }
     }
 
     /// The first error recorded, or nil if none has been.
     public var first: Error? {
-        lock.lock()
-        defer { lock.unlock() }
-        return _error
+        stored.withLock { $0 }
     }
 }
 
@@ -245,10 +252,14 @@ public struct VideoFrameUtilities {
     }
 }
 
-public final class H264StreamRecorder: @unchecked Sendable {
-    private let writer: AVAssetWriter
-    private let input: AVAssetWriterInput
-    private let adaptor: AVAssetWriterInputPixelBufferAdaptor
+public final class H264StreamRecorder: Sendable {
+    /// The non-Sendable AVFoundation objects, confined to the lock.
+    private struct State {
+        let writer: AVAssetWriter
+        let input: AVAssetWriterInput
+        let adaptor: AVAssetWriterInputPixelBufferAdaptor
+    }
+    private let state: OSAllocatedUnfairLock<State>
     private let width: Int
     private let height: Int
 
@@ -297,9 +308,7 @@ public final class H264StreamRecorder: @unchecked Sendable {
         }
         writer.startSession(atSourceTime: .zero)
 
-        self.writer = writer
-        self.input = input
-        self.adaptor = adaptor
+        self.state = OSAllocatedUnfairLock(initialState: State(writer: writer, input: input, adaptor: adaptor))
     }
 
     /// How long `append` waits for the writer input to drain before
@@ -329,55 +338,62 @@ public final class H264StreamRecorder: @unchecked Sendable {
     }
 
     public func append(image: CGImage, presentationTime: CMTime) throws {
-        try Self.waitUntilReady(
-            isReady: { input.isReadyForMoreMediaData },
-            timeout: Self.readinessTimeout
-        )
+        try state.withLock { state in
+            try Self.waitUntilReady(
+                isReady: { state.input.isReadyForMoreMediaData },
+                timeout: Self.readinessTimeout
+            )
 
-        guard let pixelBuffer = Self.makePixelBuffer(width: width, height: height, adaptor: adaptor) else {
-            throw VideoProcessingError.failedToAllocatePixelBuffer
-        }
+            guard let pixelBuffer = Self.makePixelBuffer(width: width, height: height, adaptor: state.adaptor) else {
+                throw VideoProcessingError.failedToAllocatePixelBuffer
+            }
 
-        CVPixelBufferLockBaseAddress(pixelBuffer, [])
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
+            CVPixelBufferLockBaseAddress(pixelBuffer, [])
+            defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
 
-        guard let context = CGContext(
-            data: CVPixelBufferGetBaseAddress(pixelBuffer),
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
-        ) else {
-            throw CLIError(errorDescription: "Failed to create drawing context")
-        }
+            guard let context = CGContext(
+                data: CVPixelBufferGetBaseAddress(pixelBuffer),
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
+            ) else {
+                throw CLIError(errorDescription: "Failed to create drawing context")
+            }
 
-        context.interpolationQuality = .high
-        context.draw(image, in: CGRect(x: 0, y: CGFloat(height), width: CGFloat(width), height: -CGFloat(height)))
+            context.interpolationQuality = .high
+            context.draw(image, in: CGRect(x: 0, y: CGFloat(height), width: CGFloat(width), height: -CGFloat(height)))
 
-        guard adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
-            throw CLIError(errorDescription: "Failed to append frame: \(writer.error?.localizedDescription ?? "Unknown error")")
+            guard state.adaptor.append(pixelBuffer, withPresentationTime: presentationTime) else {
+                throw CLIError(errorDescription: "Failed to append frame: \(state.writer.error?.localizedDescription ?? "Unknown error")")
+            }
         }
     }
 
     public func finish() async throws {
-        input.markAsFinished()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            writer.finishWriting {
-                if let error = self.writer.error {
-                    continuation.resume(throwing: error)
-                } else {
-                    continuation.resume(returning: ())
+            state.withLock { state in
+                state.input.markAsFinished()
+                state.writer.finishWriting {
+                    let error = self.state.withLock { $0.writer.error }
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else {
+                        continuation.resume(returning: ())
+                    }
                 }
             }
         }
     }
 
     public func invalidate() {
-        if writer.status == .writing {
-            input.markAsFinished()
-            writer.cancelWriting()
+        state.withLock { state in
+            if state.writer.status == .writing {
+                state.input.markAsFinished()
+                state.writer.cancelWriting()
+            }
         }
     }
 
@@ -403,7 +419,7 @@ public final class H264StreamRecorder: @unchecked Sendable {
         return pixelBuffer
     }
 
-    private static func estimateBitrate(width: Int, height: Int, fps: Int, quality: Int) -> Int {
+    public static func estimateBitrate(width: Int, height: Int, fps: Int, quality: Int) -> Int {
         let qualityFactor = max(0.1, min(Double(quality) / 100.0, 1.0))
         let bitsPerPixel = 0.1 + (0.4 * qualityFactor)
         let bitrate = Double(width * height) * bitsPerPixel * Double(fps)
