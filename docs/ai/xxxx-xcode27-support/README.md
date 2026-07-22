@@ -147,10 +147,19 @@ with Xcode 26.6) and both fixed in the step-1 PR:
 
 1. **No `LC_RPATH` for binary-target XCFrameworks**: the sim-use binary and
    the SimUseTests bundle carry zero rpath entries, so dlopen of the FB*
-   frameworks fails at load. dyld does still search the sibling
-   `PackageFrameworks/` directory → `scripts/stage-fb-frameworks.sh` stages
-   framework symlinks there (wired into `make build`, `make test`, and both
-   E2E runners; no-op on the classic `.build/<config>` layout).
+   frameworks fails at load. Two-layer fix: `Package.swift` emits explicit
+   rpath entries per XCFramework slice (`@loader_path`-relative for the
+   classic and SwiftBuild layouts, plus a repo-root-relative fallback for
+   custom `--scratch-path` runs started from the repo root) so bare
+   `swift test --filter …` works with no prior staging — review-verified
+   against a fresh scratch directory; and `scripts/stage-fb-frameworks.sh`
+   stages `PackageFrameworks/` symlinks as belt-and-suspenders (wired into
+   `make build`, `make test`, and both E2E runners). Known residual gap:
+   an external `--scratch-path` run started from *outside* the repo root
+   has no resolvable relative anchor. Adjacent watch item: the release
+   build (`scripts/local-release.sh`) would hit the same missing-rpath
+   issue if ever cut on a SwiftBuild-backend toolchain — releases are on
+   26.x today; re-check before moving the release toolchain.
 2. **In-test `swift build --show-bin-path` deadlocks**: the E2E suites used
    it (via `TestUtilities.getSimUsePath()`) to locate the sim-use binary
    while running *inside* `swift test`; the SwiftBuild backend holds the
