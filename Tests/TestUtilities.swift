@@ -335,6 +335,10 @@ struct UIStateParser {
 
 // MARK: - Test Helpers
 
+/// Class anchor so `Bundle(for:)` resolves to this test bundle (structs and
+/// enums cannot anchor a bundle lookup).
+private final class BundleLocator {}
+
 struct TestHelpers {
     private static func resolveSwiftBinPath(sourceRoot: String) throws -> String {
         let process = Process()
@@ -380,8 +384,36 @@ struct TestHelpers {
         return udid
     }
 
-    /// Get the path to the sim-use binary using #file to find source root
+    /// Get the path to the sim-use binary, in order of preference:
+    ///
+    /// 1. The SIM_USE_TEST_BINARY environment variable (exported by the E2E
+    ///    runners).
+    /// 2. The products directory containing this test bundle — the binary is
+    ///    built into the same directory on both the classic
+    ///    (`.build/<triple>/debug`) and SwiftBuild
+    ///    (`.build/out/Products/<config>`) layouts.
+    /// 3. Shelling out to `swift build --show-bin-path`. Last resort only:
+    ///    from inside a running `swift test` this deadlocks on
+    ///    SwiftBuild-backend toolchains (Xcode 26.6+/27), where the test run
+    ///    holds the package lock the child invocation then waits on.
     static func getSimUsePath(testFile: String = #file) throws -> String {
+        if let binary = ProcessInfo.processInfo.environment["SIM_USE_TEST_BINARY"],
+           !binary.isEmpty {
+            if FileManager.default.fileExists(atPath: binary) {
+                return binary
+            }
+            throw TestError.unexpectedState(
+                "SIM_USE_TEST_BINARY points at \(binary) but no file exists there.")
+        }
+
+        let bundleSibling = Bundle(for: BundleLocator.self).bundleURL
+            .deletingLastPathComponent()
+            .appendingPathComponent("sim-use")
+            .path
+        if FileManager.default.fileExists(atPath: bundleSibling) {
+            return bundleSibling
+        }
+
         let sourceRoot: String
         if let srcRoot = ProcessInfo.processInfo.environment["SRC_ROOT"] {
             sourceRoot = srcRoot
@@ -397,7 +429,7 @@ struct TestHelpers {
         if FileManager.default.fileExists(atPath: simUsePath) {
             return simUsePath
         }
-        
+
         throw TestError.unexpectedState("sim-use binary not found at \(simUsePath). Please run 'swift build'.")
     }
     

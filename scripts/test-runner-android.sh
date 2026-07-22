@@ -118,12 +118,20 @@ check_prerequisites() {
 
 build_sim_use() {
     print_header "Building sim-use Executable"
+    # Newer SwiftPM layouts need the FB* frameworks staged next to the
+    # products or the CLI cannot dlopen them.
+    ./scripts/stage-fb-frameworks.sh
     swift build
     SIM_USE="$(swift build --show-bin-path)/sim-use"
     if [[ ! -x "$SIM_USE" ]]; then
         print_error "sim-use binary not found at $SIM_USE"
         exit 1
     fi
+    # Hand the resolved binary path to the test suites; resolving it from
+    # inside a running `swift test` deadlocks on SwiftBuild-backend
+    # toolchains (Xcode 26.6+/27) — the test run holds the package lock a
+    # child `swift build --show-bin-path` then waits on.
+    export SIM_USE_TEST_BINARY="$SIM_USE"
     print_success "sim-use built: $SIM_USE"
 }
 
