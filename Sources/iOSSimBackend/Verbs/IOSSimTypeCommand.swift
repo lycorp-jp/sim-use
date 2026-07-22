@@ -101,9 +101,9 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
 
         // Xcode 27 stop-gap: the dtuhidd daemon takes over the simulator
         // keyboard HID service, so the legacy HID key injection that `type`
-        // uses is silently dropped. Fail loudly with the paste workaround
-        // instead of typing into the void; SIM_USE_SKIP_DTUHIDD_CHECK=1
-        // overrides. See issue #84.
+        // uses is silently dropped. Fail loudly with recovery steps instead
+        // of typing into the void; SIM_USE_SKIP_DTUHIDD_CHECK=1 overrides.
+        // See docs/ai/xxxx-xcode27-support/README.md.
         let skipDtuhiddCheck = ProcessInfo.processInfo
             .environment[KeyboardHIDSuppression.skipCheckEnvVar]?.isEmpty == false
         let resolvedUDID = device.resolved
