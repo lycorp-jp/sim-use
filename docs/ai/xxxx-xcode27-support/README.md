@@ -134,9 +134,13 @@ Verification performed (all with `DEVELOPER_DIR` → Beta 4, equivalent to
 
 Remaining scope for the PR: update the `KeyboardHIDSuppression` guard message
 (in the suppressed state *tap* is now also dead — the message should say so),
-CHANGELOG, README/SKILL notes on the Xcode 27 workflow (Device Hub closed;
+CHANGELOG, README notes on the Xcode 27 workflow (Device Hub closed;
 classic Simulator.app is safe), and an `e2e-ios` run on Xcode 26.x for
-regression.
+regression. Deliberately deferred: agent-facing guidance in
+`skills/sim-use/SKILL.md` (the suppressed-state silent tap no-op has no
+runtime guard, so the skill is where an agent would learn the symptom) —
+it will be written together with the idb-migration work, which changes the
+whole Device Hub story; until then README is the operator-facing source.
 
 ### New-toolchain build/test infra breakages found while running the matrix
 

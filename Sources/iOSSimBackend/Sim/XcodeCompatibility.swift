@@ -25,7 +25,9 @@ enum XcodeCompatibility {
     static func assertSimulatorKitAvailable(logger: SimUseLogger) throws {
         guard let developerDir = selectedDeveloperDir() else { return }
         let candidates = [
-            developerDir + "/Library/PrivateFrameworks/SimulatorKit.framework",
+            ((developerDir as NSString)
+                .appendingPathComponent("Library/PrivateFrameworks/SimulatorKit.framework") as NSString)
+                .standardizingPath,
             ((developerDir as NSString)
                 .appendingPathComponent("../SharedFrameworks/SimulatorKit.framework") as NSString)
                 .standardizingPath,
