@@ -111,6 +111,26 @@ make test    # run tests
 make clean
 ```
 
+### Xcode 27 (beta) compatibility
+
+sim-use works with Xcode 27 betas that ship `SimulatorKit.framework` in
+`Contents/SharedFrameworks` (Beta 4 and later; Beta 1 shipped without it).
+The supported workflow for now is **classic Simulator.app / headless
+`simctl`, with Device Hub closed**:
+
+- A simulator **booted while Device Hub is open** loses legacy HID input —
+  `type` becomes a silent no-op, and on current CoreSimulator builds
+  (1169.1+) `tap` does too. Recovery: quit Device Hub, then
+  `xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>`.
+- Xcode 27 no longer bundles Simulator.app; open the one from an Xcode 26.x
+  install to view simulators — it does not trigger the suppression.
+- The SimulatorKit relocation fix lives in the FB* XCFrameworks (applied via
+  `patches/idb/`), not in the Swift sources — if you built the XCFrameworks
+  before this change, re-run `./scripts/build.sh dev` or the pre-flight will
+  pass while the framework load still fails.
+- Full Device Hub support is planned via a migration to current upstream
+  idb (work record: `docs/ai/xxxx-xcode27-support/README.md`).
+
 ### Agent skill
 
 To install the bundled agent skill into your AI client's skill directory:

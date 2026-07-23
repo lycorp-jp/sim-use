@@ -197,6 +197,10 @@ clean_build() {
 build_sim_use() {
     print_header "Building sim-use Executable"
 
+    # Newer SwiftPM layouts need the FB* frameworks staged next to the
+    # products or nothing (CLI or test bundle) can dlopen them.
+    ./scripts/stage-fb-frameworks.sh
+
     print_info "Building sim-use CLI tool..."
     if [[ "$VERBOSE" == true ]]; then
         swift build
@@ -206,6 +210,12 @@ build_sim_use() {
 
     local sim_use_bin_path
     sim_use_bin_path="$(swift build --show-bin-path)/sim-use"
+
+    # Hand the resolved binary path to the test suites. Resolving it from
+    # inside a running `swift test` deadlocks on SwiftBuild-backend
+    # toolchains (Xcode 26.6+/27): the test run holds the package lock that
+    # a child `swift build --show-bin-path` then waits on forever.
+    export SIM_USE_TEST_BINARY="$sim_use_bin_path"
 
     # Verify the executable exists
     if [[ -f "$sim_use_bin_path" ]]; then
