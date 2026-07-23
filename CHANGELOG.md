@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `describe-ui --no-raw` (top-level, `ios describe-ui`, and `android describe-ui`): with `--json`, omit the raw accessibility tree from the envelope. `data.raw` dominates the payload on real app screens (~70% measured on a busy screen) and is only useful for debugging sim-use itself; `outline` / `entries` / `lists` are unaffected.
+
 ## [0.11.0] - 2026-07-23
 
 ### Added
