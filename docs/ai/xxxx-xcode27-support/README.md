@@ -416,3 +416,15 @@ Judge the result from a separate terminal with the AX side (immune to HID
 suppression): `sim-use describe-ui --device <udid>`. When rebooting the
 simulator between experiments, run `sim-use daemon stop --device <udid>`
 first (bug 2 above).
+
+## Addendum (2026-07-23, issue #60)
+
+The type-only dtuhidd guard described above is superseded. Live A/B testing
+(same device, same runtime) confirmed the boot-time rule — booted-under-Hub
+drops all legacy HID silently; Hub attached after a clean boot keeps working —
+and that dtuhidd *presence* alone therefore cannot be the predicate. The guard
+now keys on dtuhidd's start time relative to its parent `launchd_sim`
+(boot-attach window 15 s; measured 1 s poisoned vs ≥ 34 s benign), lives at
+`HIDInteractor.makeSession` so every HID verb is covered, and no longer
+false-positives on the attach-after-boot state. See
+`DeviceHubHIDSuppression.swift` and issue #60.

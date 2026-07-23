@@ -25,7 +25,7 @@ struct HIDRebootRecoveryTests {
         // open loses legacy HID *at boot* — taps silently no-op even on
         // a fresh connection, which is a different failure than #55 and
         // would fail this test for the wrong reason.
-        if KeyboardHIDSuppression.isSuppressed(forUDID: udid) {
+        if DeviceHubHIDSuppression.isSuppressed(forUDID: udid) {
             throw TestError.unexpectedState(
                 "dtuhidd is active for \(udid) (Device Hub open?); close Device Hub and re-boot the simulator before running this suite"
             )

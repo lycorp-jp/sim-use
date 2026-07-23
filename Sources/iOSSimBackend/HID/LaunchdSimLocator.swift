@@ -20,7 +20,7 @@ struct LaunchdSimIdentity: Equatable {
 /// Matched by exact process name, then scoped to the device by looking
 /// for the UDID in the argument blob — `launchd_sim`'s argv names the
 /// device's `launchd_bootstrap.plist` path (verified live on Xcode 26.5
-/// and 27 B4), the same disambiguation `KeyboardHIDSuppression` relies
+/// and 27 B4), the same disambiguation `DeviceHubHIDSuppression` relies
 /// on. Implemented with `sysctl` instead of spawning `/bin/ps`: ~1–2 ms
 /// against a ~1000-process table, cheap enough to probe on every HID
 /// verb (`ps` measured ~40 ms).
@@ -39,6 +39,7 @@ enum LaunchdSimLocator {
 
     struct ProcessRecord: Equatable {
         let pid: pid_t
+        let ppid: pid_t
         let startedAt: Date
         let command: String
     }
@@ -48,19 +49,30 @@ enum LaunchdSimLocator {
         in table: [ProcessRecord],
         argumentsForPID: (pid_t) -> String?
     ) -> LaunchdSimIdentity? {
+        record(forUDID: udid, in: table, argumentsForPID: argumentsForPID)
+            .map { LaunchdSimIdentity(pid: $0.pid, startedAt: $0.startedAt) }
+    }
+
+    /// The full process record of the `launchd_sim` serving a UDID.
+    /// Shared by the boot-identity token and `DeviceHubHIDSuppression`
+    /// (which additionally needs the pid to parent-match dtuhidd).
+    static func record(
+        forUDID udid: String,
+        in table: [ProcessRecord],
+        argumentsForPID: (pid_t) -> String?
+    ) -> ProcessRecord? {
         let matches = table
             .filter { $0.command == "launchd_sim" }
             .filter { argumentsForPID($0.pid)?.localizedCaseInsensitiveContains(udid) == true }
         // A dying previous boot can briefly overlap the next boot's
         // launchd_sim; the newest start time is the boot the device is
         // running now.
-        guard let current = matches.max(by: { $0.startedAt < $1.startedAt }) else { return nil }
-        return LaunchdSimIdentity(pid: current.pid, startedAt: current.startedAt)
+        return matches.max(by: { $0.startedAt < $1.startedAt })
     }
 
     // MARK: - sysctl probes
 
-    private static func processTable() -> [ProcessRecord]? {
+    static func processTable() -> [ProcessRecord]? {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0
         guard sysctl(&mib, UInt32(mib.count), nil, &size, nil, 0) == 0, size > 0 else {
@@ -77,6 +89,7 @@ enum LaunchdSimLocator {
         return procs.prefix(bytes / MemoryLayout<kinfo_proc>.stride).map { proc in
             ProcessRecord(
                 pid: proc.kp_proc.p_pid,
+                ppid: proc.kp_eproc.e_ppid,
                 startedAt: Date(
                     timeIntervalSince1970: TimeInterval(proc.kp_proc.p_starttime.tv_sec)
                         + TimeInterval(proc.kp_proc.p_starttime.tv_usec) / 1_000_000
@@ -96,7 +109,7 @@ enum LaunchdSimLocator {
     /// its argc header. The UDID match needs a haystack, not a parse;
     /// interior NULs decode harmlessly. Readable only for same-user
     /// processes — `launchd_sim` always is.
-    private static func argumentBlob(forPID pid: pid_t) -> String? {
+    static func argumentBlob(forPID pid: pid_t) -> String? {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 0
         let header = MemoryLayout<Int32>.size

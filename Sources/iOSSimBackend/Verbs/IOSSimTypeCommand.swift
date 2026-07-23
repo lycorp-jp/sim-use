@@ -99,19 +99,10 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
 
-        // Xcode 27 stop-gap: the dtuhidd daemon takes over the simulator
-        // keyboard HID service, so the legacy HID key injection that `type`
-        // uses is silently dropped. Fail loudly with recovery steps instead
-        // of typing into the void; SIM_USE_SKIP_DTUHIDD_CHECK=1 overrides.
-        // See docs/ai/xxxx-xcode27-support/README.md.
-        let skipDtuhiddCheck = ProcessInfo.processInfo
-            .environment[KeyboardHIDSuppression.skipCheckEnvVar]?.isEmpty == false
-        let resolvedUDID = device.resolved
-        if !skipDtuhiddCheck, KeyboardHIDSuppression.isSuppressed(forUDID: resolvedUDID) {
-            let message = KeyboardHIDSuppression.workaroundMessage(udid: resolvedUDID)
-            logger.error().log(message)
-            throw CLIError(errorDescription: message)
-        }
+        // The Device Hub / dtuhidd guard moved to HIDInteractor.makeSession
+        // (issue #60): it now covers every legacy-HID verb, only flags the
+        // poisoned booted-under-Hub state, and keeps the
+        // SIM_USE_SKIP_DTUHIDD_CHECK escape hatch.
 
         let inputText: String
         switch (text, useStdin, inputFile) {
