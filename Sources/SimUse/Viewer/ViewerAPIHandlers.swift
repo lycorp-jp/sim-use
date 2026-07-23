@@ -270,10 +270,10 @@ struct ViewerAPIHandlers {
 
     private func parseAppLine(_ line: String) -> [String: Any]? {
         // Match `App: <label>  WxH` where W and H are integers and
-        // `<label>` may contain spaces. The label captures lazily so
-        // a label like "Notes Folder" doesn't swallow the trailing
-        // "  WxH".
-        let pattern = #"^App:\s+(.*?)\s+(\d+)x(\d+)\s*$"#
+        // `<label>` may contain spaces. iOS outlines append the current
+        // device orientation when rotated, e.g. ` (landscape-right)`;
+        // accept that suffix while keeping appLabel to the app name.
+        let pattern = #"^App:\s+(.*?)\s+(\d+)x(\d+)(?:\s+\([^)]+\))?\s*$"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
         let range = NSRange(line.startIndex..., in: line)
         guard let match = regex.firstMatch(in: line, range: range),
