@@ -17,6 +17,7 @@ struct LaunchdSimLocatorMatchingTests {
     private func record(_ pid: pid_t, _ started: TimeInterval, _ command: String) -> LaunchdSimLocator.ProcessRecord {
         LaunchdSimLocator.ProcessRecord(
             pid: pid,
+            ppid: 1,
             startedAt: Date(timeIntervalSince1970: started),
             command: command
         )

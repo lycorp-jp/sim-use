@@ -82,6 +82,18 @@ public struct HIDInteractor {
         }
         logger.info().log("Simulator state verified: booted")
 
+        // A simulator booted while Device Hub was open has its legacy
+        // HID disconnected: sends succeed, nothing lands (issue #60).
+        // Fail loudly here — the single choke point every HID verb
+        // passes through — instead of delivering into the void.
+        let skipDtuhiddCheck = ProcessInfo.processInfo
+            .environment[DeviceHubHIDSuppression.skipCheckEnvVar]?.isEmpty == false
+        if !skipDtuhiddCheck, DeviceHubHIDSuppression.isSuppressed(forUDID: simulatorUDID) {
+            let message = DeviceHubHIDSuppression.workaroundMessage(udid: simulatorUDID)
+            logger.error().log(message)
+            throw CLIError(errorDescription: message)
+        }
+
         let hid = try await getOrCreateHIDConnection(for: simulator, logger: logger)
         return Session(simulatorUDID: simulatorUDID, simulator: simulator, hid: hid)
     }

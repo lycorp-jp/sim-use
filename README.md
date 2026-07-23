@@ -119,9 +119,13 @@ The supported workflow for now is **classic Simulator.app / headless
 `simctl`, with Device Hub closed**:
 
 - A simulator **booted while Device Hub is open** loses legacy HID input —
-  `type` becomes a silent no-op, and on current CoreSimulator builds
-  (1169.1+) `tap` does too. Recovery: quit Device Hub, then
-  `xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>`.
+  `type`, and on current CoreSimulator builds (1169.1+) `tap` too. Every HID
+  verb now detects this state and fails with recovery steps instead of
+  reporting success while delivering nothing (a Device Hub *attached after* a
+  clean boot is harmless and is not flagged). Recovery: quit Device Hub, then
+  `xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>`; the error
+  message includes an escape hatch (`SIM_USE_SKIP_DTUHIDD_CHECK=1`) if the
+  detection is ever wrong for your setup.
 - Xcode 27 no longer bundles Simulator.app; open the one from an Xcode 26.x
   install to view simulators — it does not trigger the suppression.
 - The SimulatorKit relocation fix lives in the FB* XCFrameworks (applied via
