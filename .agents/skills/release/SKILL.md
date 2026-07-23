@@ -113,7 +113,7 @@ scripts/local-release.sh \
 If the script fails midway:
 - Bridge build failed → `scripts/build-bridge.sh --check`, see AGENTS.md Android pitfalls
 - Notarization rejected → check `dist/notary-vX.Y.Z.log`
-- GHE release create failed → re-run (script falls back to `gh release upload --clobber`)
+- GitHub release create failed → re-run (script falls back to `gh release upload --clobber`)
 - Smoke test failed → surface exact error, don't paper over
 
 ## Step 7: Commit and push the tap

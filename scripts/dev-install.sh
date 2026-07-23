@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Build a release-shaped sim-use binary and install it locally for testing.
-# Does NOT commit, tag, push, create GHE releases, or update homebrew.
+# Does NOT commit, tag, push, create GitHub releases, or update homebrew.
 #
 # This is the local counterpart to `local-release.sh`: it builds the same
 # artefacts (universal binary, frameworks, viewer SPA, Android bridge APK)
@@ -226,7 +226,7 @@ cat <<EOF
   Version:  ${INSTALLED_VERSION}
 
   Test the release build, then:
-    /release        — ship for real (CHANGELOG, tag, GHE, brew)
+    /release        — ship for real (CHANGELOG, tag, GitHub, brew)
 
   To restore the previous binary:
     scripts/dev-install.sh --restore

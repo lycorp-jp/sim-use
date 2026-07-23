@@ -69,7 +69,7 @@ KEEP_ON_FAILURE=true
 
 # Sandboxed tap location. Picking a fresh owner namespace
 # (`sim-use-release-test`) keeps the dryrun completely separated from
-# the real `LINE-Client/line` tap on the developer's machine.
+# the real `lycorp-jp/tap` tap on the developer's machine.
 TAP_USER="sim-use-release-test"
 TAP_NAME="dryrun"
 TAP_REF="${TAP_USER}/${TAP_NAME}"
@@ -202,7 +202,7 @@ mkdir -p "${TAP_DIR}/Formula"
 cat > "${FORMULA_PATH}" <<RUBY
 class SimUseDryrun < Formula
   desc "Dry-run install of sim-use for release verification (do not use)"
-  homepage "https://git.linecorp.com/LINE-Client/sim-use"
+  homepage "https://github.com/lycorp-jp/sim-use"
   url "file://${ARCHIVE}"
   version "${VERSION}"
   sha256 "${ARCHIVE_SHA256}"

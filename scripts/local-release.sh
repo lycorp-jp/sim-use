@@ -21,7 +21,7 @@ VERSION=""
 OUTPUT_DIR="$REPO_ROOT/dist"
 TAP_DIR=""
 HOMEPAGE="https://github.com/lycorp-jp/sim-use"
-RELEASE_HOST=""
+RELEASE_HOST="github.com"
 RELEASE_OWNER="lycorp-jp"
 RELEASE_REPO="sim-use"
 BUILD_FRAMEWORKS=false
@@ -49,15 +49,14 @@ Output:
                             (default: ./dist)
   --tap-dir DIR             If given, copy the formula into <DIR>/Formula/sim-use.rb.
                             Tarball stays in --output-dir; user reviews + commits the
-                            formula and uploads the tarball to GHE separately.
+                            formula and uploads the tarball to GitHub separately.
 
-GHE release upload:
+GitHub release upload:
   --gh-release              Run `gh release create` (or `gh release upload` if the
                             tag already exists) to attach the tarball as a release asset.
-                            Uses GH_HOST=<release-host> automatically.
   --gh-release-notes FILE   Markdown file used as the release body
                             (default: auto-generated stub).
-  --gh-release-prerelease   Mark the GHE release as a pre-release.
+  --gh-release-prerelease   Mark the GitHub release as a pre-release.
 
 Build inputs:
   --build-frameworks        Force-rebuild the IDB frameworks
@@ -104,10 +103,10 @@ Brew install dress rehearsal (optional):
                             spctl assessment passes.
 
 Repo metadata:
-  --homepage URL            (default: https://git.linecorp.com/LINE-Client/sim-use)
-  --release-host HOST       GHE host (default: git.linecorp.com)
-  --release-owner OWNER     GHE org (default: LINE-Client)
-  --release-repo REPO       GHE repo (default: sim-use)
+  --homepage URL            (default: https://github.com/lycorp-jp/sim-use)
+  --release-host HOST       Release host (default: github.com)
+  --release-owner OWNER     Release org (default: lycorp-jp)
+  --release-repo REPO       Release repo (default: sim-use)
 
   -h, --help
 
@@ -126,7 +125,7 @@ fail() { printf '\033[1;31m✗\033[0m %s\n' "$*" >&2; exit 1; }
 # version) from changelog file $1 — everything between its `## [x.y.z]`
 # heading and the next `## [` heading, with leading/trailing blank lines
 # trimmed. Empty output (no such section) is a soft failure the caller
-# falls back on. Used to render the GHE release body from the change log.
+# falls back on. Used to render the GitHub release body from the change log.
 extract_changelog_section() {
   local changelog="$1" version="$2"
   [[ -f "$changelog" ]] || return 0
@@ -434,7 +433,7 @@ ok "Archive smoke test passed"
 # install path actually preserves the signature we worked to attach.
 # This is the gate that would have caught the v0.6.0 regression where
 # brew's keg_relocate.rb stripped a duplicate rpath and ad-hoc resigned
-# the binary, voiding the Apple notary chain. Runs before the GHE
+# the binary, voiding the Apple notary chain. Runs before the GitHub
 # upload so a failure aborts the release while everything is still
 # local + reversible.
 if [[ "$VERIFY_BREW_INSTALL" == "true" ]]; then
@@ -453,15 +452,15 @@ if [[ "$VERIFY_BREW_INSTALL" == "true" ]]; then
     "${VERIFY_FLAGS[@]}"
 fi
 
-# 9. GHE release upload (optional). If the tag already exists we upload
+# 9. GitHub release upload (optional). If the tag already exists we upload
 # additional assets to it; otherwise we create the release.
 if [[ "$GH_RELEASE" == "true" ]]; then
   REPO_SLUG="${RELEASE_OWNER}/${RELEASE_REPO}"
-  log "Uploading to GHE release ${TAG} on ${REPO_SLUG}..."
+  log "Uploading to GitHub release ${TAG} on ${REPO_SLUG}..."
 
   # Resolve the release body. Prefer an explicit --gh-release-notes file;
   # otherwise render it from the CHANGELOG.md section for this version so the
-  # GHE page carries the real change log instead of a placeholder. Fall back
+  # GitHub page carries the real change log instead of a placeholder. Fall back
   # to a one-line note only when no section exists (e.g. a hotfix tag with no
   # CHANGELOG entry yet).
   NOTES_ARG=()
@@ -499,7 +498,7 @@ if [[ "$GH_RELEASE" == "true" ]]; then
   [[ -n "$NOTES_TMP" ]] && rm -f "$NOTES_TMP"
 fi
 
-# 10. Tap drop-in (optional). Copy formula only; tarball lives on the GHE
+# 10. Tap drop-in (optional). Copy formula only; tarball lives on the GitHub
 # release page. We deliberately do not commit/push — release notes,
 # version-bump conventions, and tap-repo etiquette are user concerns.
 if [[ -n "$TAP_DIR" ]]; then
@@ -524,8 +523,8 @@ EOF
 
 if [[ "$GH_RELEASE" != "true" ]]; then
   cat <<EOF
-Next: upload the tarball to the GHE release page so the formula's gh
-download strategy can find it:
+Next: upload the tarball to the GitHub release page so the formula's
+download URL resolves:
 
   gh release create ${TAG} \\
     "$ARCHIVE_PATH" \\
@@ -539,13 +538,13 @@ fi
 
 if [[ -z "$TAP_DIR" ]]; then
   cat <<EOF
-Then drop the formula into the homebrew-line tap:
+Then drop the formula into the ${RELEASE_OWNER}/homebrew-tap repo:
 
   cp $FORMULA_PATH \\
-    <homebrew-line-clone>/Formula/sim-use.rb
-  cd <homebrew-line-clone> && git add Formula/sim-use.rb && git commit && git push
+    <homebrew-tap-clone>/Formula/sim-use.rb
+  cd <homebrew-tap-clone> && git add Formula/sim-use.rb && git commit && git push
 
-(or rerun with --tap-dir <homebrew-line-clone>)
+(or rerun with --tap-dir <homebrew-tap-clone>)
 
 EOF
 else
@@ -563,7 +562,6 @@ fi
 cat <<EOF
 End-user install:
 
-  gh auth login --hostname ${RELEASE_HOST}   # one-off, most engineers already have it
-  brew tap ${RELEASE_OWNER}/line git@${RELEASE_HOST}:${RELEASE_OWNER}/homebrew-line.git
-  brew install sim-use
+  brew tap ${RELEASE_OWNER}/tap
+  brew install ${RELEASE_OWNER}/tap/sim-use
 EOF
