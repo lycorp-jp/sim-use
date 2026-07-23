@@ -8,6 +8,11 @@ import SimUseCore
 @MainActor
 public struct HIDInteractor {
 
+    /// A HID session against one simulator boot. Commands that hold a
+    /// Session across many events (type, batch, gesture) do not re-check
+    /// boot identity per event: a mid-burst reboot fails the burst —
+    /// loudly, via the send deadline — and the next command recovers
+    /// through the boot gate in `getOrCreateHIDConnection`.
     public struct Session {
         public let simulatorUDID: String
         public let simulator: FBSimulator
@@ -17,11 +22,11 @@ public struct HIDInteractor {
     // Cache for HID connections per simulator. Each entry carries the
     // boot token it was created against (see HIDBootIdentity): the
     // connection's mach port dies with that boot, and a send through a
-    // dead port hangs on current SimulatorKit, so reuse must be gated
-    // on the token before anything is sent.
+    // dead port hangs or silently drops input (issue #55), so reuse
+    // must be gated on the token before anything is sent.
     private struct CachedConnection {
         let hid: FBSimulatorHID
-        let bootToken: Date?
+        let bootToken: HIDBootToken
     }
 
     private static var hidConnections: [String: CachedConnection] = [:]
@@ -34,6 +39,18 @@ public struct HIDInteractor {
             return min(milliseconds, 1000)
         }
         return 25
+    }
+
+    /// Deadline for a single HID send (see HIDSendDeadline). A single
+    /// perform can legitimately run ~10 s (swipe/press durations), so
+    /// the default leaves generous headroom. Override via
+    /// SIM_USE_HID_SEND_TIMEOUT_MS; 0 disables the deadline.
+    private static var sendTimeoutMs: UInt64 {
+        if let envValue = ProcessInfo.processInfo.environment["SIM_USE_HID_SEND_TIMEOUT_MS"],
+           let milliseconds = UInt64(envValue) {
+            return milliseconds
+        }
+        return 30_000
     }
 
     public static func makeSession(for simulatorUDID: String, logger: SimUseLogger) async throws -> Session {
@@ -97,7 +114,21 @@ public struct HIDInteractor {
     private static func performHIDEventOnce(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
         logger.info().log("Performing HID event...")
         let eventFuture = event.perform(on: session.hid)
-        _ = try await FutureBridge.value(eventFuture)
+        let timeoutMs = sendTimeoutMs
+        if timeoutMs > 0 {
+            let udid = session.simulatorUDID
+            try await HIDSendDeadline.run(milliseconds: timeoutMs) {
+                try await FutureBridge.value(eventFuture)
+            } onTimeout: {
+                CLIError(errorDescription: """
+                HID event delivery timed out after \(timeoutMs) ms; the connection to \
+                simulator \(udid) may be dead (rebooted mid-command?). The cached \
+                connection is dropped and rebuilt on the next command.
+                """)
+            }
+        } else {
+            _ = try await FutureBridge.value(eventFuture)
+        }
         logger.info().log("HID event performed successfully.")
 
         if stabilizationDelayMs > 0 {
@@ -113,16 +144,16 @@ public struct HIDInteractor {
 
     // Get or create a cached HID connection (matching CompanionLib's connectToHID behavior)
     private static func getOrCreateHIDConnection(for simulator: FBSimulator, logger: SimUseLogger) async throws -> FBSimulatorHID {
-        let currentToken = HIDBootIdentity.token(dataDirectory: simulator.dataDirectory)
+        let currentToken = HIDBootIdentity.token(dataDirectory: simulator.dataDirectory, udid: simulator.udid)
         if let cached = hidConnections[simulator.udid] {
             if HIDBootIdentity.isReusable(cachedToken: cached.bootToken, currentToken: currentToken) {
                 logger.info().log("Using existing HID connection for simulator \(simulator.udid)")
                 return cached.hid
             }
-            // The simulator was re-booted (or the boot marker is
-            // unreadable) since the connection was made: the cached
+            // The simulator was re-booted (or the boot identity is
+            // unknowable) since the connection was made: the cached
             // handle's mach port is dead and must not be sent through.
-            logger.info().log("Boot token changed for simulator \(simulator.udid); discarding cached HID connection")
+            logger.info().log("Boot identity changed for simulator \(simulator.udid) (cached: \(cached.bootToken); current: \(currentToken)); discarding cached HID connection")
             hidConnections.removeValue(forKey: simulator.udid)
         }
 
