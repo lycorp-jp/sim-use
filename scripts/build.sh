@@ -467,19 +467,28 @@ function resign_xcframework() {
   fi
 }
 
-function remove_xcode_rpaths() {
+function remove_rpaths_matching() {
   local target="$1"
+  local pattern="$2"
   if [[ ! -f "$target" ]]; then
     return
   fi
 
   local rpaths
-  rpaths=$(otool -l "$target" 2>/dev/null | awk 'BEGIN{r=0} /LC_RPATH/{r=1} r==1 && /path/{print $2; r=0}' | grep "/Applications/Xcode" || true)
+  rpaths=$(otool -l "$target" 2>/dev/null | awk 'BEGIN{r=0} /LC_RPATH/{r=1} r==1 && /path/{print $2; r=0}' | grep "$pattern" || true)
   if [[ -n "$rpaths" ]]; then
     while IFS= read -r path; do
       install_name_tool -delete_rpath "$path" "$target" || true
     done <<< "$rpaths"
   fi
+}
+
+function remove_xcode_rpaths() {
+  remove_rpaths_matching "$1" "/Applications/Xcode"
+}
+
+function remove_build_products_rpaths() {
+  remove_rpaths_matching "$1" "build_products"
 }
 
 function sanitize_framework_rpaths() {
@@ -589,6 +598,16 @@ function build_sim_use_executable() {
 
   # Strip any Xcode toolchain rpaths that can trigger Homebrew relocation
   remove_xcode_rpaths "${executable_dest}"
+
+  # Strip the dev-loop rpaths Package.swift emits for the SwiftBuild-backend
+  # toolchains (build_products/… XCFramework slices; one entry per framework
+  # is CWD-relative). dyld searches them BEFORE the appended
+  # @executable_path/Frameworks, so a shipped binary run from a directory
+  # holding dev-built frameworks — this repository's root, for one — would
+  # silently load those instead of the bundled ones (brew ad-hoc resigns the
+  # binary, so no library validation blocks the swap). Dev builds keep the
+  # entries; only the staged release binary is scrubbed.
+  remove_build_products_rpaths "${executable_dest}"
 
   # Verify rpath configuration
   print_info "Verifying rpath configuration..."

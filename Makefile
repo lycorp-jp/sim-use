@@ -42,6 +42,7 @@ sync-skills:
 	@rsync -a --delete skills/sim-use/ Sources/SimUse/Resources/skills/sim-use/
 
 build: sync-skills
+	@./scripts/stage-fb-frameworks.sh
 	@$(call run_swift,swift build)
 
 # Refresh the Viewer SPA resource bundle. The output is committed so
@@ -55,6 +56,7 @@ viewer:
 # with and without xcsift; the report only renders when xcsift is
 # there to read it.
 test: sync-skills
+	@./scripts/stage-fb-frameworks.sh
 	@$(call run_swift,swift test --enable-code-coverage,--coverage)
 
 # Run both platforms in sequence (iOS then Android), continuing past a

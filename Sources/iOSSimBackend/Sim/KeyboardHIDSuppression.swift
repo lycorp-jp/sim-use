@@ -3,19 +3,27 @@ import Foundation
 import SimUseCore
 
 /// Detects the Xcode-27-era `dtuhidd` daemon, which takes over the
-/// simulator's HID keyboard service and silently drops the legacy
-/// `SimDeviceLegacyHIDClient` keyboard path that `sim-use type` (and the
-/// `key` family) rely on. When it is active, HID key injection is a no-op,
-/// so callers fail loudly with a pointer to the `paste --via-menu`
-/// workaround instead of typing into the void.
+/// simulator's HID services and silently drops the legacy
+/// `SimDeviceLegacyHIDClient` path that `sim-use type` (and the `key`
+/// family) rely on. When it is active, HID key injection may be a no-op,
+/// so callers fail loudly with recovery steps instead of typing into the
+/// void.
+///
+/// The disconnection is decided at simulator *boot*: a simulator booted
+/// while Device Hub is open loses the legacy HID (on CoreSimulator 1169.1+
+/// that includes *touch*, not just keyboard — and touch has no guard, taps
+/// simply report success without landing); a simulator booted clean keeps
+/// working even if Device Hub attaches later. This guard only sees
+/// "dtuhidd running now", so it is deliberately conservative and can
+/// false-positive in the attached-after-boot state — hence the env
+/// override.
 ///
 /// `dtuhidd` runs inside each booted simulator's `launchd_sim` domain, so we
 /// scope detection to the target UDID by matching the daemon's parent
 /// `launchd_sim` bootstrap path against the device UDID.
 ///
-/// See facebook/idb "Detect when dtuhidd suppresses the legacy keyboard HID"
-/// (2026-06). Tracking issue: Xcode 27 support
-/// (github.com/lycorp-jp/sim-use/issues/84).
+/// Work record: docs/ai/xxxx-xcode27-support/README.md. Superseded by
+/// upstream idb's DTUHID transport once we migrate.
 enum KeyboardHIDSuppression {
     /// Environment override: set to a non-empty value to skip the guard and
     /// attempt keyboard HID anyway.
@@ -44,22 +52,27 @@ enum KeyboardHIDSuppression {
     static func workaroundMessage(udid: String) -> String {
         """
         Keyboard HID is suppressed by dtuhidd (Xcode 27 / new Simulator runtime).
-        `type` is a silent no-op while dtuhidd is active (Device Hub open, or a
-        CoreDevice HID client attached): the legacy keyboard HID path is disconnected.
+        dtuhidd is active (Device Hub open, or a CoreDevice HID client attached).
+        If this simulator was BOOTED while Device Hub was open, the legacy HID is
+        disconnected: `type` is a silent no-op, and on CoreSimulator 1169.1+ `tap`
+        is too - taps report success without landing.
 
         Fixes, in order of preference:
           1. Quit Device Hub, then re-boot the simulator. A fresh boot with no
-             CoreDevice HID client reconnects the legacy keyboard and `type` works
-             (verified on iOS 27). A live re-boot is required - the legacy service
-             is disconnected at boot, so closing Device Hub alone is not enough:
+             CoreDevice HID client keeps the legacy HID connected and `type`/`tap`
+             work (verified on iOS 27). A live re-boot is required - the
+             disconnection is decided at boot, so closing Device Hub alone is not
+             enough:
                xcrun simctl shutdown \(udid) && xcrun simctl boot \(udid)
              (`simctl boot` is headless; `open -a Simulator` shows the window -
              the classic Simulator.app does not trigger dtuhidd, only Device Hub does.)
-          2. Or use the touch-driven pasteboard path (bypasses keyboard HID):
+          2. Or use the touch-driven pasteboard path (bypasses keyboard HID; only
+             helps when the sim was booted clean, i.e. touch still lands):
                sim-use tap <target> --udid \(udid)
                sim-use paste "<text>" --via-menu --target-id <AXUniqueId> --udid \(udid)
 
-        Set \(skipCheckEnvVar)=1 to attempt typing anyway.
+        If Device Hub attached AFTER this simulator booted, typing still works -
+        set \(skipCheckEnvVar)=1 to skip this guard and type anyway.
         """
     }
 
