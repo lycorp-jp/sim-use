@@ -27,10 +27,15 @@ enum HIDSendDeadline {
         operation: @escaping @Sendable () async throws -> T,
         onTimeout makeTimeoutError: @escaping @Sendable () -> Error
     ) async throws -> T {
-        try await withThrowingTaskGroup(of: T.self) { group in
+        // Saturate instead of trapping on the ms→ns conversion: any
+        // parseable SIM_USE_HID_SEND_TIMEOUT_MS reaches this multiply,
+        // and an absurdly large value means "effectively no deadline"
+        // (UInt64.max ns ≈ 584 years), not a crash.
+        let (nanoseconds, overflow) = milliseconds.multipliedReportingOverflow(by: 1_000_000)
+        return try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask { try await operation() }
             group.addTask {
-                try await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+                try await Task.sleep(nanoseconds: overflow ? .max : nanoseconds)
                 throw makeTimeoutError()
             }
             defer { group.cancelAll() }

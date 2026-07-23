@@ -23,6 +23,19 @@ struct HIDSendDeadlineTests {
         #expect(value == 42)
     }
 
+    @Test("An overflowing millisecond value saturates instead of trapping")
+    func hugeTimeoutSaturates() async throws {
+        // Any parseable SIM_USE_HID_SEND_TIMEOUT_MS reaches the ms→ns
+        // multiply; UInt64.max used to trap at runtime. It must behave
+        // as "effectively no deadline" instead.
+        let value = try await HIDSendDeadline.run(milliseconds: .max) {
+            7
+        } onTimeout: {
+            TimeoutMarker()
+        }
+        #expect(value == 7)
+    }
+
     @Test("A fast operation's error propagates unchanged")
     func fastOperationErrorPropagates() async {
         struct PerformFailure: Error {}

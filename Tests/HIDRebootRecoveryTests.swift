@@ -43,8 +43,17 @@ struct HIDRebootRecoveryTests {
 
         // 2. Reboot the simulator out-of-band; the daemon keeps running.
         _ = try await CommandRunner.run("xcrun simctl shutdown \(udid)", timeout: 120)
-        _ = try await CommandRunner.run("xcrun simctl boot \(udid)", timeout: 120)
-        _ = try await CommandRunner.run("xcrun simctl bootstatus \(udid)", timeout: 180)
+        do {
+            _ = try await CommandRunner.run("xcrun simctl boot \(udid)", timeout: 120)
+            _ = try await CommandRunner.run("xcrun simctl bootstatus \(udid)", timeout: 180)
+        } catch {
+            // Leaving the shared simulator shut down would cascade
+            // unrelated failures through the rest of the sequential
+            // run; best-effort re-boot before surfacing the real error.
+            _ = try? await CommandRunner.run("xcrun simctl boot \(udid)", allowFailure: true, timeout: 120)
+            _ = try? await CommandRunner.run("xcrun simctl bootstatus \(udid)", allowFailure: true, timeout: 180)
+            throw error
+        }
 
         // 3. Tap through the SAME daemon — no daemon stop, no respawn.
         // With a stale connection this reported success while the count
