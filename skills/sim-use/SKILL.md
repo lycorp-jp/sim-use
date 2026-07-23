@@ -61,11 +61,11 @@ sim-use screenshot --device <UDID> --output after.png
 
 Every byte of command output you read costs context. Defaults that keep the loop cheap:
 
-- Prefer the default text outline over `--json`. The outline carries everything a tap needs (`@N` / `#<id>` aliases, roles, frames, states); reach for `--json` only when you need full untruncated text (the outline truncates labels at 60 graphemes, `value=` at 30).
+- Prefer the default text outline over `--json`. The outline carries everything a tap needs (`@N` / `#<id>` aliases, roles, frames, states); reach for `--json` when you need structured fields for coordinate math (`entries[].frame`, `screen`) or full untruncated text (the outline truncates labels at 60 graphemes, `value=` at 30).
 - When you do use `--json`, add `--no-raw`. `data.raw` is the raw accessibility tree — ~3-10x the size of the rest of the envelope and useful only for debugging sim-use itself.
 - One `ui` per action: the Verify read of step N is the Observe read of step N+1. Don't run a second `ui` in between.
 - Verify with the text outline, not a screenshot. Reading a screenshot costs ~1,500 tokens; take one only when the check is genuinely visual (colors, images, layout).
-- To wait out a transition, prefer `tap --label 'X' --wait-timeout 3` (polls for the element) over re-running `ui` in a loop.
+- On iOS, to wait out a transition, prefer `tap --label 'X' --wait-timeout 3` (polls for the element) over re-running `ui` in a loop. Android `tap` has no `--wait-timeout`; use `sleep` between commands instead.
 - For a known multi-step sequence on iOS, use `sim-use ios batch` (see `references/batch-reference.md`) — one invocation, one output.
 
 ### Common moves

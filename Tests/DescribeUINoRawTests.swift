@@ -56,4 +56,29 @@ struct DescribeUINoRawTests {
         let withoutRaw = try encode(raw: nil)
         #expect(!withoutRaw.contains("\"raw\""))
     }
+
+    @Test("Android DescribeUIResult omits the raw key when the tree was not built")
+    func androidEncodingOmitsRawKey() throws {
+        func encode(raw: JSONValue?) throws -> String {
+            let result = DescribeUIResult(
+                platform: .android,
+                raw: raw,
+                outline: "App: Demo  1080x2400\n",
+                entries: [],
+                lists: [],
+                screen: Outline.Frame(x: 0, y: 0, width: 1080, height: 2400),
+                appLabel: "Demo",
+                appPackage: "com.example.demo"
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            return String(decoding: try encoder.encode(result), as: UTF8.self)
+        }
+
+        let withRaw = try encode(raw: .object(["className": .string("android.widget.FrameLayout")]))
+        #expect(withRaw.contains("\"raw\""))
+
+        let withoutRaw = try encode(raw: nil)
+        #expect(!withoutRaw.contains("\"raw\""))
+    }
 }
