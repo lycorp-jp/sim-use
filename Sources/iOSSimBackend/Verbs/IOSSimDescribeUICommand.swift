@@ -64,6 +64,12 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
 
     @OptionGroup public var json: JSONOutputOptions
 
+    @Flag(
+        name: .customLong("no-raw"),
+        help: "With --json, omit the raw accessibility tree (`data.raw`) from the envelope. `outline` / `entries` / `lists` are unaffected; on complex screens this cuts the payload by roughly 3-10x."
+    )
+    public var noRaw: Bool = false
+
     public var jsonOutput: Bool { json.enabled }
 
     /// Result shape is structured under `raw` rather than being the bare
@@ -211,10 +217,11 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         )
         let jsonData = fetchResult.data
         // Only build the JSONValue tree when the client asked for it
-        // (`--json`). On a complex screen the parse is ~30 ms and
-        // shuffling it across the daemon socket adds another ~80 ms.
-        // `outline` + `entries` cover every other consumer.
-        let tree: JSONValue? = jsonOutput ? try JSONValue.decode(from: jsonData) : nil
+        // (`--json` without `--no-raw`). On a complex screen the parse
+        // is ~30 ms and shuffling it across the daemon socket adds
+        // another ~80 ms. `outline` + `entries` cover every other
+        // consumer.
+        let tree: JSONValue? = (jsonOutput && !noRaw) ? try JSONValue.decode(from: jsonData) : nil
 
         // Decode the same bytes into the typed tree for outline rendering.
         // `--point` returns a single element object instead of a root
