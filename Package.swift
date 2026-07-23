@@ -12,17 +12,23 @@ import PackageDescription
 // relative fallback for custom `--scratch-path` runs started from the
 // repository root. dyld ignores entries that do not resolve, and the
 // classic-toolchain layouts keep working through their own rpaths.
+// These entries serve the dev loop only: release staging strips them from
+// the shipped binary (`remove_build_products_rpaths` in scripts/build.sh),
+// which relies on `@executable_path/Frameworks` instead.
 let fbFrameworkSliceDirs = [
     "FBControlCore", "FBSimulatorControl", "FBDeviceControl", "XCTestBootstrap",
 ].map { "build_products/XCFrameworks/\($0).xcframework/macos-arm64_x86_64" }
 
 // upLevels: how many directories separate the linked product from the
-// repository root (per supported layout).
-func fbRPathFlags(upLevels: [Int]) -> [String] {
+// repository root (per supported layout). includeCWDFallback adds the bare
+// (working-directory-relative) slice paths; pass false where those entries
+// are already inherited from a dependency's flags, or ld warns about the
+// duplicates.
+func fbRPathFlags(upLevels: [Int], includeCWDFallback: Bool = true) -> [String] {
     fbFrameworkSliceDirs.flatMap { slice -> [String] in
         let entries = upLevels.map { up in
             "@loader_path/" + String(repeating: "../", count: up) + slice
-        } + [slice]
+        } + (includeCWDFallback ? [slice] : [])
         return entries.flatMap { ["-Xlinker", "-rpath", "-Xlinker", $0] }
     }
 }
@@ -128,15 +134,16 @@ let package = Package(
                 .unsafeFlags(["-parse-as-library"])
             ],
             linkerSettings: [
-                // For XCFrameworks, rpath can often be just @executable_path
-                // if SPM handles embedding correctly, or you might need to adjust
-                // if you manually copy them later for distribution.
-                // The executable sits 3 (classic) or 4 (SwiftBuild) levels
-                // below the repository root.
+                // @executable_path covers frameworks staged next to the
+                // binary; release staging replaces it with
+                // @executable_path/Frameworks (scripts/build.sh). The
+                // fbRPathFlags entries serve the dev loop — the executable
+                // sits 3 (classic) or 4 (SwiftBuild) levels below the
+                // repository root.
                 .unsafeFlags([
                     "-Xlinker", "-dead_strip",
                     "-Xlinker", "-headerpad_max_install_names",
-                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path" // Simpler rpath for SPM-handled XCFrameworks
+                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path"
                 ] + fbRPathFlags(upLevels: [3, 4]))
             ],
             plugins: ["VersionPlugin"]
@@ -162,8 +169,10 @@ let package = Package(
             linkerSettings: [
                 // The test bundle binary sits 6 (classic) or 7 (SwiftBuild)
                 // levels below the repository root
-                // (…/SimUseTests.xctest/Contents/MacOS/SimUseTests).
-                .unsafeFlags(fbRPathFlags(upLevels: [6, 7]))
+                // (…/SimUseTests.xctest/Contents/MacOS/SimUseTests). The
+                // CWD-relative fallback is inherited from the SimUse
+                // dependency's flags — don't repeat it here.
+                .unsafeFlags(fbRPathFlags(upLevels: [6, 7], includeCWDFallback: false))
             ]
         ),
         .testTarget(

@@ -10,6 +10,9 @@
 # which keeps working through its own rpaths.
 set -euo pipefail
 
+# Run relative to the repository root regardless of the caller's CWD.
+cd "$(dirname "$0")/.."
+
 # Scope: the dev loop (Debug builds via make/the E2E runners). Pass a
 # configuration as $1 for other cases (e.g. a manual
 # `swift build -c release` needs "Release"); local release-config builds

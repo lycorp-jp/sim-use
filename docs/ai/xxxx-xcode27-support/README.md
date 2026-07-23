@@ -109,7 +109,7 @@ Consequences:
 
 ## Spike 1 — SimulatorKit path fix (validated; becomes the near-term PR)
 
-Changes (in the working tree as of 2026-07-22, not yet committed):
+Changes (shipped in PR #56):
 
 - `patches/idb/xcode27-simulatorkit-sharedframeworks.patch` — backport of
   upstream `98110129` onto our pinned idb ref: prefer
@@ -161,10 +161,16 @@ with Xcode 26.6) and both fixed in the step-1 PR:
    stages `PackageFrameworks/` symlinks as belt-and-suspenders (wired into
    `make build`, `make test`, and both E2E runners). Known residual gap:
    an external `--scratch-path` run started from *outside* the repo root
-   has no resolvable relative anchor. Adjacent watch item: the release
-   build (`scripts/local-release.sh`) would hit the same missing-rpath
-   issue if ever cut on a SwiftBuild-backend toolchain — releases are on
-   26.x today; re-check before moving the release toolchain.
+   has no resolvable relative anchor. The rpath entries are deliberately
+   dev-loop-only: release staging strips them
+   (`remove_build_products_rpaths` in `scripts/build.sh`) because a shipped
+   binary would otherwise search `build_products/…` — including a
+   CWD-relative entry — ahead of `@executable_path/Frameworks` and load
+   dev-built frameworks when run from a checkout. Adjacent watch item: the
+   release build (`scripts/local-release.sh`) would hit the same
+   missing-rpath issue if ever cut on a SwiftBuild-backend toolchain —
+   releases are on 26.x today; re-check before moving the release
+   toolchain.
 2. **In-test `swift build --show-bin-path` deadlocks**: the E2E suites used
    it (via `TestUtilities.getSimUsePath()`) to locate the sim-use binary
    while running *inside* `swift test`; the SwiftBuild backend holds the

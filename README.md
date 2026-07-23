@@ -124,6 +124,10 @@ The supported workflow for now is **classic Simulator.app / headless
   `xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>`.
 - Xcode 27 no longer bundles Simulator.app; open the one from an Xcode 26.x
   install to view simulators — it does not trigger the suppression.
+- The SimulatorKit relocation fix lives in the FB* XCFrameworks (applied via
+  `patches/idb/`), not in the Swift sources — if you built the XCFrameworks
+  before this change, re-run `./scripts/build.sh dev` or the pre-flight will
+  pass while the framework load still fails.
 - Full Device Hub support is planned via a migration to current upstream
   idb (work record: `docs/ai/xxxx-xcode27-support/README.md`).
 
