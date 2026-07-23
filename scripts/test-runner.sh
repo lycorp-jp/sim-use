@@ -63,6 +63,7 @@ show_usage() {
     echo "  TypeTests           Run only type tests"
     echo "  ButtonTests         Run only button tests"
     echo "  GestureTests        Run only gesture tests"
+    echo "  HIDRebootRecoveryTests Run only the reboot recovery test (reboots the simulator)"
     echo "  ListSimulatorsTests Run only list simulators tests"
     echo ""
     echo "Examples:"
@@ -107,7 +108,7 @@ while [[ $# -gt 0 ]]; do
             VERBOSE=true
             shift
             ;;
-        SwipeTests|TapTests|KeyTests|TouchTests|TypeTests|ButtonTests|GestureTests|ListSimulatorsTests)
+        SwipeTests|TapTests|KeyTests|TouchTests|TypeTests|ButtonTests|GestureTests|HIDRebootRecoveryTests|ListSimulatorsTests)
             TEST_FILTER="$1"
             shift
             ;;
@@ -331,6 +332,7 @@ run_tests() {
             "ButtonTests"
             "DescribeUITests"
             "GestureTests"
+            "HIDRebootRecoveryTests"
             "InitTests"
             "KeyboardStateTests"
             "KeyComboTests"
