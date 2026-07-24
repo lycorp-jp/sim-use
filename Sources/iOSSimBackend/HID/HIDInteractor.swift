@@ -174,6 +174,18 @@ public struct HIDInteractor {
         }
 
         logger.info().log("Creating new HID connection for simulator \(simulator.udid)...")
+        // Upstream does not expose which transport its auto-selection
+        // resolved to, so log the input signals instead: the forced
+        // override when present, otherwise the dtuhidd-presence fact the
+        // selection keys on (a ~1–2 ms sysctl probe we already pay for
+        // the boot-identity token).
+        if let transportOverride {
+            logger.info().log("HID transport forced via SIM_USE_HID_TRANSPORT: \(transportOverride)")
+        } else {
+            let presence = dtuhiddPresenceHint(forUDID: simulator.udid)
+                .map { $0 ? "present" : "absent" } ?? "unknown"
+            logger.info().log("HID transport: auto (dtuhidd in this simulator's process tree: \(presence); upstream selects DTUHID when present)")
+        }
         // Bare construction, not `simulator.connectToHID()`: upstream's
         // lifecycle wrapper keeps its own per-simulator cache with no
         // boot-identity gate, which would resurrect exactly the stale
@@ -186,6 +198,21 @@ public struct HIDInteractor {
         logger.info().log("HID connection created and cached for simulator \(simulator.udid)")
 
         return hid
+    }
+
+    /// Whether a `dtuhidd` currently lives in the simulator's
+    /// `launchd_sim` subtree — the signal upstream's transport
+    /// auto-selection keys on. Diagnostic only (logged above); nil when
+    /// the process table cannot be read.
+    private static func dtuhiddPresenceHint(forUDID udid: String) -> Bool? {
+        guard let table = LaunchdSimLocator.processTable(),
+              let launchdSim = LaunchdSimLocator.record(
+                  forUDID: udid, in: table,
+                  argumentsForPID: LaunchdSimLocator.argumentBlob(forPID:))
+        else {
+            return nil
+        }
+        return table.contains { $0.ppid == launchdSim.pid && $0.command == "dtuhidd" }
     }
 
     public static func clearHIDConnections() {
