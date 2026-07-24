@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The agent-eval suite can now pin exactly which sim-use binary a run evaluates: `make eval ARGS="-b <path>"` / `scripts/eval.sh --sim-use <path>` / `run.py --sim-use <path>` (default remains whatever `sim-use` resolves to on PATH). The wrapper and runner print `sim-use under test: <real path> (<version>)` up front and the report header records it, so a run can never silently exercise the wrong binary — and development builds under `.build/` can be evaluated directly. New repo skill `.claude/skills/run-evals/` orchestrates the whole flow for agents and contributors: environment prep (Device Hub closed, fixtures installed), binary selection, cost confirmation, and verdict triage; `e2e/agent-evals/README.md` documents the new prereqs and flags.
+
 ## [0.11.0] - 2026-07-23
 
 ### Added

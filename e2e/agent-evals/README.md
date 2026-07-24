@@ -24,8 +24,31 @@ make eval PLATFORM=ios TAGS=release         # one platform / tag
 make eval ARGS="-y -p android"              # -y skips the prompt (CI / release gate)
 ```
 
-Prereq the wrapper reminds you about: the Playground fixture must be installed
-(`scripts/test-runner.sh -b` for iOS; `make e2e-android` for Android).
+Prereqs the wrapper reminds you about:
+
+- The Playground fixture must be installed (`scripts/test-runner.sh -b` for
+  iOS; `make e2e-android` for Android).
+- On Xcode 27, Device Hub must be closed (`pgrep dtuhidd` empty) and the
+  simulator booted without it — a simulator booted while Device Hub is open
+  has legacy HID disconnected, and sim-use's guard will (correctly) fail
+  every case on it.
+
+### Which sim-use is under test
+
+Everything in a run — device probing, the agent's commands, the verification
+layer — resolves `sim-use` from PATH, so by default you are evaluating the
+installed binary. To evaluate a specific build (e.g. a debug build during
+development), pin it explicitly:
+
+```bash
+make eval ARGS="-b .build/out/Products/Debug/sim-use"       # SwiftBuild layout
+scripts/eval.sh --sim-use .build/debug/sim-use -p ios       # classic layout
+python3 e2e/agent-evals/run.py --platform ios --tags quick --sim-use <path>
+```
+
+The wrapper and runner both print `sim-use under test: <real path>
+(<version>)` and the report header records it — check that line before
+trusting any verdict.
 
 Or call the runner directly for full control:
 
