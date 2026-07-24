@@ -130,10 +130,15 @@ public struct HIDInteractor {
     private static func performHIDEventOnce(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
         logger.info().log("Performing HID event...")
         let timeoutMs = sendTimeoutMs
+        // Capture the hid handle, not the whole Session: FBSimulatorHID is
+        // @unchecked Sendable upstream, while Session carries the
+        // non-Sendable FBSimulator and would trip strict-concurrency
+        // checking inside the @Sendable deadline closure.
+        let hid = session.hid
         if timeoutMs > 0 {
             let udid = session.simulatorUDID
             try await HIDSendDeadline.run(milliseconds: timeoutMs) {
-                try await session.hid.send(event: event, logger: logger)
+                try await hid.send(event: event, logger: logger)
             } onTimeout: {
                 CLIError(errorDescription: """
                 HID event delivery timed out after \(timeoutMs) ms; the connection to \
