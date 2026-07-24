@@ -339,7 +339,7 @@ Press Ctrl+C to stop; sim-use finalises the MP4 before exiting.
 ```bash
 sim-use ui --device $UDID                      # compact outline (default)
 sim-use ui --json --device $UDID               # structured envelope
-sim-use ui --json --no-raw --device $UDID      # envelope without data.raw (3-10x smaller)
+sim-use ui --json --no-raw --device $UDID      # envelope without the raw tree (much smaller)
 sim-use ui --point 100,200 --device $UDID      # specific point (same UI space as outline frames)
 ```
 

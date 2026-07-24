@@ -18,7 +18,7 @@ public struct AndroidDescribeUICommand: SimUseExecutableCommand {
 
     @Flag(
         name: .customLong("no-raw"),
-        help: "With --json, omit the raw bridge tree (`data.raw`) from the envelope. `outline` / `entries` / `lists` are unaffected; on complex screens this cuts the payload by roughly 3-10x."
+        help: "With --json, omit the raw bridge tree (`data.raw`) from the envelope. `outline` / `entries` / `lists` are unaffected; on real app screens the raw tree typically dominates the payload."
     )
     public var noRaw: Bool = false
 
