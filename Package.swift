@@ -16,8 +16,19 @@ import PackageDescription
 // 2. The static archives defer their CoreSimulator /
 //    AccessibilityPlatformTranslation class references to the final link,
 //    which must weak-link the .tbd stubs (the real frameworks are loaded
-//    at runtime by FBSimulatorControlFrameworkLoader). `-ObjC` keeps the
-//    archives' ObjC categories alive.
+//    at runtime by FBSimulatorControlFrameworkLoader).
+//
+// The ObjC-heavy archives are `-force_load`ed (per archive, NOT a blanket
+// `-ObjC`): their category-only members (e.g. FBControlCoreLogger+OSLog)
+// export no referenced symbol, so a normal archive link drops them and
+// the first runtime use dies with "unrecognized selector"
+// (+[FBControlCoreLoggerFactory osLoggerWithLevel:], reproduced).
+// CompanionUtilities is deliberately NOT force-loaded: it is pure Swift
+// (everything it provides is pulled in by ordinary symbol references),
+// and force-loading it makes Xcode 26.5-built binaries abort with
+// "freed pointer was not the last allocation" — a Swift task-allocator
+// trap in unrelated async code (bisected per-archive; Xcode 27 B4 builds
+// don't trip it).
 //
 // Both flag sets use `Context.packageDirectory` because SwiftPM resolves
 // relative compiler/linker arguments against an unspecified working
@@ -36,7 +47,15 @@ let privateModuleMapFlags: [String] = ["-Xcc", "-I\(privateHeadersDir)"] + [
     ["-Xcc", "-fmodule-map-file=\(privateHeadersDir)/\($0)/module.modulemap"]
 }
 
-let fbLinkerFlags: [String] = ["-Xlinker", "-ObjC"] + [
+let fbLinkerFlags: [String] = [
+    "FBControlCore", "FBSimulatorControl", "XCTestBootstrap",
+].flatMap {
+    [
+        "-Xlinker", "-force_load",
+        "-Xlinker",
+        "\(Context.packageDirectory)/build_products/XCFrameworks/\($0).xcframework/macos-arm64_x86_64/\($0).framework/Versions/A/\($0)",
+    ]
+} + [
     "CoreSimulator", "AccessibilityPlatformTranslation",
 ].flatMap {
     ["-Xlinker", "-weak_library", "-Xlinker", "\(privateHeadersDir)/\($0)/\($0).tbd"]

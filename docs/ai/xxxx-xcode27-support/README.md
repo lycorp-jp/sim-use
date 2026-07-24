@@ -488,10 +488,12 @@ the change (details in the CHANGELOG entry and the branch diff):
   FBDeviceControl is dropped — nothing in sim-use ever imported it.
 - **Package.swift**: binary target swap (+CompanionUtilities,
   −FBDeviceControl); `-Xcc -fmodule-map-file` wiring for the five private
-  Clang modules; `-ObjC` + `-weak_library` CoreSimulator/APT tbds at the
-  final link. The entire SwiftBuild-rpath machinery (slice rpaths,
-  `stage-fb-frameworks.sh`, release rpath stripping) is retired — static
-  linking dissolves the dlopen problem it existed for.
+  Clang modules; per-archive `-force_load` for the three ObjC-bearing
+  frameworks + `-weak_library` CoreSimulator/APT tbds at the final link
+  (see the linking addendum below for why NOT a blanket `-ObjC` and why
+  CompanionUtilities is excluded). The entire SwiftBuild-rpath machinery
+  (slice rpaths, `stage-fb-frameworks.sh`, release rpath stripping) is
+  retired — static linking dissolves the dlopen problem it existed for.
 - **API migration**: FBFuture bridging deleted (`FutureBridge`,
   `BridgeQueues`); HID events are Swift enums (`.touch(direction:x:y:)` …),
   sent via `hid.send(event:logger:)`; HID connection is
@@ -515,3 +517,39 @@ the change (details in the CHANGELOG entry and the branch diff):
   (Hub open, dtuhidd at +0 s): tap+type **deliver via auto→DTU** where
   v0.11.0 refused; forced `dtuhid` delivers; forced `indigo` keyboard
   fail-louds with upstream's `keyboardSuppressedByActiveDTUHIDD`.
+
+## Addendum (2026-07-24, later): archive linking — why per-archive `-force_load`, not `-ObjC`
+
+The Xcode 26.5 leg of the toolchain matrix caught two linking failure
+modes that cancel each other out; the shipped configuration threads the
+needle. Symptoms and bisection, for the record:
+
+- **Blanket `-ObjC` (the spike-recipe default): 26.5-built binaries
+  abort** with `freed pointer was not the last allocation` (a Swift
+  task-allocator LIFO trap) inside *unrelated* async code — first seen in
+  `ViewerAPIHandlers.run`, deterministic from the first call. Per-archive
+  `-force_load` bisection attributes it to **CompanionUtilities** (pure
+  Swift, 14 members); the other three archives force-load cleanly. Beta 4
+  builds of the identical source never trip it. Mechanism not root-caused
+  (no `+load` side effects beyond a sysctl read, no cross-archive member
+  duplication — both checked); treated as a 26.5-toolchain codegen/runtime
+  interaction and routed around.
+- **No force-load at all: category-only members are dropped** and the
+  first runtime use dies with
+  `+[FBControlCoreLoggerFactory osLoggerWithLevel:]: unrecognized
+  selector` (from `FBControlCoreLogger+OSLog.o`) — reproduced via
+  `OrientationRecoveryTests` once the `-ObjC` crash was out of the way.
+  Upstream's own SwiftPM consumers don't hit this because they build the
+  FB targets from source (all objects linked); AXe doesn't because its
+  fork still produces dynamic frameworks.
+- **Shipped shape**: `-force_load` FBControlCore + FBSimulatorControl +
+  XCTestBootstrap (their ObjC categories must survive), ordinary archive
+  link for CompanionUtilities (pure Swift — everything it provides is
+  symbol-referenced). 1116 unit tests + 21/21 E2E green on both 26.5 and
+  Beta 4 with this configuration.
+
+Same leg also fixed strict-concurrency noise the 26.5 compiler surfaces
+(`FBSimulatorHIDEvent` retroactive `@unchecked Sendable` — upstream never
+declared the conformance on what is a pure value tree — and capturing the
+`@unchecked Sendable` HID handle instead of the whole session in the
+send-deadline closure).
