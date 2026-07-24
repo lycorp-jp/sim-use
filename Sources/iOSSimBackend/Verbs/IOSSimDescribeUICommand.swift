@@ -64,6 +64,12 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
 
     @OptionGroup public var json: JSONOutputOptions
 
+    @Flag(
+        name: .customLong("no-raw"),
+        help: "With --json, omit the raw accessibility tree (`data.raw`) from the envelope. `outline` / `entries` / `lists` are unaffected; on real app screens the raw tree typically dominates the payload."
+    )
+    public var noRaw: Bool = false
+
     public var jsonOutput: Bool { json.enabled }
 
     /// Result shape is structured under `raw` rather than being the bare
@@ -76,9 +82,9 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
     /// `DESCRIBE_UI_OUTLINE.md` §4.
     public struct ExecutionResult: Codable, CommandAdvisoryProviding {
         public let platform: String
-        /// Raw a11y tree passthrough. Optional because the daemon path
-        /// skips encoding it when the client didn't request `--json` —
-        /// the ~200 KB tree adds 80 ms of round-trip cost otherwise.
+        /// Raw a11y tree passthrough. `nil` when the client didn't
+        /// request `--json`, or opted out with `--no-raw` — the
+        /// ~200 KB tree adds 80 ms of round-trip cost otherwise.
         public let raw: JSONValue?
         public let outline: String
         public let entries: [Outline.Entry]
@@ -210,11 +216,11 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             seedCellHeight: seedCellHeight
         )
         let jsonData = fetchResult.data
-        // Only build the JSONValue tree when the client asked for it
-        // (`--json`). On a complex screen the parse is ~30 ms and
-        // shuffling it across the daemon socket adds another ~80 ms.
-        // `outline` + `entries` cover every other consumer.
-        let tree: JSONValue? = jsonOutput ? try JSONValue.decode(from: jsonData) : nil
+        // Only build the JSONValue tree when the client will actually
+        // see it. On a complex screen the parse is ~30 ms and shuffling
+        // it across the daemon socket adds another ~80 ms. `outline` +
+        // `entries` cover every other consumer.
+        let tree: JSONValue? = (jsonOutput && !noRaw) ? try JSONValue.decode(from: jsonData) : nil
 
         // Decode the same bytes into the typed tree for outline rendering.
         // `--point` returns a single element object instead of a root

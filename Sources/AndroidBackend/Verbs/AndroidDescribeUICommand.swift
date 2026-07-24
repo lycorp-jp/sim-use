@@ -16,6 +16,12 @@ public struct AndroidDescribeUICommand: SimUseExecutableCommand {
     @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data: DescribeUIResult}` envelope (compact, sortedKeys). Includes the raw bridge tree under `data.raw`.")
     public var jsonOutput: Bool = false
 
+    @Flag(
+        name: .customLong("no-raw"),
+        help: "With --json, omit the raw bridge tree (`data.raw`) from the envelope. `outline` / `entries` / `lists` are unaffected; on real app screens the raw tree typically dominates the payload."
+    )
+    public var noRaw: Bool = false
+
     @Flag(name: .customLong("include-offscreen"), help: "Include elements whose bounds fall outside the screen (default: filter them out).")
     public var includeOffscreen: Bool = false
 
@@ -34,8 +40,8 @@ public struct AndroidDescribeUICommand: SimUseExecutableCommand {
             udid: device.resolved,
             includeOffscreen: includeOffscreen,
             // `raw` adds ~50–200 KB to the encoded envelope; only pay
-            // the cost when the caller asked for JSON.
-            includeRaw: jsonOutput
+            // the cost when the caller will actually see it.
+            includeRaw: jsonOutput && !noRaw
         )
     }
 

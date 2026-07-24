@@ -339,8 +339,11 @@ Press Ctrl+C to stop; sim-use finalises the MP4 before exiting.
 ```bash
 sim-use ui --device $UDID                      # compact outline (default)
 sim-use ui --json --device $UDID               # structured envelope
+sim-use ui --json --no-raw --device $UDID      # envelope without the raw tree (much smaller)
 sim-use ui --point 100,200 --device $UDID      # specific point (same UI space as outline frames)
 ```
+
+The `--json` envelope carries the raw accessibility tree under `data.raw` by default; `--no-raw` drops it while keeping `outline` / `entries` / `lists` intact — prefer it in agent loops where the raw tree is only debugging ballast.
 
 The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `Group` regions) and `@N` / `#N` / `#N@M` / `#<id>` alias addressing. When the device is rotated, the `App:` header carries an orientation tag (e.g. `(landscape-right)`) and the `--json` envelope an `orientation` field.
 

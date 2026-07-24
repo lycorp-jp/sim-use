@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `describe-ui --no-raw` (top-level, `ios describe-ui`, and `android describe-ui`): with `--json`, omit the raw accessibility tree from the envelope. `data.raw` typically dominates the payload on real app screens and is only useful for debugging sim-use itself; `outline` / `entries` / `lists` are unaffected.
+- *Keeping output small* section in `skills/sim-use/SKILL.md`: steers agents to prefer the text outline, pair `--json` with `--no-raw`, verify via outline instead of screenshots, reuse the verify read as the next observe, and batch known sequences.
+
 ## [0.11.0] - 2026-07-23
 
 ### Added

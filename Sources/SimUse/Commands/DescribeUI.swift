@@ -69,6 +69,12 @@ struct DescribeUI: SimUseExecutableCommand {
 
     @OptionGroup var json: JSONOutputOptions
 
+    @Flag(
+        name: .customLong("no-raw"),
+        help: "With --json, omit the raw accessibility tree (`data.raw`) from the envelope. `outline` / `entries` / `lists` are unaffected; on real app screens the raw tree typically dominates the payload."
+    )
+    var noRaw: Bool = false
+
     var jsonOutput: Bool { json.enabled }
 
     @Flag(
@@ -124,6 +130,7 @@ struct DescribeUI: SimUseExecutableCommand {
         sub.seedCellHeight = seedCellHeight
         sub.device = device
         sub.json = json
+        sub.noRaw = noRaw
         return sub
     }
 
@@ -136,7 +143,7 @@ struct DescribeUI: SimUseExecutableCommand {
         let result = try AndroidDescribeUICommand.performDescribeUI(
             udid: device.resolved,
             includeOffscreen: includeOffscreen,
-            includeRaw: jsonOutput
+            includeRaw: jsonOutput && !noRaw
         )
         return ExecutionResult(
             platform: result.platform.rawValue,

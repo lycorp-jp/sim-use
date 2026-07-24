@@ -70,7 +70,10 @@ struct ViewerAPIHandlers {
             return .json(400, ["ok": false, "error": "deviceId (or udid) query param is required"])
         }
         do {
-            let result = try await run(arguments: ["describe-ui", "--device", deviceId, "--json"], timeout: 30)
+            // `--no-raw`: the snapshot payload only forwards outline /
+            // entries / lists, and this endpoint is polled continuously
+            // during playback — never pay for the raw-tree transfer.
+            let result = try await run(arguments: ["describe-ui", "--device", deviceId, "--json", "--no-raw"], timeout: 30)
             let envelope = parseEnvelope(result.stdout)
             if let failure = failureResponse(envelope: envelope, result: result) {
                 return failure
