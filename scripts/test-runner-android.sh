@@ -118,9 +118,6 @@ check_prerequisites() {
 
 build_sim_use() {
     print_header "Building sim-use Executable"
-    # Newer SwiftPM layouts need the FB* frameworks staged next to the
-    # products or the CLI cannot dlopen them.
-    ./scripts/stage-fb-frameworks.sh
     swift build
     SIM_USE="$(swift build --show-bin-path)/sim-use"
     if [[ ! -x "$SIM_USE" ]]; then

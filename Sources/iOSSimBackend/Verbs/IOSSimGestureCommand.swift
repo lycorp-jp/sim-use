@@ -197,7 +197,7 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         if let postDelay, postDelay > 0 {
             events.append(FBSimulatorHIDEvent.delay(postDelay))
         }
-        let finalEvent = events.count == 1 ? events[0] : FBSimulatorHIDEvent(events: events)
+        let finalEvent = events.count == 1 ? events[0] : FBSimulatorHIDEvent.composite(events)
         try await HIDInteractor.performHIDEvent(finalEvent, for: device.resolved, logger: logger)
     }
 

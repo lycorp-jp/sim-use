@@ -93,7 +93,7 @@ On Homebrew 6.0.5+, if you see an "untrusted tap" error, run `brew trust lycorp-
 
 ### Build from source
 
-sim-use is a Swift package targeting **macOS 14+**, built with the latest Xcode toolchain. It links against XCFrameworks built from [Meta's idb](https://github.com/facebook/idb), which are produced locally by the build script (they are large and not checked into the repository).
+sim-use is a Swift package targeting **macOS 14+**, built with the latest Xcode toolchain. It links against static XCFrameworks built from [Meta's idb](https://github.com/facebook/idb), which are produced locally by the build script (they are large and not checked into the repository). The idb checkout generates its Xcode project with [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`).
 
 ```bash
 git clone https://github.com/lycorp-jp/sim-use.git
@@ -111,29 +111,27 @@ make test    # run tests
 make clean
 ```
 
+The XCFrameworks are built without library evolution, so their Swift
+modules are locked to the toolchain that produced them — re-run
+`./scripts/build.sh dev` after switching Xcode versions.
+
 ### Xcode 27 (beta) compatibility
 
-sim-use works with Xcode 27 betas that ship `SimulatorKit.framework` in
-`Contents/SharedFrameworks` (Beta 4 and later; Beta 1 shipped without it).
-The supported workflow for now is **classic Simulator.app / headless
-`simctl`, with Device Hub closed**:
+sim-use fully supports Xcode 27 betas that ship `SimulatorKit.framework`
+in `Contents/SharedFrameworks` (Beta 4 and later; Beta 1 shipped without
+it), **including Device Hub workflows**:
 
-- A simulator **booted while Device Hub is open** loses legacy HID input —
-  `type`, and on current CoreSimulator builds (1169.1+) `tap` too. Every HID
-  verb now detects this state and fails with recovery steps instead of
-  reporting success while delivering nothing (a Device Hub *attached after* a
-  clean boot is harmless and is not flagged). Recovery: quit Device Hub, then
-  `xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>`; the error
-  message includes an escape hatch (`SIM_USE_SKIP_DTUHIDD_CHECK=1`) if the
-  detection is ever wrong for your setup.
-- Xcode 27 no longer bundles Simulator.app; open the one from an Xcode 26.x
-  install to view simulators — it does not trigger the suppression.
-- The SimulatorKit relocation fix lives in the FB* XCFrameworks (applied via
-  `patches/idb/`), not in the Swift sources — if you built the XCFrameworks
-  before this change, re-run `./scripts/build.sh dev` or the pre-flight will
-  pass while the framework load still fails.
-- Full Device Hub support is planned via a migration to current upstream
-  idb (work record: `docs/ai/xxxx-xcode27-support/README.md`).
+- The HID transport is selected automatically per simulator boot: a
+  simulator whose legacy HID was suppressed at boot (booted while Device
+  Hub was open) is driven through dtuhidd's CoreDevice HID service, and
+  everything else through the legacy SimulatorKit path. No reboot dance,
+  no guard errors — `tap` / `type` / `swipe` work in both states.
+- `SIM_USE_HID_TRANSPORT=indigo|dtuhid` forces a specific transport for
+  debugging (combine with `SIM_USE_NO_DAEMON=1` — the per-UDID daemon
+  keeps the environment it was first spawned with).
+- Xcode 27 no longer bundles Simulator.app; the one from an Xcode 26.x
+  install still works for viewing simulators, as does Device Hub itself.
+- Work record: `docs/ai/xxxx-xcode27-support/README.md`.
 
 ### Agent skill
 

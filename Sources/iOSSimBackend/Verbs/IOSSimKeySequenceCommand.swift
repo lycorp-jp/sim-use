@@ -103,7 +103,7 @@ public struct IOSSimKeySequenceCommand: SimUseExecutableCommand {
             }
         }
 
-        let sequenceEvent = FBSimulatorHIDEvent(events: events)
+        let sequenceEvent = FBSimulatorHIDEvent.composite(events)
         try await HIDInteractor.performHIDEvent(
             sequenceEvent,
             for: device.resolved,

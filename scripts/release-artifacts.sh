@@ -6,13 +6,6 @@ set -euo pipefail
 # shellcheck source=./release-payload.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/release-payload.sh"
 
-EXPECTED_FRAMEWORKS=(
-  "FBControlCore"
-  "XCTestBootstrap"
-  "FBSimulatorControl"
-  "FBDeviceControl"
-)
-
 usage() {
   cat <<'EOF'
 Usage:
@@ -118,16 +111,12 @@ bundle_resource_root() {
 
 verify_stage() {
   local stage_dir="$1"
-  local framework_name
-  local framework_path
-  local framework_binary
   local android_bundle
   local apk_path
   local apk_bytes
 
   [[ -d "$stage_dir" ]] || fail "Stage directory not found: $stage_dir"
   [[ -x "$stage_dir/sim-use" ]] || fail "Stage is missing executable sim-use"
-  [[ -d "$stage_dir/Frameworks" ]] || fail "Stage is missing Frameworks directory"
   [[ -d "$stage_dir/SimUse_SimUse.bundle" ]] || fail "Stage is missing SimUse_SimUse.bundle"
 
   # Viewer SPA contract. SwiftPM's `.copy("Resources/viewer")` in
@@ -195,15 +184,6 @@ verify_stage() {
   if [[ -n "${dup_rpaths// /}" ]]; then
     fail "Executable has duplicate rpaths (post-normalisation): ${dup_rpaths%% }. Homebrew's relocate pass will strip duplicates and ad-hoc resign, destroying any Developer ID + notary signature. Fix the rpath block in scripts/build.sh::build_sim_use_executable so the emitted set is unique after @loader_path/@executable_path collapse."
   fi
-
-  for framework_name in "${EXPECTED_FRAMEWORKS[@]}"; do
-    framework_path="$stage_dir/Frameworks/${framework_name}.framework"
-    [[ -d "$framework_path" ]] || fail "Missing framework in staged payload: ${framework_name}.framework"
-    framework_binary="$(resolve_framework_binary "$framework_path" "$framework_name" || true)"
-    [[ -n "$framework_binary" ]] || fail "Could not locate binary for framework ${framework_name}"
-    verify_arch "$framework_binary" "arm64"
-    verify_arch "$framework_binary" "x86_64"
-  done
 
   echo "✅ Verified staged payload contract and architectures (incl. Android bridge APK ${apk_bytes} bytes, Viewer ${viewer_asset_count} assets)"
 }

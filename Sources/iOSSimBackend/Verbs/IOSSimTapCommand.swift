@@ -290,14 +290,14 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
             // some recognisers.
             logger.info().log("Touch down (hold \(duration)s)")
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.touchDownAt(x: dispatchPoint.x, y: dispatchPoint.y),
+                FBSimulatorHIDEvent.touch(direction: .down, x: dispatchPoint.x, y: dispatchPoint.y),
                 for: device.resolved,
                 logger: logger
             )
             try await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             logger.info().log("Touch up")
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.touchUpAt(x: dispatchPoint.x, y: dispatchPoint.y),
+                FBSimulatorHIDEvent.touch(direction: .up, x: dispatchPoint.x, y: dispatchPoint.y),
                 for: device.resolved,
                 logger: logger
             )

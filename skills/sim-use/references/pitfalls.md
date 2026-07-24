@@ -65,19 +65,6 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 **Recipe:** Use `--label-regex` with a pattern that skips the prefix: `--label-regex '.*Settings$'` or `--label-contains 'Settings'`.
 
-## iOS + Xcode 27: taps report success but never land
-
-**Symptom:** On Xcode 27 setups, every `tap` returns success while the screen (per `ui` or `screenshot`) never changes; `type` fails with a dtuhidd error, or enters nothing when the guard is skipped. `ui` and `screenshot` themselves keep working.
-
-**Why:** Xcode 27's Device Hub starts a `dtuhidd` daemon in each simulator. A simulator **booted while Device Hub is open** has its legacy HID input path disconnected at boot — touch and keyboard events are accepted but never delivered. The decision is made at boot: attaching Device Hub to an already-booted simulator does not break input, and closing it alone does not repair a suppressed one.
-
-**Recipes:**
-1. Quit Device Hub, then reboot the simulator: `xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>`.
-2. To view simulators, use the classic Simulator.app from an Xcode 26.x install — it does not trigger the suppression.
-3. Verify recovery with a tap that has a visible effect, checked via `ui` — do not trust the tap's own success output in this state.
-
-(Temporary limitation; native Device Hub support is planned via an idb upgrade.)
-
 ## Android: paste denied
 
 **Symptom:** `sim-use paste` succeeds but the field is empty, or the command errors.

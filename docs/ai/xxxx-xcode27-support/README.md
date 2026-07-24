@@ -428,3 +428,128 @@ now keys on dtuhidd's start time relative to its parent `launchd_sim`
 `HIDInteractor.makeSession` so every HID verb is covered, and no longer
 false-positives on the attach-after-boot state. See
 `DeviceHubHIDSuppression.swift` and issue #60.
+
+## Addendum (2026-07-24, migration phase 1): re-validated on `1f6943f8`; touch suppression did not reproduce
+
+Step-2 prerequisite survey re-run, plus a full harness re-validation against
+main @ `1f6943f8` (2026-07-23). Environment unchanged: Beta 4, system
+CoreSimulator 1169.1, iPhone 17 Pro on iOS 27.0.
+
+- **Upstream drift since `c51004c9`: none that matters.** +40 commits, zero
+  touching `FBSimulatorControl/HID/`; `FBSimulatorHIDSelection` predicate and
+  its "(touch … unaffected)" doc comment unchanged; no release/tag. Useful
+  pickups: `22b32743` "Fix the open source build", `91107b63` Swift 6 target
+  updates. `./build.sh generate` now regenerates all four projects; the root
+  `FBSimulatorControl.xcodeproj` and the appendix build recipe work as-is.
+- **Harness: zero API drift.** The appendix source compiles unchanged against
+  `1f6943f8`.
+- **facebook/idb#941 still open — reproduced exactly** (forced `.indigo`
+  without preload → `clientClassUnavailable`). With an explicit
+  `xcodeFrameworks` preload, forced `.indigo` and auto both deliver in the
+  clean state — the sim-use-side mitigation is confirmed sufficient; keep it.
+- **Suppressed-at-boot: DTU results reconfirmed.** auto → `.dtuhid`; tap
+  (Settings two-level navigation) and keyboard (Safari URL field) delivered.
+  Migration go/no-go: **GO**, ref pinned at `1f6943f8`.
+- **Deviation from the 7-22 matrix: legacy *touch* was NOT suppressed.** In
+  three consecutive poisoned boots (`simctl boot` ×2 and `devicectl device
+  reboot` ×1, all with DeviceHub.app open; dtuhidd attached at +0–3 s;
+  the v0.11.0 guard correctly classifies them as poisoned), a first-traffic
+  forced `.indigo` tap was delivered every time — while legacy *keyboard*
+  stayed silently dead in the same boots (pinned `type` exits 0, zero
+  characters; upstream's Indigo keyboard fail-louds with
+  `keyboardSuppressedByActiveDTUHIDD`). Today's reproducible poisoned state
+  is therefore keyboard-only — the June/1155.4 scope, not the 7-22
+  touch-and-keyboard scope. Hypothesis: full touch suppression additionally
+  requires Device Hub *actively attached to the device's screen view* (the
+  7-22/7-23 experiments were GUI-driven; today's were headless with Hub idle
+  in list view). Not automatable headlessly — unverified, re-check during
+  migration E2E. Consequences: the v0.11.0 all-verb guard is over-inclusive
+  for tap in this state (acceptable for a stopgap; retired by this
+  migration), and the plan is unchanged — auto-selection routes through
+  dtuhidd whenever it is present, which delivered in every state observed so
+  far; forced `.indigo` remains a documented trap.
+- Operational notes: quitting Device Hub shuts down **all** booted
+  simulators, including ones booted before Hub was opened. `devicectl device
+  reboot --device <udid>` works on simulators (CoreDevice-initiated boot)
+  and produced the same keyboard-only suppression as `simctl boot`.
+
+## Addendum (2026-07-24, migration executed): idb bumped to `1f6943f8` on branch `migrate/idb-bump`
+
+The step-2 migration itself, same day as the phase-1 re-validation. Shape of
+the change (details in the CHANGELOG entry and the branch diff):
+
+- **Build**: `scripts/build.sh` pins `1f6943f8`, generates the project with
+  XcodeGen (new build-time dependency), builds the four schemes
+  (CompanionUtilities first — the `-Swift.h` ordering trap is real),
+  packages **static** XCFrameworks with `-allow-internal-distribution`
+  (no library evolution: upstream's Swift 6 code rejects the non-frozen-enum
+  exhaustiveness it imposes, so `build_products/` is toolchain-locked), and
+  stages `PrivateHeaders` (module maps + `.tbd` stubs) for consumers.
+  FBDeviceControl is dropped — nothing in sim-use ever imported it.
+- **Package.swift**: binary target swap (+CompanionUtilities,
+  −FBDeviceControl); `-Xcc -fmodule-map-file` wiring for the five private
+  Clang modules; per-archive `-force_load` for the three ObjC-bearing
+  frameworks + `-weak_library` CoreSimulator/APT tbds at the final link
+  (see the linking addendum below for why NOT a blanket `-ObjC` and why
+  CompanionUtilities is excluded). The entire SwiftBuild-rpath machinery
+  (slice rpaths, `stage-fb-frameworks.sh`, release rpath stripping) is
+  retired — static linking dissolves the dlopen problem it existed for.
+- **API migration**: FBFuture bridging deleted (`FutureBridge`,
+  `BridgeQueues`); HID events are Swift enums (`.touch(direction:x:y:)` …),
+  sent via `hid.send(event:logger:)`; HID connection is
+  `FBSimulatorHID(for:transport:)` — deliberately NOT
+  `simulator.connectToHID()`, whose upstream-side cache has no boot-identity
+  gate and would resurrect the stale handles issue #55 guards against;
+  accessibility went typed (`FBAccessibilityElement` + serialize), consumed
+  through a legacy-shape bridge (`LegacyAccessibilityBridge.swift`) since the
+  serializer output shapes are unchanged; video stream API async
+  (`createStream(configuration:to:)` / `awaitCompletion`); multi-touch uses
+  upstream `.twoFingerTouch` assembled as one composite (single per-gesture
+  drain, as DTUHID requires).
+- **Guard retirement**: `DeviceHubHIDSuppression` + `SIM_USE_SKIP_DTUHIDD_CHECK`
+  removed; auto transport selection covers every observed state.
+  `SIM_USE_HID_TRANSPORT=indigo|dtuhid` added as the debug override the
+  step-2 checklist suggested. `XcodeCompatibility` already had the narrowed
+  dual-path form — kept as-is. #941 mitigation (explicit `xcodeFrameworks`
+  preload in GlobalSetup/HIDInteractor) kept, as required.
+- **Verified**: `make test` green (1116); live matrix on iPhone 17 Pro /
+  iOS 27.0 / Beta 4 — clean boot: tap+type deliver (indigo); poisoned boot
+  (Hub open, dtuhidd at +0 s): tap+type **deliver via auto→DTU** where
+  v0.11.0 refused; forced `dtuhid` delivers; forced `indigo` keyboard
+  fail-louds with upstream's `keyboardSuppressedByActiveDTUHIDD`.
+
+## Addendum (2026-07-24, later): archive linking — why per-archive `-force_load`, not `-ObjC`
+
+The Xcode 26.5 leg of the toolchain matrix caught two linking failure
+modes that cancel each other out; the shipped configuration threads the
+needle. Symptoms and bisection, for the record:
+
+- **Blanket `-ObjC` (the spike-recipe default): 26.5-built binaries
+  abort** with `freed pointer was not the last allocation` (a Swift
+  task-allocator LIFO trap) inside *unrelated* async code — first seen in
+  `ViewerAPIHandlers.run`, deterministic from the first call. Per-archive
+  `-force_load` bisection attributes it to **CompanionUtilities** (pure
+  Swift, 14 members); the other three archives force-load cleanly. Beta 4
+  builds of the identical source never trip it. Mechanism not root-caused
+  (no `+load` side effects beyond a sysctl read, no cross-archive member
+  duplication — both checked); treated as a 26.5-toolchain codegen/runtime
+  interaction and routed around.
+- **No force-load at all: category-only members are dropped** and the
+  first runtime use dies with
+  `+[FBControlCoreLoggerFactory osLoggerWithLevel:]: unrecognized
+  selector` (from `FBControlCoreLogger+OSLog.o`) — reproduced via
+  `OrientationRecoveryTests` once the `-ObjC` crash was out of the way.
+  Upstream's own SwiftPM consumers don't hit this because they build the
+  FB targets from source (all objects linked); AXe doesn't because its
+  fork still produces dynamic frameworks.
+- **Shipped shape**: `-force_load` FBControlCore + FBSimulatorControl +
+  XCTestBootstrap (their ObjC categories must survive), ordinary archive
+  link for CompanionUtilities (pure Swift — everything it provides is
+  symbol-referenced). 1116 unit tests + 21/21 E2E green on both 26.5 and
+  Beta 4 with this configuration.
+
+Same leg also fixed strict-concurrency noise the 26.5 compiler surfaces
+(`FBSimulatorHIDEvent` retroactive `@unchecked Sendable` — upstream never
+declared the conformance on what is a pure value tree — and capturing the
+`@unchecked Sendable` HID handle instead of the whole session in the
+send-deadline closure).

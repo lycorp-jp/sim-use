@@ -198,10 +198,6 @@ clean_build() {
 build_sim_use() {
     print_header "Building sim-use Executable"
 
-    # Newer SwiftPM layouts need the FB* frameworks staged next to the
-    # products or nothing (CLI or test bundle) can dlopen them.
-    ./scripts/stage-fb-frameworks.sh
-
     print_info "Building sim-use CLI tool..."
     if [[ "$VERBOSE" == true ]]; then
         swift build

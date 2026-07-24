@@ -65,15 +65,11 @@ class ${FORMULA_CLASS} < Formula
   sha256 "${SHA256}"
 
   def install
-    libexec.install "sim-use", "Frameworks", "SimUse_SimUse.bundle", "SimUse_AndroidBackend.bundle"
+    libexec.install "sim-use", "SimUse_SimUse.bundle", "SimUse_AndroidBackend.bundle"
     bin.write_exec_script libexec/"sim-use"
   end
 
   def post_install
-    Dir.glob("#{libexec}/Frameworks/*.framework").each do |framework|
-      system "codesign", "--force", "--sign", "-", "--timestamp=none", framework
-    end
-
     system "codesign", "--force", "--sign", "-", "--timestamp=none", libexec/"sim-use"
   end
 

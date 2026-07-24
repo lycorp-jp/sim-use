@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import CompanionUtilities
 import FBControlCore
 import FBSimulatorControl
 import Foundation
@@ -82,8 +83,7 @@ public struct AccessibilityFetcher {
             // because every probed hit is tagged synthesized and never
             // re-walked into its children anyway. Cuts per-probe XPC cost
             // significantly on WebView-heavy pages.
-            let future = target.accessibilityElement(at: point, nestedFormat: false)
-            let raw: AnyObject = try await FutureBridge.value(future)
+            let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false)
             let durationMs = Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000
             perf.recordProbe(durationMs: durationMs, phase: "objectAtPoint")
             return raw as? [String: Any]
@@ -100,8 +100,7 @@ public struct AccessibilityFetcher {
             )
         }
 
-        let future = target.accessibilityElements(withNestedFormat: true)
-        let info: AnyObject = try await FutureBridge.value(future)
+        let info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
         perf.stage("tree fetch XPC")
 
         let calibration = await calibrate(info: info, native: native, probe: probe, logger: logger)
@@ -178,8 +177,7 @@ public struct AccessibilityFetcher {
         perf: PerfLog
     ) async throws -> FetchResult {
         func nestedQuery(_ p: CGPoint) async throws -> AnyObject {
-            let future = target.accessibilityElement(at: p, nestedFormat: true)
-            return try await FutureBridge.value(future)
+            try await target.legacyAccessibilityElement(at: p, nestedFormat: true)
         }
 
         guard let native else {
@@ -212,8 +210,7 @@ public struct AccessibilityFetcher {
         // tree calibration below settles which landscape.
 
         if orientation == nil {
-            let future = target.accessibilityElements(withNestedFormat: true)
-            if let info: AnyObject = try? await FutureBridge.value(future) {
+            if let info: AnyObject = try? await target.legacyAccessibilityElements(nestedFormat: true) {
                 perf.stage("tree fetch XPC (point calibration)")
                 let treeCalibration = await calibrate(info: info, native: native, probe: probe, logger: logger)
                 calibration = treeCalibration

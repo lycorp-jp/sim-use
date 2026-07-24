@@ -2,35 +2,63 @@
 // SPDX-License-Identifier: Apache-2.0
 import PackageDescription
 
-// The SwiftBuild-backend SwiftPM (Xcode 26.6+/27 toolchains) emits no
-// LC_RPATH entries for binary-target XCFrameworks, so the sim-use binary
-// and the SimUseTests bundle cannot dlopen the FB* frameworks that
-// `scripts/build.sh` places under build_products/. Emit explicit rpath
-// entries pointing at each XCFramework slice: `@loader_path`-relative for
-// the known product layouts (classic `.build/<arch>/<config>` and
-// SwiftBuild `.build/out/Products/<config>`), plus a working-directory
-// relative fallback for custom `--scratch-path` runs started from the
-// repository root. dyld ignores entries that do not resolve, and the
-// classic-toolchain layouts keep working through their own rpaths.
-// These entries serve the dev loop only: release staging strips them from
-// the shipped binary (`remove_build_products_rpaths` in scripts/build.sh),
-// which relies on `@executable_path/Frameworks` instead.
-let fbFrameworkSliceDirs = [
-    "FBControlCore", "FBSimulatorControl", "FBDeviceControl", "XCTestBootstrap",
-].map { "build_products/XCFrameworks/\($0).xcframework/macos-arm64_x86_64" }
+// The FB* XCFrameworks built by `scripts/build.sh` are STATIC archives
+// (upstream idb switched its frameworks to MACH_O_TYPE staticlib), so the
+// FB* code links into the consuming binary and nothing is loaded at
+// runtime. Two consequences wired up below:
+//
+// 1. The FB* Swift modules import the reverse-engineered private-framework
+//    Clang modules bundled with idb (CoreSimulator, SimulatorKit, ...).
+//    Every target that compiles `import FBControlCore` /
+//    `import FBSimulatorControl` — directly or through iOSSimBackend's
+//    swiftmodule — needs those module maps on the compiler search path.
+//    `scripts/build.sh` stages them under build_products/PrivateHeaders/.
+// 2. The static archives defer their CoreSimulator /
+//    AccessibilityPlatformTranslation class references to the final link,
+//    which must weak-link the .tbd stubs (the real frameworks are loaded
+//    at runtime by FBSimulatorControlFrameworkLoader).
+//
+// The ObjC-heavy archives are `-force_load`ed (per archive, NOT a blanket
+// `-ObjC`): their category-only members (e.g. FBControlCoreLogger+OSLog)
+// export no referenced symbol, so a normal archive link drops them and
+// the first runtime use dies with "unrecognized selector"
+// (+[FBControlCoreLoggerFactory osLoggerWithLevel:], reproduced).
+// CompanionUtilities is deliberately NOT force-loaded: it is pure Swift
+// (everything it provides is pulled in by ordinary symbol references),
+// and force-loading it makes Xcode 26.5-built binaries abort with
+// "freed pointer was not the last allocation" — a Swift task-allocator
+// trap in unrelated async code (bisected per-archive; Xcode 27 B4 builds
+// don't trip it).
+//
+// Both flag sets use `Context.packageDirectory` because SwiftPM resolves
+// relative compiler/linker arguments against an unspecified working
+// directory that differs between the classic and SwiftBuild backends.
+// unsafeFlags make this package unusable as a SwiftPM dependency of
+// another package; sim-use is a root package (CLI tool), so that is fine.
+let privateHeadersDir = "\(Context.packageDirectory)/build_products/PrivateHeaders"
 
-// upLevels: how many directories separate the linked product from the
-// repository root (per supported layout). includeCWDFallback adds the bare
-// (working-directory-relative) slice paths; pass false where those entries
-// are already inherited from a dependency's flags, or ld warns about the
-// duplicates.
-func fbRPathFlags(upLevels: [Int], includeCWDFallback: Bool = true) -> [String] {
-    fbFrameworkSliceDirs.flatMap { slice -> [String] in
-        let entries = upLevels.map { up in
-            "@loader_path/" + String(repeating: "../", count: up) + slice
-        } + (includeCWDFallback ? [slice] : [])
-        return entries.flatMap { ["-Xlinker", "-rpath", "-Xlinker", $0] }
-    }
+// The bare -I is needed too: the private headers include their siblings
+// framework-style (e.g. <CoreSimulator/NSObject-Protocol.h>), which
+// resolves as a subdirectory of the PrivateHeaders root.
+let privateModuleMapFlags: [String] = ["-Xcc", "-I\(privateHeadersDir)"] + [
+    "CoreSimulator", "SimulatorApp", "SimulatorKit", "AXRuntime",
+    "AccessibilityPlatformTranslation",
+].flatMap {
+    ["-Xcc", "-fmodule-map-file=\(privateHeadersDir)/\($0)/module.modulemap"]
+}
+
+let fbLinkerFlags: [String] = [
+    "FBControlCore", "FBSimulatorControl", "XCTestBootstrap",
+].flatMap {
+    [
+        "-Xlinker", "-force_load",
+        "-Xlinker",
+        "\(Context.packageDirectory)/build_products/XCFrameworks/\($0).xcframework/macos-arm64_x86_64/\($0).framework/Versions/A/\($0)",
+    ]
+} + [
+    "CoreSimulator", "AccessibilityPlatformTranslation",
+].flatMap {
+    ["-Xlinker", "-weak_library", "-Xlinker", "\(privateHeadersDir)/\($0)/\($0).tbd"]
 }
 
 let package = Package(
@@ -77,17 +105,15 @@ let package = Package(
             dependencies: [
                 "SimUseCore",
                 "FBSimulatorControl",
-                "FBDeviceControl",
                 "FBControlCore",
                 "XCTestBootstrap",
+                "CompanionUtilities",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             path: "Sources/iOSSimBackend",
-            // No `-rpath` here: the executable `SimUse` target owns
-            // `@executable_path` at link time, and ld emits a
-            // "duplicate -rpath ignored" warning when both targets
-            // claim it. Library targets don't load XCFrameworks; only
-            // the final executable needs the runtime search path.
+            swiftSettings: [
+                .unsafeFlags(privateModuleMapFlags)
+            ],
             plugins: ["VersionPlugin"]
         ),
         .target(
@@ -115,9 +141,9 @@ let package = Package(
                 "AndroidBackend",
                 "iOSSimBackend",
                 "FBSimulatorControl",
-                "FBDeviceControl",
                 "FBControlCore",
-                "XCTestBootstrap"
+                "XCTestBootstrap",
+                "CompanionUtilities"
             ],
             path: "Sources/SimUse",
             resources: [
@@ -131,20 +157,13 @@ let package = Package(
                 .copy("Resources/viewer"),
             ],
             swiftSettings: [
-                .unsafeFlags(["-parse-as-library"])
+                .unsafeFlags(["-parse-as-library"] + privateModuleMapFlags)
             ],
             linkerSettings: [
-                // @executable_path covers frameworks staged next to the
-                // binary; release staging replaces it with
-                // @executable_path/Frameworks (scripts/build.sh). The
-                // fbRPathFlags entries serve the dev loop — the executable
-                // sits 3 (classic) or 4 (SwiftBuild) levels below the
-                // repository root.
                 .unsafeFlags([
                     "-Xlinker", "-dead_strip",
                     "-Xlinker", "-headerpad_max_install_names",
-                    "-Xlinker", "-rpath", "-Xlinker", "@executable_path"
-                ] + fbRPathFlags(upLevels: [3, 4]))
+                ] + fbLinkerFlags)
             ],
             plugins: ["VersionPlugin"]
         ),
@@ -166,13 +185,11 @@ let package = Package(
                 .copy("README.md"),
                 .copy("Fixtures")
             ],
+            swiftSettings: [
+                .unsafeFlags(privateModuleMapFlags)
+            ],
             linkerSettings: [
-                // The test bundle binary sits 6 (classic) or 7 (SwiftBuild)
-                // levels below the repository root
-                // (…/SimUseTests.xctest/Contents/MacOS/SimUseTests). The
-                // CWD-relative fallback is inherited from the SimUse
-                // dependency's flags — don't repeat it here.
-                .unsafeFlags(fbRPathFlags(upLevels: [6, 7], includeCWDFallback: false))
+                .unsafeFlags(fbLinkerFlags)
             ]
         ),
         .testTarget(
@@ -199,16 +216,16 @@ let package = Package(
             path: "build_products/XCFrameworks/FBControlCore.xcframework"
         ),
         .binaryTarget(
-            name: "FBDeviceControl",
-            path: "build_products/XCFrameworks/FBDeviceControl.xcframework"
-        ),
-        .binaryTarget(
             name: "FBSimulatorControl",
             path: "build_products/XCFrameworks/FBSimulatorControl.xcframework"
         ),
         .binaryTarget(
             name: "XCTestBootstrap",
             path: "build_products/XCFrameworks/XCTestBootstrap.xcframework"
+        ),
+        .binaryTarget(
+            name: "CompanionUtilities",
+            path: "build_products/XCFrameworks/CompanionUtilities.xcframework"
         ),
     ]
 )

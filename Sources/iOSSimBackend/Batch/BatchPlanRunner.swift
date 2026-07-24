@@ -17,7 +17,7 @@ public struct BatchPlanRunner {
 
         func flushPending() async throws {
             guard !pendingMergeable.isEmpty else { return }
-            let event = pendingMergeable.count == 1 ? pendingMergeable[0] : FBSimulatorHIDEvent(events: pendingMergeable)
+            let event = pendingMergeable.count == 1 ? pendingMergeable[0] : FBSimulatorHIDEvent.composite(pendingMergeable)
             try await HIDInteractor.performHIDEvent(event, in: session, logger: logger)
             pendingMergeable.removeAll(keepingCapacity: true)
         }

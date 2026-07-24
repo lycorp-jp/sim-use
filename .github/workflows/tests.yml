@@ -2,13 +2,16 @@
 #
 # Unit-test gate for pushes and PRs to main.
 #
-# Package.swift declares binary targets under build_products/XCFrameworks,
-# so the idb-derived FB* XCFrameworks must exist before any swift build /
-# swift test. Building them (scripts/build.sh dev: idb clone + four
+# Package.swift declares binary targets under build_products/XCFrameworks
+# and compiles against the idb PrivateHeaders modules staged next to them,
+# so both must exist before any swift build / swift test. Building them
+# (scripts/build.sh dev: idb clone + XcodeGen project generation + four
 # xcodebuild passes) measures ~2 min on hosted runners; caching the output
 # still halves warm-run wall time and avoids the network clone. Keyed on
-# everything that shapes it: the build script (pins IDB_GIT_REF), the
-# local idb patches, and the selected Xcode version.
+# everything that shapes it: the build script (pins IDB_GIT_REF) and the
+# selected Xcode version. The frameworks are static archives built without
+# library evolution, so their Swift modules are toolchain-locked — the
+# Xcode version in the key is what keeps a cached build consumable.
 
 name: Tests
 
@@ -86,7 +89,10 @@ jobs:
           sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
           xcodebuild -version
           swift --version
-          echo "version=$(xcodebuild -version | awk 'NR==1 {print $2}')" >> "${GITHUB_OUTPUT}"
+          # Include the Xcode build id, not just the marketing version:
+          # two betas of the same version ship incompatible Swift
+          # compilers, and the FB* swiftmodules are toolchain-locked.
+          echo "version=$(xcodebuild -version | awk 'NR==1 {v=$2} /^Build version/ {b=$3} END {print v "-" b}')" >> "${GITHUB_OUTPUT}"
 
       # Separate restore/save so a red test run still persists the
       # expensive framework build for the next attempt.
@@ -94,8 +100,15 @@ jobs:
         id: xcframeworks-cache
         uses: actions/cache/restore@v6
         with:
-          path: build_products/XCFrameworks
-          key: fb-xcframeworks-${{ runner.arch }}-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('scripts/build.sh', 'patches/idb/**') }}
+          path: |
+            build_products/XCFrameworks
+            build_products/PrivateHeaders
+          key: fb-xcframeworks-${{ runner.arch }}-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('scripts/build.sh') }}
+
+      # The idb checkout generates its Xcode project with XcodeGen.
+      - name: Install XcodeGen
+        if: steps.xcframeworks-cache.outputs.cache-hit != 'true'
+        run: command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
 
       - name: Build FB XCFrameworks
         if: steps.xcframeworks-cache.outputs.cache-hit != 'true'
@@ -105,7 +118,9 @@ jobs:
         if: steps.xcframeworks-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v6
         with:
-          path: build_products/XCFrameworks
+          path: |
+            build_products/XCFrameworks
+            build_products/PrivateHeaders
           key: ${{ steps.xcframeworks-cache.outputs.cache-primary-key }}
 
       - name: Cache SwiftPM build

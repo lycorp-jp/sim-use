@@ -6,9 +6,10 @@ import FBSimulatorControl
 import SimUseCore
 
 /// `sim-use ios multi-touch` — dispatches an arbitrary two-finger
-/// trajectory through the patched `FBSimulatorHID.sendMultiTouchWith…`
-/// primitive. Productised from the validation spike on
-/// `spike/ios-multi-touch`.
+/// trajectory through upstream's `FBSimulatorHIDEvent.twoFingerTouch`
+/// primitive (originally productised from the validation spike on
+/// `spike/ios-multi-touch`; the local patch was superseded by the
+/// native upstream API in the idb bump).
 ///
 /// The verb is the raw-coordinate escape hatch. High-level verbs
 /// (`tap --fingers 2`, `long-press --fingers 2`, `gesture pinch-*` /
@@ -231,6 +232,14 @@ enum MultiTouchDispatcher {
     /// uses the supplied `startP1` / `startP2`; the final Up uses the
     /// last interpolated position so the recogniser sees a clean
     /// trajectory through `interpolate(1.0)`.
+    ///
+    /// The whole trajectory is assembled into a single `.composite`
+    /// event (a Move is a repeated `.down` at the new position — the
+    /// same convention upstream's `pinchAt` uses) and sent through
+    /// `HIDInteractor.performHIDEvent`, so the transport is drained
+    /// exactly once at the end of the gesture. Sending the primitives
+    /// individually would skip the per-gesture `flush()` the DTUHID
+    /// transport needs.
     static func run(
         session: HIDInteractor.Session,
         startP1: (x: Double, y: Double),
@@ -240,33 +249,44 @@ enum MultiTouchDispatcher {
         interpolate: (Double) -> ((x: Double, y: Double), (x: Double, y: Double)),
         logger: SimUseLogger
     ) async throws {
-        // Empirical: sending Down → Move → Up back-to-back with zero
-        // delay between events causes SimulatorKit's underlying
-        // `IndigoHIDMessageForMouseNSEvent` to return nil for the
-        // subsequent message (state-machine constraint inside the
-        // private function). Enforce a 5 ms floor so callers don't
-        // need to know about it.
+        // Empirical (Indigo transport): consecutive touch messages with
+        // zero delay in between make SimulatorKit's underlying message
+        // builder return nil for the subsequent message. Enforce a 5 ms
+        // floor so callers don't need to know about it.
         let effectiveStepMs = max(stepMs, minimumStepMs)
-        logger.info().log("multi-touch down at (\(startP1.x),\(startP1.y)) + (\(startP2.x),\(startP2.y))")
-        try await dispatch(session: session, phase: .down,
-                           p1: startP1, p2: startP2)
+        let stepDelay = TimeInterval(effectiveStepMs) / 1000.0
+
+        var events: [FBSimulatorHIDEvent] = []
+        events.append(.twoFingerTouch(
+            direction: .down,
+            finger1: CGPoint(x: startP1.x, y: startP1.y),
+            finger2: CGPoint(x: startP2.x, y: startP2.y)
+        ))
 
         var lastP1 = startP1
         var lastP2 = startP2
         let safeSteps = max(steps, 1)
         for i in 1...safeSteps {
-            try await Task.sleep(nanoseconds: UInt64(effectiveStepMs) * 1_000_000)
             let t = Double(i) / Double(safeSteps)
             let (p1, p2) = interpolate(t)
-            try await dispatch(session: session, phase: .move,
-                               p1: p1, p2: p2)
+            events.append(.delay(stepDelay))
+            events.append(.twoFingerTouch(
+                direction: .down,
+                finger1: CGPoint(x: p1.x, y: p1.y),
+                finger2: CGPoint(x: p2.x, y: p2.y)
+            ))
             lastP1 = p1
             lastP2 = p2
         }
-        try await Task.sleep(nanoseconds: UInt64(effectiveStepMs) * 1_000_000)
-        logger.info().log("multi-touch up at (\(lastP1.x),\(lastP1.y)) + (\(lastP2.x),\(lastP2.y))")
-        try await dispatch(session: session, phase: .up,
-                           p1: lastP1, p2: lastP2)
+        events.append(.delay(stepDelay))
+        events.append(.twoFingerTouch(
+            direction: .up,
+            finger1: CGPoint(x: lastP1.x, y: lastP1.y),
+            finger2: CGPoint(x: lastP2.x, y: lastP2.y)
+        ))
+
+        logger.info().log("multi-touch down at (\(startP1.x),\(startP1.y)) + (\(startP2.x),\(startP2.y)), up at (\(lastP1.x),\(lastP1.y)) + (\(lastP2.x),\(lastP2.y)) over \(safeSteps) steps")
+        try await HIDInteractor.performHIDEvent(.composite(events), in: session, logger: logger)
     }
 
     /// Minimum delay between consecutive HID Indigo events. Below ~5 ms
@@ -275,18 +295,4 @@ enum MultiTouchDispatcher {
     /// `MultiTouchDispatcher.run`. Picked conservatively at 5 ms so
     /// total wall-clock impact stays below the recogniser threshold.
     static let minimumStepMs = 5
-
-    private static func dispatch(
-        session: HIDInteractor.Session,
-        phase: FBSimulatorMultiTouchPhase,
-        p1: (x: Double, y: Double),
-        p2: (x: Double, y: Double)
-    ) async throws {
-        let future = session.hid.sendMultiTouch(
-            with: phase,
-            x1: p1.x, y1: p1.y,
-            x2: p2.x, y2: p2.y
-        )
-        _ = try await FutureBridge.value(future)
-    }
 }

@@ -21,16 +21,6 @@ struct HIDRebootRecoveryTests {
     func tapRecoversAcrossReboot() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()
 
-        // dtuhidd confounder: a simulator booted while Device Hub is
-        // open loses legacy HID *at boot* — taps silently no-op even on
-        // a fresh connection, which is a different failure than #55 and
-        // would fail this test for the wrong reason.
-        if DeviceHubHIDSuppression.isSuppressed(forUDID: udid) {
-            throw TestError.unexpectedState(
-                "dtuhidd is active for \(udid) (Device Hub open?); close Device Hub and re-boot the simulator before running this suite"
-            )
-        }
-
         // 1. Baseline tap through the daemon; this also spawns it.
         try await TestHelpers.launchPlaygroundApp(to: "tap-test")
         try await TestHelpers.runSimUseCommand("tap -x 200 -y 400", simulatorUDID: udid)

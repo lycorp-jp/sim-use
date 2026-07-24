@@ -30,7 +30,7 @@ private func buildDelayedEvent(
     if let postDelay, postDelay > 0 {
         events.append(.delay(postDelay))
     }
-    return events.count == 1 ? events[0] : FBSimulatorHIDEvent(events: events)
+    return events.count == 1 ? events[0] : FBSimulatorHIDEvent.composite(events)
 }
 
 extension IOSSimTapCommand: BatchConvertible {
@@ -90,9 +90,9 @@ extension IOSSimTapCommand: BatchConvertible {
             if let preDelay = timing.preDelay, preDelay > 0 {
                 primitives.append(.hostSleep(preDelay))
             }
-            primitives.append(.hidBarrier(.touchDownAt(x: resolvedPoint.x, y: resolvedPoint.y)))
+            primitives.append(.hidBarrier(.touch(direction: .down, x: resolvedPoint.x, y: resolvedPoint.y)))
             primitives.append(.hostSleep(duration))
-            primitives.append(.hidBarrier(.touchUpAt(x: resolvedPoint.x, y: resolvedPoint.y)))
+            primitives.append(.hidBarrier(.touch(direction: .up, x: resolvedPoint.x, y: resolvedPoint.y)))
             if let postDelay = timing.postDelay, postDelay > 0 {
                 primitives.append(.hostSleep(postDelay))
             }
@@ -144,8 +144,8 @@ extension IOSSimGestureCommand: BatchConvertible {
 
 extension IOSSimTouchCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
-        let touchDownEvent = FBSimulatorHIDEvent.touchDownAt(x: pointX, y: pointY)
-        let touchUpEvent = FBSimulatorHIDEvent.touchUpAt(x: pointX, y: pointY)
+        let touchDownEvent = FBSimulatorHIDEvent.touch(direction: .down, x: pointX, y: pointY)
+        let touchUpEvent = FBSimulatorHIDEvent.touch(direction: .up, x: pointX, y: pointY)
 
         if touchDown && touchUp {
             let holdDelay = delay ?? 0.1
@@ -176,10 +176,10 @@ extension IOSSimButtonCommand: BatchConvertible {
             )
         }
         if let duration {
-            let composite = FBSimulatorHIDEvent(events: [
-                .buttonDown(hidButton),
+            let composite = FBSimulatorHIDEvent.composite([
+                .button(direction: .down, button: hidButton),
                 .delay(duration),
-                .buttonUp(hidButton)
+                .button(direction: .up, button: hidButton)
             ])
             return [.hidMergeable(composite)]
         }
@@ -191,10 +191,10 @@ extension IOSSimButtonCommand: BatchConvertible {
 extension IOSSimKeyCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
         if let duration {
-            let composite = FBSimulatorHIDEvent(events: [
-                .keyDown(UInt32(keycode)),
+            let composite = FBSimulatorHIDEvent.composite([
+                .keyboard(direction: .down, keyCode: UInt32(keycode)),
                 .delay(duration),
-                .keyUp(UInt32(keycode))
+                .keyboard(direction: .up, keyCode: UInt32(keycode))
             ])
             return [.hidMergeable(composite)]
         }
@@ -216,7 +216,7 @@ extension IOSSimKeySequenceCommand: BatchConvertible {
             }
         }
 
-        return [.hidMergeable(FBSimulatorHIDEvent(events: events))]
+        return [.hidMergeable(FBSimulatorHIDEvent.composite(events))]
     }
 }
 
@@ -226,14 +226,14 @@ extension IOSSimKeyComboCommand: BatchConvertible {
 
         var events: [FBSimulatorHIDEvent] = []
         for modifier in parsedModifiers {
-            events.append(.keyDown(UInt32(modifier)))
+            events.append(.keyboard(direction: .down, keyCode: UInt32(modifier)))
         }
         events.append(.shortKeyPress(UInt32(key)))
         for modifier in parsedModifiers.reversed() {
-            events.append(.keyUp(UInt32(modifier)))
+            events.append(.keyboard(direction: .up, keyCode: UInt32(modifier)))
         }
 
-        return [.hidMergeable(FBSimulatorHIDEvent(events: events))]
+        return [.hidMergeable(FBSimulatorHIDEvent.composite(events))]
     }
 }
 
@@ -295,10 +295,10 @@ extension IOSSimPasteCommand: BatchConvertible {
     }
 
     private func modifierCombo(key: UInt32, modifier: UInt32) -> FBSimulatorHIDEvent {
-        FBSimulatorHIDEvent(events: [
-            FBSimulatorHIDEvent.keyDown(modifier),
+        FBSimulatorHIDEvent.composite([
+            FBSimulatorHIDEvent.keyboard(direction: .down, keyCode: modifier),
             FBSimulatorHIDEvent.shortKeyPress(key),
-            FBSimulatorHIDEvent.keyUp(modifier),
+            FBSimulatorHIDEvent.keyboard(direction: .up, keyCode: modifier),
         ])
     }
 }
@@ -332,7 +332,7 @@ extension IOSSimTypeCommand: BatchConvertible {
 
         switch context.typeSubmissionMode {
         case .composite:
-            return [.hidMergeable(FBSimulatorHIDEvent(events: hidEvents))]
+            return [.hidMergeable(FBSimulatorHIDEvent.composite(hidEvents))]
         case .chunked:
             let chunkSize = max(1, context.typeChunkSize)
             var primitives: [BatchPrimitive] = []
@@ -340,7 +340,7 @@ extension IOSSimTypeCommand: BatchConvertible {
             while start < hidEvents.count {
                 let end = min(start + chunkSize, hidEvents.count)
                 let chunkEvents = Array(hidEvents[start..<end])
-                primitives.append(.hidBarrier(FBSimulatorHIDEvent(events: chunkEvents)))
+                primitives.append(.hidBarrier(FBSimulatorHIDEvent.composite(chunkEvents)))
                 start = end
             }
             return primitives

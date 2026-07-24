@@ -23,18 +23,18 @@ public struct TextToHIDEvents {
     /// Creates key events for a character that doesn't require shift
     private static func simpleKeyEvent(keyCode: Int) -> [FBSimulatorHIDEvent] {
         return [
-            .keyDown(UInt32(keyCode)),
-            .keyUp(UInt32(keyCode))
+            .keyboard(direction: .down, keyCode: UInt32(keyCode)),
+            .keyboard(direction: .up, keyCode: UInt32(keyCode))
         ]
     }
     
     /// Creates key events for a character that requires shift
     private static func shiftedKeyEvent(keyCode: Int) -> [FBSimulatorHIDEvent] {
         return [
-            .keyDown(225),          // Left Shift key down
-            .keyDown(UInt32(keyCode)),  // Target key down
-            .keyUp(UInt32(keyCode)),    // Target key up
-            .keyUp(225)             // Left Shift key up
+            .keyboard(direction: .down, keyCode: 225),          // Left Shift key down
+            .keyboard(direction: .down, keyCode: UInt32(keyCode)),  // Target key down
+            .keyboard(direction: .up, keyCode: UInt32(keyCode)),    // Target key up
+            .keyboard(direction: .up, keyCode: 225)             // Left Shift key up
         ]
     }
     

@@ -13,9 +13,14 @@
 ### First-time setup
 
 ```bash
+brew install xcodegen    # idb generates its Xcode project with XcodeGen
 ./scripts/build.sh dev   # clone idb, build XCFrameworks
 make build               # build sim-use
 ```
+
+The FB* XCFrameworks are static archives built without library evolution —
+`build_products/` is locked to the toolchain that produced it. Re-run
+`./scripts/build.sh dev` after switching Xcode versions.
 
 ### Daily workflow
 

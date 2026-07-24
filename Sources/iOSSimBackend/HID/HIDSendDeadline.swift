@@ -20,8 +20,8 @@ import Foundation
 enum HIDSendDeadline {
 
     /// Races `operation` against a deadline. Losing the race cancels
-    /// the operation's task; `FutureBridge.value` forwards that
-    /// cancellation to the underlying `FBFuture`.
+    /// the operation's task; the upstream async HID send paths honor
+    /// task cancellation.
     static func run<T: Sendable>(
         milliseconds: UInt64,
         operation: @escaping @Sendable () async throws -> T,

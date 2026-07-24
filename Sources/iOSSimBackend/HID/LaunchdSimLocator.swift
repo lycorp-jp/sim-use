@@ -20,10 +20,9 @@ struct LaunchdSimIdentity: Equatable {
 /// Matched by exact process name, then scoped to the device by looking
 /// for the UDID in the argument blob — `launchd_sim`'s argv names the
 /// device's `launchd_bootstrap.plist` path (verified live on Xcode 26.5
-/// and 27 B4), the same disambiguation `DeviceHubHIDSuppression` relies
-/// on. Implemented with `sysctl` instead of spawning `/bin/ps`: ~1–2 ms
-/// against a ~1000-process table, cheap enough to probe on every HID
-/// verb (`ps` measured ~40 ms).
+/// and 27 B4). Implemented with `sysctl` instead of spawning `/bin/ps`:
+/// ~1–2 ms against a ~1000-process table, cheap enough to probe on every
+/// HID verb (`ps` measured ~40 ms).
 enum LaunchdSimLocator {
 
     /// The current boot identity for a UDID, or nil when no matching
@@ -54,8 +53,8 @@ enum LaunchdSimLocator {
     }
 
     /// The full process record of the `launchd_sim` serving a UDID.
-    /// Shared by the boot-identity token and `DeviceHubHIDSuppression`
-    /// (which additionally needs the pid to parent-match dtuhidd).
+    /// Used by the boot-identity token; kept as the general entry point
+    /// for callers that need more than the identity pair.
     static func record(
         forUDID udid: String,
         in table: [ProcessRecord],

@@ -106,14 +106,14 @@ public struct IOSSimKeyComboCommand: SimUseExecutableCommand {
         var events: [FBSimulatorHIDEvent] = []
 
         for modifier in parsedModifiers {
-            events.append(FBSimulatorHIDEvent.keyDown(UInt32(modifier)))
+            events.append(FBSimulatorHIDEvent.keyboard(direction: .down, keyCode: UInt32(modifier)))
         }
         events.append(FBSimulatorHIDEvent.shortKeyPress(UInt32(key)))
         for modifier in parsedModifiers.reversed() {
-            events.append(FBSimulatorHIDEvent.keyUp(UInt32(modifier)))
+            events.append(FBSimulatorHIDEvent.keyboard(direction: .up, keyCode: UInt32(modifier)))
         }
 
-        let comboEvent = FBSimulatorHIDEvent(events: events)
+        let comboEvent = FBSimulatorHIDEvent.composite(events)
 
         try await HIDInteractor.performHIDEvent(
             comboEvent,

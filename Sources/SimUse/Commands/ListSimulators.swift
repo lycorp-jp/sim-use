@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import ArgumentParser
 import Foundation
+import CompanionUtilities
 import FBControlCore
 import FBSimulatorControl
 import iOSSimBackend
