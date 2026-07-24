@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `SIM_USE_HID_TRANSPORT=indigo|dtuhid` debug override to force a specific iOS HID transport (default: automatic per-boot selection). The per-UDID daemon keeps the environment it was spawned with — combine with `SIM_USE_NO_DAEMON=1` or restart the daemon for ad-hoc experiments.
+
+### Changed
+
+- The pinned idb ref is bumped from `76639e4d` (2025-05-29) to `1f6943f8` (2026-07-23) — a migration, not a version bump (upstream Swiftified the HID layer and much of FBControlCore, moved the build to XcodeGen-generated projects producing **static** frameworks, and rewrote the video layer in async Swift). What it buys:
+  - **Device Hub workflows now just work on Xcode 27.** The HID transport is selected automatically per simulator boot: simulators whose legacy HID was suppressed at boot (booted while Device Hub was open) are driven through dtuhidd's CoreDevice HID service (upstream's new `FBSimulatorDTUHIDTransport`), everything else through the legacy SimulatorKit path. `tap`/`type`/`swipe` deliver in both states — no reboot dance.
+  - **Multi-touch verbs ride upstream's native two-finger API** (`FBSimulatorHIDEvent.twoFingerTouch`); the whole gesture is assembled into one composite event so the transport is drained exactly once per gesture, as the DTUHID transport requires.
+  - **The FB* frameworks are statically linked into the sim-use binary.** The release payload shrinks to the executable plus the two resource bundles (no `Frameworks/` directory, no framework codesigning), and the entire dev-loop rpath machinery — `Package.swift` slice rpaths, `scripts/stage-fb-frameworks.sh`, release-time rpath stripping — is retired. `Package.swift` instead wires the idb `PrivateHeaders` Clang module maps and weak-links the CoreSimulator / AccessibilityPlatformTranslation `.tbd` stubs at the final link.
+  - All four `patches/idb/` patches are retired: `xcode27-simulatorkit-sharedframeworks` and `multi-touch-spike` are superseded upstream; `headerpad-shims` targeted the removed checked-in project's shim build phase; `fbprocess-runtime-rename` renamed a class that no longer exists (and was never referenced by sim-use).
+- Building the XCFrameworks now requires [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`) — the idb checkout generates `FBSimulatorControl.xcodeproj` from `project.yml`. The frameworks are built without library evolution, so `build_products/` is locked to the toolchain that produced it: re-run `./scripts/build.sh dev` after switching Xcode versions (CI keys its cache on the Xcode version for the same reason).
+
+### Removed
+
+- The Device-Hub-poisoned-simulator guard (`DeviceHubHIDSuppression`, shipped in 0.11.0) and its `SIM_USE_SKIP_DTUHIDD_CHECK` escape hatch: automatic transport selection routes those simulators through dtuhidd itself, so the state the guard refused is now simply functional. Forcing the legacy transport onto a suppressed simulator (via the new debug override) fails loudly with upstream's diagnostic.
+- `scripts/build.sh` subcommands `strip`, `sign-frameworks`, and `sign-xcframeworks` — static archives have no nested frameworks and their signatures are irrelevant at runtime (the executable's signature covers the linked code).
+
 ## [0.11.0] - 2026-07-23
 
 ### Added

@@ -88,7 +88,6 @@ Quick symptom index — see `references/pitfalls.md` for detailed recipes.
 | Outline shows `U+FFFC` in label | iOS icon placeholder character | Match with `--label-regex` excluding the prefix |
 | `[i] … covers ~N% of the screen` warning (text output, or `--json` top-level `advisory` key) | The selector resolved to a near-full-screen wrapper (common on Flutter/canvas UIs) and the tap hit its center, likely missing the intended control | Re-run `ui` and target the control via `@N`/`#<id>`, or pass explicit `-x/-y`/`--point` |
 | `[i] Screen orientation could not be confirmed…` / `…coordinates may be stale…` advisory | Device/app is rotated (the `App:` header shows a tag like `(landscape-right)`) and orientation self-calibration couldn't verify the mapping, or the `@N` snapshot predates a rotation | Re-run `ui` and tap again; selectors handle rotation automatically once calibration succeeds. Explicit `-x/-y`/`--point` is always device-native portrait space |
-| iOS + Xcode 27: any HID verb (`tap`, `type`, `swipe`, …) errors with "Legacy HID input is disconnected … booted while Device Hub was open" | The simulator was **booted while Device Hub was open** — the legacy HID input path is disconnected at boot; sim-use detects this and refuses to send into the void | Quit Device Hub, then `xcrun simctl shutdown <UDID> && xcrun simctl boot <UDID>`; view simulators via the classic Simulator.app (from an Xcode 26.x install), which is safe. Device Hub attached *after* a clean boot is harmless and is not flagged |
 
 ## 3. Crash awareness
 
