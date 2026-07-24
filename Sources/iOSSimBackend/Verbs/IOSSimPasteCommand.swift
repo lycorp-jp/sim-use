@@ -252,8 +252,8 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
 
     private func longPress(at point: (x: Double, y: Double), logger: SimUseLogger) async throws {
         let durationNs = UInt64(max(0.1, longPressDuration) * 1_000_000_000)
-        let down = FBSimulatorHIDEvent.touchDownAt(x: point.x, y: point.y)
-        let up = FBSimulatorHIDEvent.touchUpAt(x: point.x, y: point.y)
+        let down = FBSimulatorHIDEvent.touch(direction: .down, x: point.x, y: point.y)
+        let up = FBSimulatorHIDEvent.touch(direction: .up, x: point.x, y: point.y)
         try await HIDInteractor.performHIDEvent(down, for: device.resolved, logger: logger)
         try await Task.sleep(nanoseconds: durationNs)
         try await HIDInteractor.performHIDEvent(up, for: device.resolved, logger: logger)
@@ -399,11 +399,11 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
 
     private func sendModifierCombo(key: UInt32, modifier: UInt32, logger: SimUseLogger) async throws {
         let events: [FBSimulatorHIDEvent] = [
-            FBSimulatorHIDEvent.keyDown(modifier),
+            FBSimulatorHIDEvent.keyboard(direction: .down, keyCode: modifier),
             FBSimulatorHIDEvent.shortKeyPress(key),
-            FBSimulatorHIDEvent.keyUp(modifier),
+            FBSimulatorHIDEvent.keyboard(direction: .up, keyCode: modifier),
         ]
-        let combo = FBSimulatorHIDEvent(events: events)
+        let combo = FBSimulatorHIDEvent.composite(events)
         try await HIDInteractor.performHIDEvent(combo, for: device.resolved, logger: logger)
     }
 }

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import ArgumentParser
 import Foundation
+import CompanionUtilities
 import FBSimulatorControl
 @preconcurrency import FBControlCore
 import SimUseCore
@@ -236,44 +237,34 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
         do {
             let config = FBVideoStreamConfiguration(
-                encoding: .BGRA,
+                format: .bgra,
                 framesPerSecond: nil,
-                compressionQuality: NSNumber(value: Double(quality) / 100.0),
-                scaleFactor: NSNumber(value: scale),
-                avgBitrate: nil,
+                rateControl: .quality(Double(quality) / 100.0),
+                scaleFactor: scale,
                 keyFrameRate: nil
             )
 
             let stdoutConsumer = FBFileWriter.syncWriter(withFileDescriptor: STDOUT_FILENO, closeOnEndOfFile: false)
-            let videoStreamFuture = simulator.createStream(with: config)
-            let videoStream = try await FutureBridge.value(videoStreamFuture)
-            let startFuture = videoStream.startStreaming(stdoutConsumer)
+            // The stream comes back already running — attach failures throw
+            // here instead of surfacing asynchronously.
+            let videoStream = try await simulator.createStream(configuration: config, to: stdoutConsumer)
+            FileHandle.standardError.write(Data("BGRA stream is now running...\n".utf8))
 
-            // The private startStreaming future can resolve with an error at
-            // any point (attach failure during startup, or later), and the
-            // operation's `completed` future is the mid-stream termination
-            // channel. Neither has a continuation to resume — box the first
-            // error and let the wait loop below pick it up, so failures
-            // surface as a non-zero exit instead of a stderr line.
+            // Mid-stream termination surfaces through awaitCompletion();
+            // box the error and flip a flag so the cancellation-aware wait
+            // loop below picks both up, and failures surface as a non-zero
+            // exit instead of a stderr line.
             let streamError = FirstErrorBox()
-            startFuture.onQueue(BridgeQueues.videoStreamQueue, notifyOfCompletion: { future in
-                if let error = future.error {
-                    FileHandle.standardError.write(Data("Stream initialization error: \(error)\n".utf8))
-                    streamError.set(error)
-                }
-            })
-            videoStream.completed.onQueue(BridgeQueues.videoStreamQueue, notifyOfCompletion: { future in
-                if let error = future.error {
+            let streamEnded = CancellationFlag()
+            let completionTask = Task {
+                do {
+                    try await videoStream.awaitCompletion()
+                } catch {
                     FileHandle.standardError.write(Data("Stream terminated with error: \(error)\n".utf8))
                     streamError.set(error)
                 }
-            })
-
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-            if let error = streamError.first {
-                throw error
+                streamEnded.cancel()
             }
-            FileHandle.standardError.write(Data("BGRA stream is now running...\n".utf8))
 
             while true {
                 if Task.isCancelled {
@@ -282,7 +273,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
                 if cancellationFlag.isCancelled() {
                     break
                 }
-                if streamError.first != nil {
+                if streamEnded.isCancelled() {
                     break
                 }
                 try? await cancellableSleep(seconds: 0.1, flag: cancellationFlag)
@@ -295,19 +286,9 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             }
 
             FileHandle.standardError.write(Data("\nStopping BGRA stream...\n".utf8))
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                BridgeQueues.videoStreamQueue.async {
-                    let stopFuture = videoStream.stopStreaming()
-                    stopFuture.onQueue(BridgeQueues.videoStreamQueue, notifyOfCompletion: { future in
-                        FileHandle.standardError.write(Data("BGRA stream stopped\n".utf8))
-                        if let error = future.error {
-                            continuation.resume(throwing: error)
-                        } else {
-                            continuation.resume(returning: ())
-                        }
-                    })
-                }
-            }
+            try await videoStream.stopStreaming()
+            await completionTask.value
+            FileHandle.standardError.write(Data("BGRA stream stopped\n".utf8))
         } catch {
             throw CLIError(errorDescription: "Failed to stream BGRA video: \(error.localizedDescription)")
         }

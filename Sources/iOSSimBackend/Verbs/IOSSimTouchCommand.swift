@@ -122,7 +122,7 @@ public struct IOSSimTouchCommand: SimUseExecutableCommand {
 
             logger.info().log("Touch down")
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.touchDownAt(x: pointX, y: pointY),
+                FBSimulatorHIDEvent.touch(direction: .down, x: pointX, y: pointY),
                 for: device.resolved,
                 logger: logger
             )
@@ -134,21 +134,21 @@ public struct IOSSimTouchCommand: SimUseExecutableCommand {
 
             logger.info().log("Touch up")
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.touchUpAt(x: pointX, y: pointY),
+                FBSimulatorHIDEvent.touch(direction: .up, x: pointX, y: pointY),
                 for: device.resolved,
                 logger: logger
             )
         } else if touchDown {
             logger.info().log("Touch down")
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.touchDownAt(x: pointX, y: pointY),
+                FBSimulatorHIDEvent.touch(direction: .down, x: pointX, y: pointY),
                 for: device.resolved,
                 logger: logger
             )
         } else {
             logger.info().log("Touch up")
             try await HIDInteractor.performHIDEvent(
-                FBSimulatorHIDEvent.touchUpAt(x: pointX, y: pointY),
+                FBSimulatorHIDEvent.touch(direction: .up, x: pointX, y: pointY),
                 for: device.resolved,
                 logger: logger
             )

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
+import CompanionUtilities
 import FBControlCore
 import FBSimulatorControl
 import SimUseCore
@@ -39,6 +40,21 @@ public struct HIDInteractor {
             return min(milliseconds, 1000)
         }
         return 25
+    }
+
+    /// Debug override for the HID transport, via SIM_USE_HID_TRANSPORT
+    /// (`indigo` | `dtuhid`). Unset (the default) lets upstream's
+    /// auto-selection pick: the DTUHID transport on simulators whose
+    /// legacy HID is dtuhidd-suppressed (booted with Device Hub open),
+    /// the legacy Indigo path otherwise. Note the daemon keeps the
+    /// environment it was spawned with — combine with SIM_USE_NO_DAEMON=1
+    /// or a daemon restart for ad-hoc experiments.
+    private static var transportOverride: FBSimulatorHIDTransportType? {
+        switch ProcessInfo.processInfo.environment["SIM_USE_HID_TRANSPORT"]?.lowercased() {
+        case "indigo": return .indigo
+        case "dtuhid": return .dtuhid
+        default: return nil
+        }
     }
 
     /// Deadline for a single HID send (see HIDSendDeadline). A single
@@ -82,18 +98,6 @@ public struct HIDInteractor {
         }
         logger.info().log("Simulator state verified: booted")
 
-        // A simulator booted while Device Hub was open has its legacy
-        // HID disconnected: sends succeed, nothing lands (issue #60).
-        // Fail loudly here — the single choke point every HID verb
-        // passes through — instead of delivering into the void.
-        let skipDtuhiddCheck = ProcessInfo.processInfo
-            .environment[DeviceHubHIDSuppression.skipCheckEnvVar]?.isEmpty == false
-        if !skipDtuhiddCheck, DeviceHubHIDSuppression.isSuppressed(forUDID: simulatorUDID) {
-            let message = DeviceHubHIDSuppression.workaroundMessage(udid: simulatorUDID)
-            logger.error().log(message)
-            throw CLIError(errorDescription: message)
-        }
-
         let hid = try await getOrCreateHIDConnection(for: simulator, logger: logger)
         return Session(simulatorUDID: simulatorUDID, simulator: simulator, hid: hid)
     }
@@ -125,12 +129,11 @@ public struct HIDInteractor {
 
     private static func performHIDEventOnce(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
         logger.info().log("Performing HID event...")
-        let eventFuture = event.perform(on: session.hid)
         let timeoutMs = sendTimeoutMs
         if timeoutMs > 0 {
             let udid = session.simulatorUDID
             try await HIDSendDeadline.run(milliseconds: timeoutMs) {
-                try await FutureBridge.value(eventFuture)
+                try await session.hid.send(event: event, logger: logger)
             } onTimeout: {
                 CLIError(errorDescription: """
                 HID event delivery timed out after \(timeoutMs) ms; the connection to \
@@ -139,7 +142,7 @@ public struct HIDInteractor {
                 """)
             }
         } else {
-            _ = try await FutureBridge.value(eventFuture)
+            try await session.hid.send(event: event, logger: logger)
         }
         logger.info().log("HID event performed successfully.")
 
@@ -166,12 +169,18 @@ public struct HIDInteractor {
             // unknowable) since the connection was made: the cached
             // handle's mach port is dead and must not be sent through.
             logger.info().log("Boot identity changed for simulator \(simulator.udid) (cached: \(cached.bootToken); current: \(currentToken)); discarding cached HID connection")
+            cached.hid.disconnect()
             hidConnections.removeValue(forKey: simulator.udid)
         }
 
         logger.info().log("Creating new HID connection for simulator \(simulator.udid)...")
-        let hidFuture = simulator.connectToHID()
-        let hid = try await FutureBridge.value(hidFuture)
+        // Bare construction, not `simulator.connectToHID()`: upstream's
+        // lifecycle wrapper keeps its own per-simulator cache with no
+        // boot-identity gate, which would resurrect exactly the stale
+        // handles this cache invalidates (issue #55). Transport selection
+        // stays automatic (`FBSimulator.defaultHIDTransport`) unless the
+        // debug override is set.
+        let hid = try FBSimulatorHID(for: simulator, transport: transportOverride)
 
         hidConnections[simulator.udid] = CachedConnection(hid: hid, bootToken: currentToken)
         logger.info().log("HID connection created and cached for simulator \(simulator.udid)")
@@ -180,6 +189,9 @@ public struct HIDInteractor {
     }
 
     public static func clearHIDConnections() {
+        for cached in hidConnections.values {
+            cached.hid.disconnect()
+        }
         hidConnections.removeAll()
     }
 
@@ -190,6 +202,7 @@ public struct HIDInteractor {
     /// even if the same UDID is re-booted before the daemon process
     /// itself terminates.
     public static func clearHIDConnection(for simulatorUDID: String) {
+        hidConnections[simulatorUDID]?.hid.disconnect()
         hidConnections.removeValue(forKey: simulatorUDID)
     }
 } 

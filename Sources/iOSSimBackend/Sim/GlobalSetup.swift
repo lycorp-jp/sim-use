@@ -12,9 +12,8 @@ public func performGlobalSetup(logger: SimUseLogger) async throws {
     // Check Xcode availability
     logger.info().log("Checking Xcode availability...")
     do {
-        let xcodePathFuture = FBXcodeDirectory.xcodeSelectDeveloperDirectory()
-        let xcodePath = try await FutureBridge.value(xcodePathFuture)        
-        if xcodePath.length == 0 {
+        let xcodePath = try FBXcodeDirectory.xcodeSelectDeveloperDirectory()
+        if xcodePath.isEmpty {
             let errorMessage = "Xcode is not available (xcode-select path is empty). FBSimulatorControl may not function correctly."
             logger.error().log(errorMessage)
             throw CLIError(errorDescription: errorMessage)

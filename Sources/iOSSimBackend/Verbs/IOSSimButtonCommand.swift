@@ -152,10 +152,10 @@ public struct IOSSimButtonCommand: SimUseExecutableCommand {
 
         let buttonEvent: FBSimulatorHIDEvent
         if let duration {
-            let down = FBSimulatorHIDEvent.buttonDown(hidButton)
+            let down = FBSimulatorHIDEvent.button(direction: .down, button: hidButton)
             let delayEvent = FBSimulatorHIDEvent.delay(duration)
-            let up = FBSimulatorHIDEvent.buttonUp(hidButton)
-            buttonEvent = FBSimulatorHIDEvent(events: [down, delayEvent, up])
+            let up = FBSimulatorHIDEvent.button(direction: .up, button: hidButton)
+            buttonEvent = FBSimulatorHIDEvent.composite([down, delayEvent, up])
         } else {
             buttonEvent = FBSimulatorHIDEvent.shortButtonPress(hidButton)
         }

@@ -169,9 +169,8 @@ public struct VideoWriterStallError: Error, LocalizedError, Equatable {
 
 public struct VideoFrameUtilities {
     public static func captureScreenshotData(from simulator: FBSimulator) async throws -> Data {
-        let screenshotFuture = simulator.takeScreenshot(.PNG)
-        let nsData = try await FutureBridge.value(screenshotFuture)
-        guard let data = nsData as Data? else {
+        let data = try await simulator.takeScreenshot(format: .png)
+        guard !data.isEmpty else {
             throw VideoProcessingError.emptyScreenshot
         }
         return data

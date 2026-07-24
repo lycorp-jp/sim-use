@@ -18,8 +18,8 @@ extension AsyncParsableCommand {
 public func performEssentialSetup(logger: SimUseLogger) async throws {
     // Check Xcode availability
     do {
-        let isXcodeAvailable: NSString = try await FutureBridge.value(FBXcodeDirectory.xcodeSelectDeveloperDirectory())
-        if isXcodeAvailable.length == 0 {
+        let xcodePath = try FBXcodeDirectory.xcodeSelectDeveloperDirectory()
+        if xcodePath.isEmpty {
             logger.error().log("Xcode is not available, idb will not be able to use Simulators")
             throw CLIError(errorDescription: "Xcode is not available, idb will not be able to use Simulators")
         }

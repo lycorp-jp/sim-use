@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import CompanionUtilities
 import FBControlCore
 import FBSimulatorControl
 import Foundation
@@ -361,8 +362,7 @@ public struct AXProbeSession {
             throw CLIError(errorDescription: "Simulator with UDID \(udid) not found in set.")
         }
         let probe: OrientationCalibrator.HitTestProbe = { point in
-            let future = target.accessibilityElement(at: point, nestedFormat: false)
-            let raw: AnyObject = try await FutureBridge.value(future)
+            let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false)
             return raw as? [String: Any]
         }
         return AXProbeSession(probe: probe, native: NativePortraitSize(screenInfo: target.screenInfo))

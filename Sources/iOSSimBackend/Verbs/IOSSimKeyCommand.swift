@@ -100,10 +100,10 @@ public struct IOSSimKeyCommand: SimUseExecutableCommand {
 
         let keyEvent: FBSimulatorHIDEvent
         if let duration {
-            let keyDownEvent = FBSimulatorHIDEvent.keyDown(UInt32(keycode))
+            let keyDownEvent = FBSimulatorHIDEvent.keyboard(direction: .down, keyCode: UInt32(keycode))
             let delayEvent = FBSimulatorHIDEvent.delay(duration)
-            let keyUpEvent = FBSimulatorHIDEvent.keyUp(UInt32(keycode))
-            keyEvent = FBSimulatorHIDEvent(events: [keyDownEvent, delayEvent, keyUpEvent])
+            let keyUpEvent = FBSimulatorHIDEvent.keyboard(direction: .up, keyCode: UInt32(keycode))
+            keyEvent = FBSimulatorHIDEvent.composite([keyDownEvent, delayEvent, keyUpEvent])
         } else {
             keyEvent = FBSimulatorHIDEvent.shortKeyPress(UInt32(keycode))
         }

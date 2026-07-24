@@ -99,11 +99,6 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
 
-        // The Device Hub / dtuhidd guard moved to HIDInteractor.makeSession
-        // (issue #60): it now covers every legacy-HID verb, only flags the
-        // poisoned booted-under-Hub state, and keeps the
-        // SIM_USE_SKIP_DTUHIDD_CHECK escape hatch.
-
         let inputText: String
         switch (text, useStdin, inputFile) {
         case (let positional?, false, nil):
