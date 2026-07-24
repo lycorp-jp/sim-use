@@ -89,7 +89,10 @@ jobs:
           sudo xcode-select -s "${XCODE_APP}/Contents/Developer"
           xcodebuild -version
           swift --version
-          echo "version=$(xcodebuild -version | awk 'NR==1 {print $2}')" >> "${GITHUB_OUTPUT}"
+          # Include the Xcode build id, not just the marketing version:
+          # two betas of the same version ship incompatible Swift
+          # compilers, and the FB* swiftmodules are toolchain-locked.
+          echo "version=$(xcodebuild -version | awk 'NR==1 {v=$2} /^Build version/ {b=$3} END {print v "-" b}')" >> "${GITHUB_OUTPUT}"
 
       # Separate restore/save so a red test run still persists the
       # expensive framework build for the next attempt.
