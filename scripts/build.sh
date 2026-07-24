@@ -7,7 +7,7 @@ set -o pipefail
 
 # Environment and Configuration
 IDB_CHECKOUT_DIR="${IDB_CHECKOUT_DIR:-./idb_checkout}"
-IDB_GIT_REF="${IDB_GIT_REF:-76639e4d0e1741adf391cab36f19fbc59378153e}"
+IDB_GIT_REF="${IDB_GIT_REF:-1f6943f8a2cc1ce449f031241818032adaea2079}"
 IDB_PATCHES_DIR="${IDB_PATCHES_DIR:-./patches/idb}"
 BUILD_OUTPUT_DIR="${BUILD_OUTPUT_DIR:-./build_products}"
 DERIVED_DATA_PATH="${DERIVED_DATA_PATH:-./build_derived_data}"
@@ -207,6 +207,25 @@ function clone_idb_repo() {
     print_success "idb repository updated to $IDB_GIT_REF."
     apply_idb_patches
   fi
+  generate_idb_project
+}
+
+# idb no longer checks in FBSimulatorControl.xcodeproj — it is generated
+# from project.yml with XcodeGen.
+function generate_idb_project() {
+  if ! command -v xcodegen &> /dev/null; then
+    echo "❌ Error: XcodeGen not found — the idb checkout generates its Xcode project from project.yml."
+    echo "   Install with: brew install xcodegen"
+    exit 1
+  fi
+
+  print_info "Generating FBSimulatorControl.xcodeproj with XcodeGen..."
+  (cd "$IDB_CHECKOUT_DIR" && xcodegen generate)
+  if [ ! -f "${FBSIMCONTROL_PROJECT}/project.pbxproj" ]; then
+    echo "❌ Error: XcodeGen did not produce ${FBSIMCONTROL_PROJECT}"
+    exit 1
+  fi
+  print_success "FBSimulatorControl.xcodeproj generated."
 }
 
 function apply_idb_patches() {
@@ -257,6 +276,11 @@ function framework_build() {
   print_subsection "🔨" "Building framework: ${scheme_name}"
   print_info "Project: ${project_file}"
 
+  # No BUILD_LIBRARY_FOR_DISTRIBUTION: upstream's Swift 6 code rejects the
+  # non-frozen-enum exhaustiveness rules that library evolution imposes, and
+  # the frameworks are static archives consumed from source in this repo —
+  # binary .swiftmodule files are toolchain-locked instead, so re-run
+  # `build.sh dev` after switching Xcode versions.
   invoke_xcodebuild \
     -project "${project_file}" \
     -scheme "${scheme_name}" \
@@ -268,12 +292,8 @@ function framework_build() {
     SKIP_INSTALL=NO \
     ONLY_ACTIVE_ARCH=NO \
     ARCHS="arm64 x86_64" \
-    BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
-    GCC_WARN_ABOUT_MISSING_FIELD_INITIALIZERS=NO \
-    CLANG_WARN_DOCUMENTATION_COMMENTS=NO \
     GCC_TREAT_WARNINGS_AS_ERRORS=NO \
-    SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
-    OTHER_LDFLAGS='$(inherited) -Wl,-headerpad_max_install_names'
+    SWIFT_TREAT_WARNINGS_AS_ERRORS=NO
   local build_exit_code=$?
 
   if [ $build_exit_code -eq 0 ]; then
@@ -305,29 +325,67 @@ function install_framework() {
   print_success "Framework ${scheme_name}.framework installed to ${final_framework_install_dir}/"
 }
 
+# The FB* frameworks are static archives whose Swift modules import the
+# reverse-engineered private-framework Clang modules (CoreSimulator,
+# SimulatorKit, ...), and whose CoreSimulator / AccessibilityPlatformTranslation
+# class references must be weak-linked at the *final* executable link. Stage
+# the idb PrivateHeaders module directories (module maps + headers + .tbd
+# stubs) next to the XCFrameworks so Package.swift can reference them.
+PRIVATE_HEADER_MODULES=(
+  "CoreSimulator"
+  "SimulatorApp"
+  "SimulatorKit"
+  "AXRuntime"
+  "AccessibilityPlatformTranslation"
+)
+
+function install_private_headers() {
+  local output_base_dir="$1"
+  local source_dir="${IDB_CHECKOUT_DIR}/PrivateHeaders"
+  local dest_dir="${output_base_dir}/PrivateHeaders"
+
+  print_subsection "📑" "Staging idb PrivateHeaders modules"
+  rm -rf "${dest_dir}"
+  mkdir -p "${dest_dir}"
+
+  local module
+  for module in "${PRIVATE_HEADER_MODULES[@]}"; do
+    if [[ ! -f "${source_dir}/${module}/module.modulemap" ]]; then
+      echo "❌ Error: PrivateHeaders module '${module}' not found in ${source_dir}"
+      exit 1
+    fi
+    cp -R "${source_dir}/${module}" "${dest_dir}/"
+  done
+  print_success "PrivateHeaders modules staged to ${dest_dir}"
+}
+
 # Function to create a single XCFramework
 # $1: Scheme name
 # $2: Base output directory (where XCFrameworks/ subdirectory will be created)
 function create_xcframework() {
   local scheme_name="$1"
   local output_base_dir="$2"
-  local signed_framework_path="${output_base_dir}/Frameworks/${scheme_name}.framework"
+  local framework_path="${output_base_dir}/Frameworks/${scheme_name}.framework"
   local final_xcframework_output_dir="${output_base_dir}/XCFrameworks"
   local xcframework_path="${final_xcframework_output_dir}/${scheme_name}.xcframework"
 
   print_subsection "📦" "Creating XCFramework for ${scheme_name}"
-  if [[ ! -d "${signed_framework_path}" ]]; then
-    echo "❌ Error: Signed framework not found at ${signed_framework_path} for XCFramework creation."
+  if [[ ! -d "${framework_path}" ]]; then
+    echo "❌ Error: Framework not found at ${framework_path} for XCFramework creation."
     exit 1
   fi
 
   mkdir -p "${final_xcframework_output_dir}"
   rm -rf "${xcframework_path}"
 
-  print_info "Packaging ${signed_framework_path} into ${xcframework_path}"
+  print_info "Packaging ${framework_path} into ${xcframework_path}"
+  # -allow-internal-distribution: the static frameworks are built without
+  # library evolution (no .swiftinterface), which is fine for same-repo,
+  # same-toolchain consumption via SwiftPM binary targets.
   invoke_xcodebuild \
     -create-xcframework \
-    -framework "${signed_framework_path}" \
+    -allow-internal-distribution \
+    -framework "${framework_path}" \
     -output "${xcframework_path}"
   local xcframework_exit_code=$?
 
@@ -336,134 +394,6 @@ function create_xcframework() {
   else
     echo "❌ Error: XCFramework creation for ${scheme_name} failed with exit code ${xcframework_exit_code}"
     exit $xcframework_exit_code
-  fi
-}
-
-# Function to strip a framework of nested frameworks
-# $1: Base output directory
-# $2: Framework path
-function strip_framework() {
-  local output_base_dir="$1"
-  local framework_path="${output_base_dir}/Frameworks/${2}"
-
-  if [ -d "$framework_path" ]; then
-    print_info "Stripping Framework $framework_path"
-    rm -r "$framework_path"
-  fi
-}
-
-# Function to resign a framework with Developer ID
-# $1: Base output directory
-# $2: Framework name (e.g., "FBSimulatorControl.framework")
-function resign_framework() {
-  local output_base_dir="$1"
-  local framework_name="$2"
-  local framework_path="${output_base_dir}/Frameworks/${framework_name}"
-
-  if [ -d "$framework_path" ]; then
-    print_info "Resigning framework: ${framework_name}"
-
-    # First, sign all dynamic libraries and binaries inside the framework
-    print_info "Signing embedded binaries in ${framework_name}..."
-
-    # Find and sign all .dylib files recursively
-    find "$framework_path" -name "*.dylib" -type f | while read -r dylib_path; do
-      print_info "  Signing dylib: $(basename "$dylib_path")"
-      codesign_with_retry --force \
-        --sign "${CODESIGN_IDENTITY}" \
-        --options runtime \
-        --timestamp \
-        --verbose \
-        "$dylib_path"
-
-      if [ $? -ne 0 ]; then
-        echo "❌ Error: Failed to sign dylib: $dylib_path"
-        exit 1
-      fi
-    done
-
-    # Remove any existing signature from the main framework binary first
-    print_info "Removing existing signature from ${framework_name}..."
-    codesign --remove-signature "$framework_path" 2>/dev/null || true
-
-    # Sign the main framework bundle with specific notarization-compatible options
-    print_info "Signing main framework bundle: ${framework_name}"
-    codesign_with_retry --force \
-      --sign "${CODESIGN_IDENTITY}" \
-      --options runtime \
-      --entitlements scripts/entitlements.plist \
-      --timestamp \
-      --verbose \
-      "$framework_path"
-
-    if [ $? -eq 0 ]; then
-      print_success "Framework ${framework_name} resigned successfully"
-
-      # Verify the signature with strictest verification
-      print_info "Performing strict verification for ${framework_name}..."
-      codesign -vvv --strict "$framework_path"
-
-      if [ $? -eq 0 ]; then
-        print_success "Signature verification passed for ${framework_name}"
-
-        # Display signature details
-        print_info "Signature details for ${framework_name}:"
-        codesign -dv "$framework_path" 2>&1 | grep -E "(Identifier|TeamIdentifier|Authority|Timestamp)" || true
-      else
-        echo "❌ Error: Signature verification failed for ${framework_name}"
-        exit 1
-      fi
-    else
-      echo "❌ Error: Failed to resign framework ${framework_name}"
-      exit 1
-    fi
-  else
-    print_warning "Framework not found: $framework_path"
-  fi
-}
-
-# Function to resign an XCFramework with Developer ID
-# $1: Base output directory
-# $2: XCFramework name (e.g., "FBSimulatorControl.xcframework")
-function resign_xcframework() {
-  local output_base_dir="$1"
-  local xcframework_name="$2"
-  local xcframework_path="${output_base_dir}/XCFrameworks/${xcframework_name}"
-
-  if [ -d "$xcframework_path" ]; then
-    print_info "Resigning XCFramework: ${xcframework_name}"
-
-    # Sign XCFramework with Developer ID and runtime hardening
-    codesign_with_retry --force \
-      --sign "${CODESIGN_IDENTITY}" \
-      --options runtime \
-      --deep \
-      --timestamp \
-      "$xcframework_path"
-
-    if [ $? -eq 0 ]; then
-      print_success "XCFramework ${xcframework_name} resigned successfully"
-
-      # Verify the signature with strictest verification and deep checking
-      print_info "Performing strict verification for XCFramework ${xcframework_name}..."
-      codesign -vvv --deep "$xcframework_path"
-
-      if [ $? -eq 0 ]; then
-        print_success "XCFramework signature verification passed for ${xcframework_name}"
-
-        # Display signature details
-        print_info "XCFramework signature details for ${xcframework_name}:"
-        codesign -dv --deep "$xcframework_path" 2>&1 | grep -E "(Identifier|TeamIdentifier|Authority)" || true
-      else
-        echo "❌ Error: XCFramework signature verification failed for ${xcframework_name}"
-        exit 1
-      fi
-    else
-      echo "❌ Error: Failed to resign XCFramework ${xcframework_name}"
-      exit 1
-    fi
-  else
-    print_warning "XCFramework not found: $xcframework_path"
   fi
 }
 
@@ -485,31 +415,6 @@ function remove_rpaths_matching() {
 
 function remove_xcode_rpaths() {
   remove_rpaths_matching "$1" "/Applications/Xcode"
-}
-
-function remove_build_products_rpaths() {
-  remove_rpaths_matching "$1" "build_products"
-}
-
-function sanitize_framework_rpaths() {
-  local frameworks_dir="$1"
-  if [[ ! -d "$frameworks_dir" ]]; then
-    print_warning "Frameworks directory not found: $frameworks_dir"
-    return
-  fi
-
-  print_info "Removing Xcode toolchain rpaths from framework binaries..."
-  local found=false
-  while IFS= read -r -d '' file; do
-    if file "$file" | grep -q "Mach-O"; then
-      found=true
-      remove_xcode_rpaths "$file"
-    fi
-  done < <(find "$frameworks_dir" -type f -print0)
-
-  if [[ "$found" == "false" ]]; then
-    print_warning "No Mach-O files found under ${frameworks_dir}"
-  fi
 }
 
 # Function to build the sim-use executable using Swift Package Manager
@@ -558,58 +463,19 @@ function build_sim_use_executable() {
   verify_macho_has_arch "${executable_dest}" "x86_64"
   print_success "sim-use executable installed to ${executable_dest}"
 
-  # Configure the executable's rpath set for framework loading.
-  #
-  # The set must satisfy two constraints simultaneously:
-  #   1. dyld can resolve `@rpath/<Name>.framework/Versions/A/<Name>` loads
-  #      (every framework load in this binary is in that form — see `otool
-  #      -L`).
-  #   2. Homebrew's keg_relocate.rb (extend/os/mac/keg_relocate.rb, the
-  #      block at `each_linkage_for(file, :rpaths,
-  #      resolve_variable_references: true)`) finds **no two rpaths
-  #      resolving to the same path**. The moment it deletes a duplicate
-  #      it flips `needs_codesigning = true` and ad-hoc resigns the
-  #      binary, destroying the upstream Developer ID + Apple notary
-  #      signature we worked to ship.
-  #
-  # Both `@loader_path` and `@executable_path` resolve to the executable's
-  # own directory (loader_path == executable_path for the main binary), so
-  # keeping both is a duplicate brew strips. Same for
-  # `@executable_path/Frameworks` vs `@loader_path/Frameworks`. The
-  # minimal brew-safe set:
-  #
-  #   /usr/lib/swift              # Swift stdlib fallback (SwiftPM emits)
-  #   @loader_path                # SwiftPM emits; alone, kept
-  #   @executable_path/Frameworks # we add; resolves all @rpath/*.framework
-  #                               # loads to libexec/Frameworks/ once brew
-  #                               # installs the payload
-  #
-  # We explicitly delete the bare `@executable_path` (SwiftPM emits it,
-  # duplicate with `@loader_path`) and never add `@loader_path/Frameworks`
-  # (would duplicate `@executable_path/Frameworks`).
-  print_info "Configuring executable rpath for organized framework loading..."
+  # The FB* frameworks are linked statically, so the binary carries no
+  # @rpath framework loads. The remaining rpath work is Homebrew hygiene:
+  # keg_relocate.rb ad-hoc resigns the binary (destroying the Developer ID
+  # + notary signature) the moment it finds two rpaths resolving to the
+  # same path, and `@loader_path` == `@executable_path` for a main binary.
+  # Keep the minimal set SwiftPM needs (`/usr/lib/swift` fallback +
+  # `@loader_path`), drop the duplicate, and strip any Xcode toolchain
+  # rpaths that would also trigger relocation.
+  print_info "Sanitizing executable rpaths..."
 
-  install_name_tool -delete_rpath "@executable_path"            "${executable_dest}" 2>/dev/null || true
-  install_name_tool -delete_rpath "@executable_path/Frameworks" "${executable_dest}" 2>/dev/null || true
-  install_name_tool -delete_rpath "@loader_path/Frameworks"     "${executable_dest}" 2>/dev/null || true
-
-  install_name_tool -add_rpath "@executable_path/Frameworks" "${executable_dest}"
-  print_success "Added rpath: @executable_path/Frameworks"
-
-  # Strip any Xcode toolchain rpaths that can trigger Homebrew relocation
+  install_name_tool -delete_rpath "@executable_path" "${executable_dest}" 2>/dev/null || true
   remove_xcode_rpaths "${executable_dest}"
 
-  # Strip the dev-loop rpaths Package.swift emits for the SwiftBuild-backend
-  # toolchains (build_products/… XCFramework slices; one entry per framework
-  # is CWD-relative). dyld searches them BEFORE the appended
-  # @executable_path/Frameworks, so a shipped binary run from a directory
-  # holding dev-built frameworks — this repository's root, for one — would
-  # silently load those instead of the bundled ones (brew ad-hoc resigns the
-  # binary, so no library validation blocks the swap). Dev builds keep the
-  # entries; only the staged release binary is scrubbed.
-  remove_build_products_rpaths "${executable_dest}"
-
-  # Verify rpath configuration
   print_info "Verifying rpath configuration..."
   local rpath_output=$(otool -l "${executable_dest}" | grep -A2 LC_RPATH | grep path | awk '{print $2}')
   if [[ -n "$rpath_output" ]]; then
@@ -618,16 +484,14 @@ function build_sim_use_executable() {
       print_info "  → ${path}"
     done
   else
-    print_warning "No rpath entries found in executable"
+    print_info "No rpath entries in executable (fine for a static link)"
   fi
-
-  print_success "Executable rpath configured for organized framework deployment"
 }
 
 function verify_xcframework_inputs() {
   local output_base_dir="$1"
   local xcframeworks_dir="${output_base_dir}/XCFrameworks"
-  local expected_frameworks=("FBControlCore" "XCTestBootstrap" "FBSimulatorControl" "FBDeviceControl")
+  local expected_frameworks=("FBControlCore" "XCTestBootstrap" "FBSimulatorControl" "CompanionUtilities")
 
   print_subsection "🧪" "Validating XCFramework inputs"
 
@@ -659,7 +523,7 @@ function verify_release_architectures() {
   local output_base_dir="$1"
   local frameworks_dir="${output_base_dir}/Frameworks"
   local executable_path="${output_base_dir}/sim-use"
-  local expected_frameworks=("FBControlCore" "XCTestBootstrap" "FBSimulatorControl" "FBDeviceControl")
+  local expected_frameworks=("FBControlCore" "XCTestBootstrap" "FBSimulatorControl" "CompanionUtilities")
 
   print_subsection "🧪" "Validating release artifact architectures"
   verify_macho_has_arch "${executable_path}" "arm64"
@@ -749,22 +613,13 @@ Commands:
     Clean previous build products and derived data.
 
   frameworks
-    Build all IDB frameworks (FBControlCore, XCTestBootstrap, FBSimulatorControl, FBDeviceControl).
+    Build all IDB frameworks (CompanionUtilities, FBControlCore, XCTestBootstrap, FBSimulatorControl).
 
   install
-    Install built frameworks to the Frameworks directory.
-
-  strip
-    Strip nested frameworks from the built frameworks.
-
-  sign-frameworks
-    Code sign all frameworks with Developer ID.
+    Install built frameworks and the idb PrivateHeaders modules to build_products/.
 
   xcframeworks
     Create XCFrameworks from the built frameworks.
-
-  sign-xcframeworks
-    Code sign all XCFrameworks with Developer ID.
 
   executable
     Build the sim-use executable using Swift Package Manager.
@@ -791,7 +646,7 @@ Examples:
   ./build.sh                    # Build everything (default)
   ./build.sh help               # Show this help
   ./build.sh frameworks         # Only build frameworks
-  ./build.sh sign-frameworks    # Only sign frameworks
+  ./build.sh dev                # Frameworks + XCFrameworks, no executable
 EOF
 }
 
@@ -814,56 +669,31 @@ function cmd_clean() {
 
 function cmd_frameworks() {
   print_section "🔧" "Building Frameworks"
+  # CompanionUtilities must be built before FBSimulatorControl:
+  # FBSimulator.h imports CompanionUtilities-Swift.h and upstream's scheme
+  # dependency graph does not order the generated header for a bare
+  # xcodebuild invocation.
+  framework_build "CompanionUtilities" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
   framework_build "FBControlCore" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
   framework_build "XCTestBootstrap" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
   framework_build "FBSimulatorControl" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
-  framework_build "FBDeviceControl" "${FBSIMCONTROL_PROJECT}" "${BUILD_OUTPUT_DIR}"
 }
 
 function cmd_install() {
   print_section "📦" "Installing Frameworks"
+  install_framework "CompanionUtilities" "${BUILD_OUTPUT_DIR}"
   install_framework "FBControlCore" "${BUILD_OUTPUT_DIR}"
   install_framework "XCTestBootstrap" "${BUILD_OUTPUT_DIR}"
   install_framework "FBSimulatorControl" "${BUILD_OUTPUT_DIR}"
-  install_framework "FBDeviceControl" "${BUILD_OUTPUT_DIR}"
-}
-
-function cmd_strip() {
-  print_section "✂️" "Stripping Nested Frameworks"
-  strip_framework "${BUILD_OUTPUT_DIR}" "FBSimulatorControl.framework/Versions/Current/Frameworks/XCTestBootstrap.framework"
-  strip_framework "${BUILD_OUTPUT_DIR}" "FBSimulatorControl.framework/Versions/Current/Frameworks/FBControlCore.framework"
-  strip_framework "${BUILD_OUTPUT_DIR}" "FBDeviceControl.framework/Versions/Current/Frameworks/XCTestBootstrap.framework"
-  strip_framework "${BUILD_OUTPUT_DIR}" "FBDeviceControl.framework/Versions/Current/Frameworks/FBControlCore.framework"
-  strip_framework "${BUILD_OUTPUT_DIR}" "XCTestBootstrap.framework/Versions/Current/Frameworks/FBControlCore.framework"
-}
-
-function cmd_sign_frameworks() {
-  print_section "🔒" "Resigning Frameworks"
-  print_info "Resigning frameworks..."
-  sanitize_framework_rpaths "${BUILD_OUTPUT_DIR}/Frameworks"
-  resign_framework "${BUILD_OUTPUT_DIR}" "FBSimulatorControl.framework"
-  resign_framework "${BUILD_OUTPUT_DIR}" "FBDeviceControl.framework"
-  resign_framework "${BUILD_OUTPUT_DIR}" "XCTestBootstrap.framework"
-  resign_framework "${BUILD_OUTPUT_DIR}" "FBControlCore.framework"
-  print_success "Frameworks resigned successfully"
+  install_private_headers "${BUILD_OUTPUT_DIR}"
 }
 
 function cmd_xcframeworks() {
   print_section "📦" "Creating XCFrameworks"
+  create_xcframework "CompanionUtilities" "${BUILD_OUTPUT_DIR}"
   create_xcframework "FBControlCore" "${BUILD_OUTPUT_DIR}"
   create_xcframework "XCTestBootstrap" "${BUILD_OUTPUT_DIR}"
   create_xcframework "FBSimulatorControl" "${BUILD_OUTPUT_DIR}"
-  create_xcframework "FBDeviceControl" "${BUILD_OUTPUT_DIR}"
-}
-
-function cmd_sign_xcframeworks() {
-  print_section "🔒" "Resigning XCFrameworks"
-  print_info "Resigning XCFrameworks with Developer ID..."
-  resign_xcframework "${BUILD_OUTPUT_DIR}" "FBControlCore.xcframework"
-  resign_xcframework "${BUILD_OUTPUT_DIR}" "XCTestBootstrap.xcframework"
-  resign_xcframework "${BUILD_OUTPUT_DIR}" "FBSimulatorControl.xcframework"
-  resign_xcframework "${BUILD_OUTPUT_DIR}" "FBDeviceControl.xcframework"
-  print_success "XCFrameworks resigned successfully"
 }
 
 function cmd_executable() {
@@ -901,10 +731,7 @@ function cmd_build() {
   cmd_clean
   cmd_frameworks
   cmd_install
-  cmd_strip
-  cmd_sign_frameworks
   cmd_xcframeworks
-  cmd_sign_xcframeworks
   cmd_executable
   cmd_sign_executable
 
@@ -931,23 +758,14 @@ case $COMMAND in
     cmd_frameworks;;
   install)
     cmd_install;;
-  strip)
-    cmd_strip;;
-  sign-frameworks)
-    cmd_sign_frameworks;;
   xcframeworks)
     cmd_xcframeworks;;
-  sign-xcframeworks)
-    cmd_sign_xcframeworks;;
   dev)
     cmd_setup
     cmd_clean
     cmd_frameworks
     cmd_install
-    cmd_strip
-    cmd_sign_frameworks
-    cmd_xcframeworks
-    cmd_sign_xcframeworks;;
+    cmd_xcframeworks;;
   executable)
     cmd_executable;;
   sign-executable)
