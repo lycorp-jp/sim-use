@@ -23,8 +23,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -58,6 +61,41 @@ def load_cases(platform: str, ids: list[str] | None, tags: list[str] | None) -> 
         # never gate a run unless asked for by id or by tag.
         cases = [c for c in cases if "fragile" not in c.get("tags", [])]
     return cases
+
+
+def install_sim_use_override(binary: str) -> str:
+    """Make `binary` the sim-use every layer of this run resolves.
+
+    The runner's device detection, the deterministic verification layer
+    (framework/device.py), and the eval agent's subprocesses all invoke
+    bare `sim-use` and inherit this process's environment — so one PATH
+    prepend pins the binary under test for the whole run. A shim
+    directory (with a `sim-use` symlink) keeps resolution working
+    whatever the target file is called. Returns the resolved path.
+    """
+    path = Path(binary).expanduser().resolve()
+    if not (path.is_file() and os.access(path, os.X_OK)):
+        sys.exit(f"--sim-use: not an executable file: {path}")
+    shim = Path(tempfile.mkdtemp(prefix="sim-use-eval-bin-"))
+    (shim / "sim-use").symlink_to(path)
+    os.environ["PATH"] = f"{shim}{os.pathsep}{os.environ.get('PATH', '')}"
+    return str(path)
+
+
+def sim_use_under_test() -> tuple[str, str]:
+    """Resolved path + version of the sim-use this run will exercise.
+    Symlinks (the override shim, brew's bin link) are followed so the
+    banner names the real binary."""
+    which = shutil.which("sim-use")
+    resolved = str(Path(which).resolve()) if which else "(not found on PATH)"
+    try:
+        out = subprocess.run(
+            ["sim-use", "--version"], capture_output=True, text=True, timeout=10
+        )
+        version = out.stdout.strip() or "unknown"
+    except FileNotFoundError:
+        version = "unknown"
+    return resolved, version
 
 
 def resolve_device(platform: str, cli_device: str) -> str:
@@ -141,6 +179,10 @@ def main() -> int:
     parser.add_argument("--cases", default="", help="comma-separated case ids")
     parser.add_argument("--tags", default="", help="comma-separated tag filter (e.g. quick)")
     parser.add_argument("--model", default="", help="model override for the eval agent")
+    parser.add_argument("--sim-use", default="", metavar="PATH", dest="sim_use",
+                        help="sim-use binary to evaluate (default: whatever "
+                             "`sim-use` resolves to on PATH) — e.g. a debug "
+                             "build under .build/")
     parser.add_argument("--retries", type=int, default=0,
                         help="retry a FAILed case N times (flake control; default 0)")
     parser.add_argument("--list", action="store_true", help="list cases and exit")
@@ -172,11 +214,23 @@ def main() -> int:
     if not cases:
         sys.exit("no cases matched")
 
+    # Pin and announce the binary under test BEFORE anything touches a
+    # device, so a run never silently exercises the wrong sim-use.
+    if args.sim_use:
+        install_sim_use_override(args.sim_use)
+    binary_path, binary_version = sim_use_under_test()
+    if binary_path.startswith("(") :
+        sys.exit("sim-use not found on PATH; build one or pass --sim-use <path>")
+
     device = resolve_device(args.platform, args.device)
     sim = Sim(udid=device)
 
     out_dir = EVALS_DIR / "reports" / datetime.now().strftime("%Y%m%d-%H%M%S")
-    report = RunReport(out_dir, args.platform, device)
+    report = RunReport(
+        out_dir, args.platform, device,
+        meta={"sim-use under test": f"{binary_path} ({binary_version})"},
+    )
+    print(f"[eval] sim-use under test: {binary_path} ({binary_version})")
     print(f"[eval] {len(cases)} case(s) on {args.platform} device {device}")
     print(f"[eval] report dir: {out_dir}")
 

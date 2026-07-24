@@ -33,7 +33,9 @@ Run these checks. Abort with a clear error if any fails.
    map and keeps going past failures. Any red suite blocks the release unless
    the user explicitly waives it at Step 3.
    Optional but recommended when skill prose changed this release (real
-   `claude -p` cost): `make eval ARGS="-y -t quick"`.
+   `claude -p` cost): `make eval ARGS="-y -t quick"` — the `/run-evals`
+   skill covers environment prep (Device Hub closed, fixtures installed)
+   and pinning which sim-use binary is under test.
 8. Signing + notarization readiness:
    ```bash
    security find-identity -v -p codesigning | grep -F "NAVER Japan K.K. (GFPYJQXRSN)"

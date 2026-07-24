@@ -12,10 +12,11 @@
 #   scripts/eval.sh -p ios                # a single platform
 #   scripts/eval.sh -p android -t release # a specific tag
 #   scripts/eval.sh -y ...                # skip the cost prompt (CI / release gate)
+#   scripts/eval.sh -b .build/out/Products/Debug/sim-use   # eval a specific binary
 #   scripts/eval.sh -- --cases oss-ios-tap-three-times   # pass raw args to run.py
 #
-# Env: PLATFORM, TAGS, DEVICE, EVAL_ASSUME_YES mirror the flags (so
-# `make eval PLATFORM=ios TAGS=release` works).
+# Env: PLATFORM, TAGS, DEVICE, SIM_USE_BIN, EVAL_ASSUME_YES mirror the flags
+# (so `make eval PLATFORM=ios TAGS=release` works).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -30,6 +31,7 @@ die()   { printf "${RED}✗ %s${NC}\n" "$1" >&2; exit 1; }
 PLATFORM="${PLATFORM:-}"
 TAGS="${TAGS:-quick}"
 DEVICE="${DEVICE:-}"
+SIM_USE_BIN="${SIM_USE_BIN:-}"
 ASSUME_YES="${EVAL_ASSUME_YES:-0}"
 PASSTHROUGH=()
 
@@ -38,6 +40,7 @@ while [[ $# -gt 0 ]]; do
     -p|--platform) PLATFORM="$2"; shift 2 ;;
     -t|--tags)     TAGS="$2"; shift 2 ;;
     -d|--device)   DEVICE="$2"; shift 2 ;;
+    -b|--sim-use)  SIM_USE_BIN="$2"; shift 2 ;;
     -y|--yes)      ASSUME_YES=1; shift ;;
     --)            shift ;;   # skip a stray separator (e.g. pnpm/make forwards one)
     *)             PASSTHROUGH+=("$1"); shift ;;
@@ -47,9 +50,20 @@ done
 # ── 1. environment checks ────────────────────────────────────────────
 info "Checking eval environment…"
 command -v claude   >/dev/null || die "\`claude\` CLI not found on PATH — the eval agent needs it."
-command -v sim-use  >/dev/null || die "\`sim-use\` not found on PATH (build with 'make build' and add .build/debug to PATH, or 'brew install')."
+
+# Pin the binary under test FIRST: the reachability probe below, the
+# runner, its verification layer, and the eval agent all resolve bare
+# `sim-use`, so a PATH shim here decides what the whole run exercises.
+if [[ -n "$SIM_USE_BIN" ]]; then
+  [[ -f "$SIM_USE_BIN" && -x "$SIM_USE_BIN" ]] || die "--sim-use: not an executable file: $SIM_USE_BIN"
+  shim_dir="$(mktemp -d "${TMPDIR:-/tmp}/sim-use-eval-bin.XXXXXX")"
+  ln -s "$(cd "$(dirname "$SIM_USE_BIN")" && pwd)/$(basename "$SIM_USE_BIN")" "$shim_dir/sim-use"
+  export PATH="$shim_dir:$PATH"
+fi
+command -v sim-use  >/dev/null || die "\`sim-use\` not found on PATH (build with 'make build' and add .build/debug to PATH, 'brew install', or pass -b <path>)."
 [[ -f "$runner" ]] || die "eval runner missing at $runner"
-ok "claude + sim-use present"
+sim_use_real="$(python3 -c 'import pathlib,sys; print(pathlib.Path(sys.argv[1]).resolve())' "$(command -v sim-use)")"
+ok "claude present; sim-use under test: $sim_use_real ($(sim-use --version 2>/dev/null || echo unknown))"
 
 # Which platforms have a reachable device? (auto-detect when --platform unset)
 devices_json="$(sim-use devices --json 2>/dev/null || echo '{}')"
