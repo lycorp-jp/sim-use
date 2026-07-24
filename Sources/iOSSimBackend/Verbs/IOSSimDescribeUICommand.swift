@@ -82,9 +82,9 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
     /// `DESCRIBE_UI_OUTLINE.md` §4.
     public struct ExecutionResult: Codable, CommandAdvisoryProviding {
         public let platform: String
-        /// Raw a11y tree passthrough. Optional because the daemon path
-        /// skips encoding it when the client didn't request `--json` —
-        /// the ~200 KB tree adds 80 ms of round-trip cost otherwise.
+        /// Raw a11y tree passthrough. `nil` when the client didn't
+        /// request `--json`, or opted out with `--no-raw` — the
+        /// ~200 KB tree adds 80 ms of round-trip cost otherwise.
         public let raw: JSONValue?
         public let outline: String
         public let entries: [Outline.Entry]

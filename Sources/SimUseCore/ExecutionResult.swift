@@ -20,11 +20,11 @@ public struct DescribeUIResult: Codable, Equatable, Sendable {
     /// bridge `ElementNode` tree shape. Different schemas, both
     /// documented under `schemas/`.
     ///
-    /// `nil` when the caller did not request `--json` — the raw tree is
-    /// ~200 KB on a complex screen and serialising it across the daemon
-    /// socket adds ~80 ms of encode/decode for stdout-only consumers.
-    /// `outline` + `entries` carry everything the human / alias-cache
-    /// paths need.
+    /// `nil` when the caller did not request `--json`, or opted out
+    /// with `--no-raw` — the raw tree is ~200 KB on a complex screen
+    /// and serialising it across the daemon socket adds ~80 ms of
+    /// encode/decode for stdout-only consumers. `outline` + `entries`
+    /// carry everything the human / alias-cache paths need.
     public let raw: JSONValue?
     public let outline: String
     public let entries: [Outline.Entry]

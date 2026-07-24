@@ -193,6 +193,30 @@ struct ViewerAPIHandlersTests {
         #expect(devices.first?["deviceId"] as? String == "ABC")
     }
 
+    @Test("snapshot: spawns describe-ui with --json --no-raw")
+    func snapshotSpawnsNoRaw() async throws {
+        let envelope = """
+        {"ok":true,"data":{"platform":"ios","outline":"App: SampleApp  402x874\\n","entries":[],"lists":[]}}
+        """
+        let (handlers, cleanup) = try makeHandlers(stdout: envelope, exitCode: 0)
+        defer { cleanup() }
+        // Extend the fake binary to record its argv before replaying
+        // the scripted stdout — the recording is what this test is for.
+        let script = handlers.executable
+        let argsFile = script.deletingLastPathComponent().appendingPathComponent("args.txt")
+        let original = try String(contentsOf: script, encoding: .utf8)
+        try Data(("#!/bin/sh\necho \"$@\" > '\(argsFile.path)'\n"
+            + original.replacingOccurrences(of: "#!/bin/sh\n", with: "")).utf8)
+            .write(to: script)
+
+        let response = await handlers.snapshot(getRequest(query: ["deviceId": "TEST-UDID"]))
+
+        #expect(response.status == 200)
+        let argv = try String(contentsOf: argsFile, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(argv == "describe-ui --device TEST-UDID --json --no-raw")
+    }
+
     @Test("snapshot: rotated iOS outline still carries screen dimensions")
     func snapshotParsesRotatedScreenLine() async throws {
         let envelope = """
