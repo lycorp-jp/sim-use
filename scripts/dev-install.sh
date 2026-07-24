@@ -122,8 +122,8 @@ log "  repo:     ${REPO_ROOT}"
 command -v swift >/dev/null || fail "swift not on PATH"
 command -v lipo >/dev/null  || fail "lipo not on PATH"
 
-if [[ ! -d "build_products/Frameworks" ]]; then
-  fail "build_products/Frameworks not found. Run 'scripts/build.sh frameworks install strip' first (~30 min)."
+if [[ ! -d "build_products/XCFrameworks" || ! -d "build_products/PrivateHeaders" ]]; then
+  fail "build_products/XCFrameworks (or PrivateHeaders) not found. Run 'scripts/build.sh dev' first (~5 min)."
 fi
 
 # Locate the current PATH binary so we know what to replace.
@@ -172,11 +172,8 @@ scripts/release-artifacts.sh verify-stage --stage-dir "$STAGE_DIR"
 
 # 7. Ad-hoc codesign the staged payload so it runs on arm64 macOS.
 # lipo + install_name_tool invalidate the compiler's ad-hoc signature;
-# re-sign everything before linking it into PATH.
+# re-sign before linking it into PATH.
 log "Ad-hoc codesigning staged payload..."
-for fw in "$STAGE_DIR"/Frameworks/*.framework; do
-  codesign --force --sign - --timestamp=none "$fw" >/dev/null 2>&1
-done
 codesign --force --sign - --timestamp=none "$STAGE_DIR/sim-use" >/dev/null 2>&1
 ok "Staged payload codesigned (ad-hoc)"
 

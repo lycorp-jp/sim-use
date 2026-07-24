@@ -1,36 +1,14 @@
 #!/usr/bin/env bash
 
-resolve_framework_binary() {
-  local framework_path="$1"
-  local framework_name="$2"
-  local candidates=(
-    "$framework_path/Versions/A/$framework_name"
-    "$framework_path/Versions/Current/$framework_name"
-    "$framework_path/$framework_name"
-  )
-
-  local candidate
-  for candidate in "${candidates[@]}"; do
-    if [[ -f "$candidate" ]]; then
-      echo "$candidate"
-      return 0
-    fi
-  done
-
-  return 1
-}
-
+# The FB* frameworks are statically linked into the sim-use binary since the
+# idb bump, so the release payload is the executable plus the two SwiftPM
+# resource bundles — no Frameworks/ directory ships.
 copy_release_payload() {
   local source_dir="$1"
   local destination_dir="$2"
 
   if [[ ! -f "${source_dir}/sim-use" ]]; then
     echo "❌ Error: sim-use executable missing from ${source_dir}" >&2
-    exit 1
-  fi
-
-  if [[ ! -d "${source_dir}/Frameworks" ]]; then
-    echo "❌ Error: Frameworks directory missing from ${source_dir}" >&2
     exit 1
   fi
 
@@ -56,7 +34,6 @@ copy_release_payload() {
   rm -rf "$destination_dir"
   mkdir -p "$destination_dir"
   cp "$source_dir/sim-use" "$destination_dir/"
-  cp -R "$source_dir/Frameworks" "$destination_dir/"
   cp -R "$source_dir/SimUse_SimUse.bundle" "$destination_dir/"
   cp -R "$source_dir/SimUse_AndroidBackend.bundle" "$destination_dir/"
 }

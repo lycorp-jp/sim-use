@@ -60,11 +60,10 @@ GitHub release upload:
 
 Build inputs:
   --build-frameworks        Force-rebuild the IDB frameworks
-                            (slow, ~30 min, requires a populated idb_checkout/).
-                            Default: reuse build_products/Frameworks/ if present.
+                            (~5 min, requires a populated idb_checkout/).
+                            Default: reuse build_products/XCFrameworks/ if present.
   --skip-build              Skip the swift build step entirely. Assumes
-                            build_products/sim-use is already a universal binary
-                            with Frameworks/ rpath wired up.
+                            build_products/sim-use is already a universal binary.
                             Use after a previous run that already built; not for fresh trees.
   --skip-bridge             Skip the Android bridge APK rebuild. Use only when
                             you have just rebuilt it manually and want to save
@@ -230,16 +229,20 @@ if [[ "$GRADLE_VERSION_NAME" != "$VERSION" ]]; then
 fi
 log "Bridge APK versionName matches CLI release: $GRADLE_VERSION_NAME"
 
-if [[ ! -d "build_products/Frameworks" ]]; then
+# The swift build consumes the FB* XCFrameworks (static archives) plus the
+# staged PrivateHeaders modules; nothing framework-shaped ships in the
+# payload. Note the XCFrameworks are toolchain-locked (no library
+# evolution) — they must have been built with the same Xcode that runs
+# the swift build below.
+if [[ ! -d "build_products/XCFrameworks" || ! -d "build_products/PrivateHeaders" ]]; then
   if [[ "$BUILD_FRAMEWORKS" == "true" ]]; then
-    log "Building IDB frameworks (this will take a while)..."
+    log "Building IDB frameworks..."
     [[ -d "idb_checkout/.git" ]] || scripts/build.sh setup
     scripts/build.sh frameworks
     scripts/build.sh install
-    scripts/build.sh strip
-    [[ -n "$SIGN_IDENTITY" ]] && SIM_USE_CODESIGN_IDENTITY="$SIGN_IDENTITY" scripts/build.sh sign-frameworks || true
+    scripts/build.sh xcframeworks
   else
-    fail "build_products/Frameworks not found. Run with --build-frameworks (slow, ~30 min) or pre-populate via 'scripts/build.sh frameworks install strip'."
+    fail "build_products/XCFrameworks (or PrivateHeaders) not found. Run with --build-frameworks or pre-populate via 'scripts/build.sh dev'."
   fi
 fi
 
@@ -310,9 +313,8 @@ fi
 
 # 3. Build the universal sim-use executable.
 # scripts/build.sh executable runs: swift package clean → swift build (arm64+x86_64)
-# → lipo → install_name_tool fixups (@executable_path/Frameworks rpath, strip Xcode rpath).
-# That last fixup is the difference between "runs from .build/release" and
-# "runs after being copied anywhere else on disk".
+# → lipo → rpath hygiene (dedupe SwiftPM's duplicate entries, strip Xcode
+# rpaths) so Homebrew's relocate pass leaves the signature alone.
 if [[ "$SKIP_BUILD" == "true" ]]; then
   [[ -x "build_products/sim-use" ]] || fail "--skip-build set but build_products/sim-use missing"
   log "Skipping swift build, reusing build_products/sim-use"
@@ -321,19 +323,16 @@ else
   SIM_USE_VERSION="$VERSION" scripts/build.sh executable
 fi
 
-# Code-sign the binary + frameworks when an identity is supplied. When
-# --notarize is also set, frameworks are mandatory (Apple notary inspects
-# every embedded Mach-O); we sign them even if the IDB build path
-# already did to make this script self-sufficient.
+# Code-sign the binary when an identity is supplied. The FB* code is
+# statically linked, so the executable is the only Mach-O Apple notary
+# inspects.
 if [[ -n "$SIGN_IDENTITY" ]]; then
-  log "Code signing frameworks with identity: ${SIGN_IDENTITY}"
-  SIM_USE_CODESIGN_IDENTITY="$SIGN_IDENTITY" scripts/build.sh sign-frameworks
   log "Code signing executable with identity: ${SIGN_IDENTITY}"
   SIM_USE_CODESIGN_IDENTITY="$SIGN_IDENTITY" scripts/build.sh sign-executable
 fi
 
-# 4. Stage payload (binary + Frameworks/ + resource bundle) and verify
-# the universal arch contract before we tar it up.
+# 4. Stage payload (binary + resource bundles) and verify the universal
+# arch contract before we tar it up.
 mkdir -p "$OUTPUT_DIR"
 STAGE_DIR="$OUTPUT_DIR/stage"
 log "Staging release payload at ${STAGE_DIR}..."
@@ -419,9 +418,6 @@ if [[ "$NOTARIZE" == "true" ]]; then
     || fail "Tarball binary failed codesign --verify."
 else
   log "Smoke-testing archive (with ad-hoc re-sign, matching brew post_install)..."
-  for fw in "$SMOKE_DIR"/Frameworks/*.framework; do
-    codesign --force --sign - --timestamp=none "$fw" >/dev/null 2>&1
-  done
   codesign --force --sign - --timestamp=none "$SMOKE_DIR/sim-use" >/dev/null 2>&1
 fi
 "$SMOKE_DIR/sim-use" --version >/dev/null
