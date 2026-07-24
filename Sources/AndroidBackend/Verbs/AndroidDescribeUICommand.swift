@@ -40,8 +40,7 @@ public struct AndroidDescribeUICommand: SimUseExecutableCommand {
             udid: device.resolved,
             includeOffscreen: includeOffscreen,
             // `raw` adds ~50–200 KB to the encoded envelope; only pay
-            // the cost when the caller asked for JSON and didn't opt
-            // out with --no-raw.
+            // the cost when the caller will actually see it.
             includeRaw: jsonOutput && !noRaw
         )
     }

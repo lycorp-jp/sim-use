@@ -216,11 +216,10 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             seedCellHeight: seedCellHeight
         )
         let jsonData = fetchResult.data
-        // Only build the JSONValue tree when the client asked for it
-        // (`--json` without `--no-raw`). On a complex screen the parse
-        // is ~30 ms and shuffling it across the daemon socket adds
-        // another ~80 ms. `outline` + `entries` cover every other
-        // consumer.
+        // Only build the JSONValue tree when the client will actually
+        // see it. On a complex screen the parse is ~30 ms and shuffling
+        // it across the daemon socket adds another ~80 ms. `outline` +
+        // `entries` cover every other consumer.
         let tree: JSONValue? = (jsonOutput && !noRaw) ? try JSONValue.decode(from: jsonData) : nil
 
         // Decode the same bytes into the typed tree for outline rendering.
