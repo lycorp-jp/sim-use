@@ -88,14 +88,22 @@ struct VideoFrameProcessingTests {
         #expect(tiny.height >= 2)
     }
 
-    @Test("processJPEGData passes data through untouched at default settings")
-    func processPassthrough() async throws {
-        // Pins the intentional fast path shared with iOS streaming: at
-        // scale 1.0 / quality 80 the frame is forwarded byte-for-byte
-        // (no decode/re-encode), whatever its container format.
+    @Test("processJPEGData encodes default PNG input as JPEG")
+    func processEncodesDefaultPNG() async throws {
         let png = try makePNG(width: 32, height: 32)
         let out = try await VideoFrameUtilities.processJPEGData(png, scale: 1.0, quality: 80)
-        #expect(out == png)
+        #expect(out.prefix(2) == Data([0xFF, 0xD8]))
+        let encoded = try #require(VideoFrameUtilities.makeCGImage(from: out))
+        #expect(encoded.width == 32)
+        #expect(encoded.height == 32)
+    }
+
+    @Test("processJPEGData passes default JPEG input through untouched")
+    func processPassesThroughDefaultJPEG() async throws {
+        let png = try makePNG(width: 32, height: 32)
+        let jpeg = try await VideoFrameUtilities.processJPEGData(png, scale: 1.0, quality: 90)
+        let out = try await VideoFrameUtilities.processJPEGData(jpeg, scale: 1.0, quality: 80)
+        #expect(out == jpeg)
     }
 
     @Test("non-default quality re-encodes to JPEG")

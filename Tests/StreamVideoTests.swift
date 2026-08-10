@@ -12,6 +12,10 @@ struct StreamVideoTests {
         #expect(!result.output.isEmpty, "Should have stderr messages")
         #expect(result.output.contains("Starting screenshot-based video stream"))
         #expect(result.output.contains("Format: mjpeg"))
+        let frame = try firstMJPEGFrame(in: result.data)
+        #expect(frame.contentType == "image/jpeg")
+        #expect(frame.contentLength == frame.payload.count)
+        #expect(frame.payload.starts(with: [0xFF, 0xD8]))
     }
 
     @Test("Stream video outputs raw JPEG data for ffmpeg format")

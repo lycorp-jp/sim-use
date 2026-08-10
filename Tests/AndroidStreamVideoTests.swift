@@ -20,9 +20,10 @@ struct AndroidStreamVideoTests {
         let result = try await streamForDuration(format: "mjpeg", duration: 4.0)
 
         #expect(isAcceptableStreamExitCode(result.exitCode), "Unexpected exit code: \(result.exitCode)")
-        let text = String(decoding: result.stdout.prefix(4096), as: UTF8.self)
-        #expect(text.contains("--mjpegstream"))
-        #expect(text.contains("Content-Type: image/jpeg"))
+        let frame = try firstMJPEGFrame(in: result.stdout)
+        #expect(frame.contentType == "image/jpeg")
+        #expect(frame.contentLength == frame.payload.count)
+        #expect(frame.payload.starts(with: [0xFF, 0xD8]))
         #expect(result.stderr.contains("Format: mjpeg"))
     }
 

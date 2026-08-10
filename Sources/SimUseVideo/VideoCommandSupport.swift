@@ -2,6 +2,7 @@
 import Foundation
 import AVFoundation
 import ImageIO
+import UniformTypeIdentifiers
 import os
 import SimUseCore
 
@@ -72,10 +73,18 @@ public struct VideoFrameUtilities {
     public static func processJPEGData(_ data: Data, scale: Double, quality: Int) async throws -> Data {
         if scale < 1.0 {
             return try await scaleJPEGData(data, scale: scale, quality: quality)
-        } else if quality != 80 {
+        } else if quality != 80 || !isJPEG(data) {
             return try await reencodeJPEGData(data, quality: quality)
         }
         return data
+    }
+
+    private static func isJPEG(_ data: Data) -> Bool {
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let typeIdentifier = CGImageSourceGetType(source) as String? else {
+            return false
+        }
+        return UTType(typeIdentifier)?.conforms(to: .jpeg) == true
     }
 
     public static func computeDimensions(for image: CGImage, scale: Double) -> (width: Int, height: Int) {
