@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Screenshot-backed `stream-video` formats now emit actual JPEG frames at the default quality and scale on both iOS and Android, instead of forwarding PNG screenshots unchanged; MJPEG frame payloads now match their `image/jpeg` MIME type.
+
 ## [0.13.0] - 2026-08-06
 
 ### Added
