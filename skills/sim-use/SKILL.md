@@ -11,9 +11,9 @@ Before first interaction with a device, run the preflight check:
 python3 scripts/preflight.py --device <UDID>
 ```
 
-This verifies sim-use is installed, the device is reachable, and the daemon is healthy. If you don't have the script, do the checks manually:
+This verifies sim-use is installed and compatible with the skill, the device is reachable, and the daemon is healthy. If you don't have the script, do the checks manually:
 
-1. `sim-use --version` — confirm sim-use is on PATH.
+1. `sim-use --version` — confirm sim-use is on PATH and supports the skill's documented commands.
 2. `sim-use devices` — confirm the target device is listed and booted/connected.
 3. `sim-use ui --device <UDID>` — confirm you can read the screen.
 

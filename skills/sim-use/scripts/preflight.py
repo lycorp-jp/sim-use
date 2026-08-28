@@ -13,11 +13,15 @@ Usage:
 
 import argparse
 import json
+import re
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Optional
+
+
+MINIMUM_SIM_USE_VERSION = (0, 14, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +94,24 @@ def run_checks(checks: list[Check], ctx: Ctx) -> bool:
 
 def check_sim_use_installed(ctx: Ctx) -> bool:
     return shutil.which(ctx.sim_use_bin) is not None
+
+
+def parse_version(value: str) -> Optional[tuple[int, int, int]]:
+    match = re.search(r"(?:^|\s)(\d+)\.(\d+)\.(\d+)(?:\s|$)", value.strip())
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def check_sim_use_compatible(ctx: Ctx) -> bool:
+    result = subprocess.run(
+        [ctx.sim_use_bin, "--version"],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        return False
+    version = parse_version(result.stdout or result.stderr)
+    return version is not None and version >= MINIMUM_SIM_USE_VERSION
 
 
 def check_device_listed(ctx: Ctx) -> bool:
@@ -166,11 +188,21 @@ def shared_checks() -> list[Check]:
             fix_hint="Install sim-use: brew tap lycorp-jp/tap && brew install lycorp-jp/tap/sim-use (run 'brew trust lycorp-jp/tap' first if you see an untrusted-tap error)",
         ),
         Check(
+            id="sim_use_compatible",
+            description="sim-use version is compatible with this skill",
+            run=check_sim_use_compatible,
+            on_fail="abort",
+            fix_hint=(
+                f"Upgrade sim-use to >= {'.'.join(map(str, MINIMUM_SIM_USE_VERSION))}: "
+                "brew update && brew upgrade lycorp-jp/tap/sim-use"
+            ),
+        ),
+        Check(
             id="device_listed",
             description="target device is listed and reachable",
             run=check_device_listed,
             on_fail="abort",
-            fix_hint="Boot a simulator or connect an Android device, then retry.",
+            fix_hint="Boot a simulator, connect and unlock a physical iPhone/iPad, or connect an Android device, then retry.",
         ),
         Check(
             id="ui_responds",

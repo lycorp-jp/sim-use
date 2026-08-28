@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The bundled skill preflight now rejects an older `sim-use` CLI before device discovery and prints the Homebrew upgrade command, instead of misdiagnosing newly documented device types as disconnected.
+
 ## [0.14.0] - 2026-08-27
 
 ### Added

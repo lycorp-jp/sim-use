@@ -28,15 +28,49 @@ struct PreflightScriptTests {
         #expect(result.output.contains("All checks passed"))
 
         let log = try String(contentsOf: logFile, encoding: .utf8)
+        #expect(log.contains("--version\n"))
         #expect(log.contains("devices --json\n"))
         #expect(!log.contains("devices --json --device target-device"))
         #expect(log.contains("ui --json --device target-device"))
+    }
+
+    @Test("incompatible CLI versions fail before device discovery")
+    func incompatibleVersionFailsBeforeDeviceDiscovery() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let logFile = tempRoot.appendingPathComponent("sim-use-args.log")
+        let fakeSimUse = tempRoot.appendingPathComponent("sim-use")
+
+        defer {
+            try? FileManager.default.removeItem(at: tempRoot)
+        }
+
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        try outdatedSimUseScript(logFile: logFile.path).write(to: fakeSimUse, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fakeSimUse.path)
+
+        let result = try await CommandRunner.run(
+            "python3 skills/sim-use/scripts/preflight.py --device target-device --sim-use-bin \(fakeSimUse.path)",
+            allowFailure: true
+        )
+
+        #expect(result.exitCode == 1)
+        #expect(result.output.contains("FAIL  sim-use version is compatible with this skill"))
+        #expect(result.output.contains("brew upgrade lycorp-jp/tap/sim-use"))
+
+        let log = try String(contentsOf: logFile, encoding: .utf8)
+        #expect(log == "--version\n")
     }
 
     private func fakeSimUseScript(logFile: String) -> String {
         """
         #!/bin/bash
         printf '%s\\n' "$*" >> "\(logFile)"
+
+        if [[ "$1" == "--version" ]]; then
+          echo "0.14.0"
+          exit 0
+        fi
 
         if [[ "$1" == "devices" ]]; then
           if [[ "$*" == *"--device"* ]]; then
@@ -53,6 +87,21 @@ struct PreflightScriptTests {
             exit 3
           fi
           echo '{"ok":true,"data":{"outline":"App: Test"}}'
+          exit 0
+        fi
+
+        echo "unexpected command: $*" >&2
+        exit 4
+        """
+    }
+
+    private func outdatedSimUseScript(logFile: String) -> String {
+        """
+        #!/bin/bash
+        printf '%s\\n' "$*" >> "\(logFile)"
+
+        if [[ "$1" == "--version" ]]; then
+          echo "0.13.0"
           exit 0
         fi
 
