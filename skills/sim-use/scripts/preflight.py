@@ -96,11 +96,9 @@ def check_sim_use_installed(ctx: Ctx) -> bool:
     return shutil.which(ctx.sim_use_bin) is not None
 
 
-def parse_version(value: str) -> Optional[tuple[int, int, int]]:
-    match = re.search(r"(?:^|\s)(\d+)\.(\d+)\.(\d+)(?:\s|$)", value.strip())
-    if not match:
-        return None
-    return tuple(int(part) for part in match.groups())
+def parse_version(value: str) -> Optional[tuple[int, ...]]:
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", value.strip())
+    return tuple(int(part) for part in match.groups()) if match else None
 
 
 def check_sim_use_compatible(ctx: Ctx) -> bool:
@@ -111,7 +109,9 @@ def check_sim_use_compatible(ctx: Ctx) -> bool:
     if result.returncode != 0:
         return False
     version = parse_version(result.stdout or result.stderr)
-    return version is not None and version >= MINIMUM_SIM_USE_VERSION
+    # Dev and dirty stamps are unparseable by design. Only release builds are
+    # gated, matching the Swift-side ReleaseVersion / BridgeClient behavior.
+    return version is None or version >= MINIMUM_SIM_USE_VERSION
 
 
 def check_device_listed(ctx: Ctx) -> bool:
