@@ -25,7 +25,6 @@ All participants are responsible for helping maintain a safe and supportive atmo
 
 ## Reporting and Handling of Concerns
 
-If you experience or observe behavior that is inconsistent with this Code of Conduct, you are encouraged to share your concerns with us at [Mailing List Address].
- Any member of the community may report an issue, even if they were not the target of the harm.
+If you experience or observe behavior that is inconsistent with this Code of Conduct, you are encouraged to share your concerns with us at ml-opensource-coc@lycorp.co.jp. Any member of the community may report an issue, even if they were not the target of the harm.
 
 All reports will be kept confidential and secure. Reported cases will be reviewed and investigated promptly and fairly.
