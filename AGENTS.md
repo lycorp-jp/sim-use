@@ -3,7 +3,7 @@
 ## Code quality
 - No `Any` types unless absolutely necessary; upgrade dependencies rather than downgrading code to work around type errors.
 - Follow Swift best practices and match the style of surrounding code.
-- When adding or removing commands/options, update the README and `skills/sim-use/SKILL.md`.
+- When adding or removing commands/options, update the README and `skills/sim-use/SKILL.md`. If the Skill starts relying on behavior newer than its current compatibility floor, also bump `MINIMUM_SIM_USE_VERSION` in `skills/sim-use/scripts/preflight.py` and extend `PreflightScriptTests`.
 
 ## Changelog
 `CHANGELOG.md` follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/). Add entries under `## [Unreleased]` as you land changes. Subsection order: `### Added` / `### Changed` / `### Fixed` / `### Removed`. Never modify already-released version sections.
