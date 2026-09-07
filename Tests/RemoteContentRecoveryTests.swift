@@ -17,6 +17,12 @@ struct RemoteContentRecoveryTests {
 
     private static let port = 8899
 
+    // The browser labels a bare file input in the simulator's language, and
+    // the picker it opens is system UI with no AXUniqueId to match on. An
+    // aria-label the fixture owns keeps the one selector this scene needs
+    // independent of the simulator's locale.
+    private static let fileInputLabel = "e2e-file-input"
+
     private func writeUploadPage() throws -> URL {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("sim-use-remote-content-e2e-\(UUID().uuidString)")
@@ -24,7 +30,7 @@ struct RemoteContentRecoveryTests {
         let html = """
         <html><body style="font-size:40px">
         <h1>Upload test</h1>
-        <input type="file" style="font-size:40px">
+        <input type="file" accept="text/plain" aria-label="\(Self.fileInputLabel)" style="font-size:40px">
         </body></html>
         """
         try html.write(to: dir.appendingPathComponent("upload.html"), atomically: true, encoding: .utf8)
@@ -77,16 +83,13 @@ struct RemoteContentRecoveryTests {
         _ = try await CommandRunner.run(
             "xcrun simctl openurl \(udid) http://localhost:\(Self.port)/upload.html")
 
-        // Two taps on the same localized label: the first hits the page's
-        // file input (opening Safari's action sheet, which then occludes
-        // the page from the AX tree), the second hits the sheet's file
-        // option. The sleep between them lets the sheet settle so the
-        // second resolution cannot race the still-exposed page input.
+        // One tap is enough: `accept` rules out the photo sources, so iOS
+        // skips the action sheet it would otherwise put between the input
+        // and the document picker. The picker is hosted by a remote
+        // process either way, which is the state this scene exists to
+        // reach.
         _ = try await TestHelpers.runSimUseCommand(
-            "tap --label-regex '选取文件|Choose File' --wait-timeout 10", simulatorUDID: udid)
-        try await Task.sleep(nanoseconds: 2_000_000_000)
-        _ = try await TestHelpers.runSimUseCommand(
-            "tap --label-regex '选取文件|Choose File' --wait-timeout 10", simulatorUDID: udid)
+            "tap --label '\(Self.fileInputLabel)' --wait-timeout 10", simulatorUDID: udid)
 
         // Let the remote picker sheet settle.
         try await Task.sleep(nanoseconds: 4_000_000_000)
