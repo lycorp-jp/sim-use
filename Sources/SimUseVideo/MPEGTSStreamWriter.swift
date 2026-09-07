@@ -11,18 +11,35 @@ import os
 public final class MPEGTSStreamWriter: H264AccessUnitSink {
     private struct State {
         var muxer = MPEGTSMuxer()
-        var firstHostTime: TimeInterval?
-        /// Last PTS emitted, in seconds. Monotonicity is enforced because a
-        /// decoder will discard a picture that goes backwards.
-        var lastPTS: TimeInterval = -1
+        /// Arrival time of the previous picture, used to measure the real gap
+        /// between consecutive frames.
+        var lastHostTime: TimeInterval?
+        /// The stream's own timeline, which advances by the real inter-frame
+        /// gap but never by more than `maxFrameGap`. See `append`.
+        var streamTime: TimeInterval = 0
         /// Stream-relative time of the last PAT/PMT emission.
-        var lastTablesHostTime: TimeInterval = -.infinity
+        var lastTablesTime: TimeInterval = -.infinity
         var framesWritten: Int64 = 0
     }
 
     private static let startCode = Data([0x00, 0x00, 0x00, 0x01])
     /// One 90 kHz tick, the smallest step that keeps PTS strictly increasing.
     private static let ptsEpsilon: TimeInterval = 1.0 / 90_000
+
+    /// Largest gap the stream's timeline will advance between two pictures,
+    /// however long the real pause between them was.
+    ///
+    /// A live preview's contract is "show me the newest frame", not
+    /// "reproduce the wall clock" — that second one is `record-video`'s job,
+    /// and it keeps real arrival times for exactly that reason. Capture here
+    /// is variable-frame-rate: a still screen produces no frames at all, so
+    /// stamping the next picture with its true arrival time opens a hole in
+    /// the timeline as long as the pause. A player then has to play through
+    /// that hole before it reaches the new picture, which is seen as the
+    /// preview running minutes behind after the screen has been idle a
+    /// while. Capping the gap keeps the timeline compact, so the newest
+    /// picture is always about to be presented.
+    private static let maxFrameGap: TimeInterval = 0.2
 
     private let state: OSAllocatedUnfairLock<State>
     private let consume: @Sendable (Data) -> Void
@@ -52,7 +69,7 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
     /// waiting for one would leave an attached player with nothing to read.
     public func writeProgramTables() {
         let tables: Data = state.withLock { state in
-            state.lastTablesHostTime = 0
+            state.lastTablesTime = 0
             return state.muxer.programTables()
         }
         consume(tables)
@@ -73,16 +90,13 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
     public func writeKeepAlive(hostTime: TimeInterval) {
         let bytes: Data = state.withLock { state in
             var out = state.muxer.programTables()
-            guard let firstHostTime = state.firstHostTime else {
-                // No picture yet, so the stream clock has not started. Tables
-                // alone are enough for a consumer to learn the structure.
-                state.lastTablesHostTime = 0
-                return out
-            }
-            // Never behind the last picture: PTS must not precede the PCR.
-            let elapsed = max(state.lastPTS, hostTime - firstHostTime)
-            out.append(state.muxer.clockReference(at: elapsed))
-            state.lastTablesHostTime = elapsed
+            state.lastTablesTime = state.streamTime
+            // The clock reference rides the stream's own timeline, not the
+            // wall clock. They deliberately diverge across an idle period:
+            // if the PCR ran ahead while no pictures were produced, the next
+            // picture's PTS would already be in the player's past and it
+            // would be discarded as late.
+            out.append(state.muxer.clockReference(at: state.streamTime))
             return out
         }
         consume(bytes)
@@ -93,21 +107,20 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
         // consumer is called outside it, because it can block on a pipe and
         // holding the lock across that would stall the capture thread.
         let packets: Data = state.withLock { state in
-            let firstHostTime = state.firstHostTime ?? hostTime
-            if state.firstHostTime == nil {
-                state.firstHostTime = firstHostTime
+            // Advance the timeline by the real gap, clamped. Frames arriving
+            // in one chunk share an arrival time, so a zero gap still needs
+            // one tick to keep PTS strictly increasing.
+            if let lastHostTime = state.lastHostTime {
+                let gap = min(max(0, hostTime - lastHostTime), Self.maxFrameGap)
+                state.streamTime += max(gap, Self.ptsEpsilon)
             }
-
-            var pts = max(0, hostTime - firstHostTime)
-            if pts <= state.lastPTS {
-                pts = state.lastPTS + Self.ptsEpsilon
-            }
-            state.lastPTS = pts
+            state.lastHostTime = hostTime
+            let pts = state.streamTime
 
             var out = Data()
-            if pts - state.lastTablesHostTime >= tableInterval {
+            if pts - state.lastTablesTime >= tableInterval {
                 out.append(state.muxer.programTables())
-                state.lastTablesHostTime = pts
+                state.lastTablesTime = pts
             }
             out.append(
                 state.muxer.packets(
