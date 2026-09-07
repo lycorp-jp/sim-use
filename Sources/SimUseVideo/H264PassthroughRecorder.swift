@@ -36,7 +36,7 @@ public enum H264PassthroughError: Error, LocalizedError, Equatable {
 /// clock, since the source (Android's `adb screenrecord`, the only remaining
 /// caller — iOS records through idb's native file recorder instead) doesn't
 /// embed timing.
-public final class H264PassthroughRecorder: Sendable {
+public final class H264PassthroughRecorder: H264AccessUnitSink {
     /// Mutable + non-Sendable writer state, confined to the lock.
     private struct State {
         let writer: AVAssetWriter
@@ -255,7 +255,9 @@ public final class H264PassthroughRecorder: Sendable {
         return format
     }
 
-    private static func makeSampleBuffer(
+    /// Shared with `H264FragmentStreamer`, which wraps the same access units
+    /// for a fragmented sink rather than a file.
+    static func makeSampleBuffer(
         avcc: Data,
         formatDescription: CMFormatDescription,
         pts: CMTime,

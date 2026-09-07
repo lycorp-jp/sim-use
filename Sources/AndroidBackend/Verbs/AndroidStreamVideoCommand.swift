@@ -169,14 +169,23 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
         }
     }
 
-    // MARK: - h264 passthrough
+    // MARK: - h264 stream
 
     /// Native stream: `adb exec-out screenrecord --output-format=h264 -`
-    /// copied byte-for-byte to stdout. Mirrors the segment-restart loop in
+    /// re-containered into MPEG-TS on the way to stdout. Mirrors the
+    /// segment-restart loop in
     /// `AndroidRecordVideoCommand.recordVideoAndroidStream` — kept separate
-    /// because the sink (stdout vs muxer), the error taxonomy (no screencap
+    /// because the sink (stdout vs file), the error taxonomy (no screencap
     /// fallback for an explicitly chosen format), and the end-of-stream
     /// semantics (consumer hangup is an orderly stop) all differ.
+    ///
+    /// screenrecord's own output is bare Annex B, which carries no
+    /// timestamps at all. A player fed it assumes a frame rate — ffmpeg
+    /// assumes 25 fps — and since the device commonly encodes faster, the
+    /// consumer drains slower than sim-use fills and the lag grows without
+    /// bound rather than settling. MPEG-TS carries a PTS per picture, so the
+    /// player paces off the stream. Nothing is re-encoded; only the
+    /// container changes.
     private static func streamH264(
         adb: Adb,
         serial: String,
@@ -202,26 +211,44 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
             timeLimitOverride: AndroidRecordVideoCommand.screenrecordTimeLimitOverride()
         )
 
-        FileHandle.standardError.write(Data("Streaming Android device \(serial) (h264 Annex B passthrough)...\n".utf8))
+        FileHandle.standardError.write(Data("Streaming Android device \(serial) (h264 in MPEG-TS)...\n".utf8))
+        FileHandle.standardError.write(Data("Note: carries PTS, so players pace correctly. Preview it live:\n".utf8))
+        FileHandle.standardError.write(Data("  sim-use android stream-video --format h264 --device \(serial) | ffplay -f mpegts -probesize 32 -fflags nobuffer -\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 
         let sink = StdoutStreamSink()
+        let tsWriter = MPEGTSStreamWriter { data in
+            if !sink.write(data) {
+                // Consumer closed its end (ffplay quit, `head` done).
+                cancellationFlag.cancel()
+            }
+        }
+
+        // Announce the stream structure before the first picture: on a
+        // variable-frame-rate source a still screen yields no frames at all,
+        // and a consumer that attached would otherwise read nothing.
+        tsWriter.writeProgramTables()
+
+        let fatalBox = FirstErrorBox()
+        let pipeline = H264MuxingPipeline(sink: tsWriter, onFatalError: { error in
+            fatalBox.set(error)
+            cancellationFlag.cancel()
+        })
+
         let startTime = Date()
         var firstSegment = true
 
         segmentLoop: while true {
             if Task.isCancelled || cancellationFlag.isCancelled() || sink.isBroken { break }
+            if fatalBox.first != nil { break }
 
+            // Each restarted segment re-emits SPS/PPS, so the parser starts
+            // clean; the single host clock keeps PTS continuous across the gap.
+            pipeline.resetParserForNewSegment()
             let process = AdbStreamingProcess(
                 adbPath: adb.binaryPath,
                 arguments: arguments,
-                onStdout: { data in
-                    if !sink.write(data) {
-                        // Consumer closed its end (ffplay quit, `head` done)
-                        // — stop producing rather than erroring out.
-                        cancellationFlag.cancel()
-                    }
-                }
+                onStdout: { data in pipeline.ingest(data) }
             )
             do {
                 try process.start()
@@ -234,12 +261,26 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
             firstSegment = false
 
             let segmentStartBytes = process.stdoutByteCount
+            var lastKeepAlive = Date()
             while process.isRunning {
                 if Task.isCancelled || cancellationFlag.isCancelled() || sink.isBroken { break }
+                if fatalBox.first != nil { break }
                 try? await cancellableSleep(seconds: 0.05, flag: cancellationFlag)
+
+                // Re-announce the program tables periodically. This is
+                // ordinary practice for a transport stream — it is how a
+                // consumer attaching mid-stream learns its structure — and
+                // it doubles as the keep-alive that surfaces a hung-up
+                // consumer. Without it a still screen produces no frames,
+                // nothing is ever written, and a closed pipe would go
+                // unnoticed until the device happened to move again.
+                if Date().timeIntervalSince(lastKeepAlive) >= 0.5 {
+                    tsWriter.writeProgramTables()
+                    lastKeepAlive = Date()
+                }
             }
 
-            let stopping = Task.isCancelled || cancellationFlag.isCancelled() || sink.isBroken
+            let stopping = Task.isCancelled || cancellationFlag.isCancelled() || sink.isBroken || fatalBox.first != nil
             if stopping {
                 process.interrupt()
                 process.waitForExit(timeout: 2)
@@ -254,7 +295,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
             let bytesThisSegment = process.stdoutByteCount - segmentStartBytes
             let stderrTail = process.collectedStderr.trimmingCharacters(in: .whitespacesAndNewlines)
             if bytesThisSegment == 0 {
-                if sink.bytesWritten == 0 {
+                if !pipeline.firstFrameReceived {
                     let exitDescription = exitCode.map(String.init) ?? "timeout"
                     throw CLIError(errorDescription: "screenrecord produced no output (exit \(exitDescription)): \(stderrTail). Use --format mjpeg for the screencap-based stream instead.")
                 }
@@ -267,9 +308,14 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
             FileHandle.standardError.write(Data("screenrecord segment ended (time limit); restarting stream (~100-300ms gap; the new segment re-emits SPS/PPS)\n".utf8))
         }
 
+        pipeline.finishIngest()
+        if let fatal = fatalBox.first { throw fatal }
+
         let elapsed = Date().timeIntervalSince(startTime)
         return ExecutionResult(
-            framesStreamed: 0,
+            // Re-containering parses the stream, so unlike the old
+            // byte-passthrough this path knows its frame count.
+            framesStreamed: UInt64(pipeline.framesWritten),
             bytesStreamed: sink.bytesWritten,
             durationSeconds: elapsed,
             format: .h264
