@@ -41,7 +41,7 @@ struct StreamVideo: SimUseExecutableCommand {
 
     @OptionGroup var device: DeviceOptions
 
-    @Option(help: "Output format: h264 (native passthrough on both platforms — fastest, recommended); mjpeg, raw, ffmpeg (screenshot-backed, deprecated); bgra (iOS-only raw pixels). Default: mjpeg")
+    @Option(help: "Output format: h264 (native H.264 in MPEG-TS on both platforms — fastest, recommended); mjpeg, raw, ffmpeg (screenshot loop; DEPRECATED on iOS, retained on Android for devices where screenrecord is unavailable); bgra (iOS-only raw pixels). Default: mjpeg")
     var format: OutputFormat = .mjpeg
 
     @Option(help: "Frames per second (1-30, default: 10). On iOS --format h264 records at this constant rate; Android's h264 ignores it (native variable frame rate).")

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Testing
 @testable import SimUse
-import iOSSimBackend
+@testable import iOSSimBackend
 import AndroidBackend
 
 /// Pins the top-level `stream-video` format union: `h264` and the
@@ -50,6 +50,24 @@ struct StreamVideoFormatMappingTests {
     // stdout carries the raw video bytes, so the summary envelope can
     // never share it — all three surfaces must reject the flag at
     // validation time rather than corrupt the stream after the fact.
+    // The deprecation is per-platform on purpose: on a simulator `h264`
+    // strictly dominates the screenshot loop, but on Android the same loop
+    // is the only way to stream from a device whose `screenrecord` does not
+    // work. Pinning it here so the asymmetry is not "tidied up" later.
+    @Test("the screenshot formats are deprecated on iOS only")
+    func deprecationIsIOSOnly() {
+        #expect(IOSSimStreamVideoCommand.OutputFormat.mjpeg.isDeprecated)
+        #expect(IOSSimStreamVideoCommand.OutputFormat.raw.isDeprecated)
+        #expect(IOSSimStreamVideoCommand.OutputFormat.ffmpeg.isDeprecated)
+        #expect(!IOSSimStreamVideoCommand.OutputFormat.h264.isDeprecated)
+        // Raw pixels are not something H.264 substitutes for.
+        #expect(!IOSSimStreamVideoCommand.OutputFormat.bgra.isDeprecated)
+
+        let notice = IOSSimStreamVideoCommand.OutputFormat.mjpeg.deprecationNotice
+        #expect(notice.contains("h264"), "the notice must name the replacement")
+        #expect(notice.contains("mjpeg"), "the notice must name the format being used")
+    }
+
     @Test("--json is rejected on every stream-video surface")
     func jsonRejectedEverywhere() {
         #expect(throws: (any Error).self) {

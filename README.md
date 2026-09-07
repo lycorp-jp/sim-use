@@ -318,8 +318,10 @@ sim-use stream-video --device $UDID --format h264 | \
 # recording use `record-video`.
 sim-use stream-video --device $UDID --format h264 | ffmpeg -f mpegts -i - -c copy out.mp4
 
-# Screenshot-backed formats (deprecated — an order of magnitude slower and
-# larger than h264; use h264 unless you specifically need per-frame images)
+# Screenshot-backed formats. DEPRECATED on iOS (h264 is ~6x the frame rate at
+# an eighth of the bytes) and slated for removal there. Retained on Android:
+# `screenrecord` is unavailable on some devices, and this loop is the only way
+# to stream from those.
 sim-use stream-video --device $UDID --fps 10 --format mjpeg > stream.mjpeg
 sim-use stream-video --device $UDID --fps 30 --format ffmpeg | \
   ffmpeg -f image2pipe -framerate 30 -i - -c:v libx264 -preset ultrafast out.mp4

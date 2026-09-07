@@ -28,6 +28,28 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             case .mjpeg, .raw, .ffmpeg: false
             }
         }
+
+        /// The screenshot-per-frame formats, superseded on this platform by
+        /// `h264`. Measured on a booted iPhone 17 Pro over 6 s: `h264`
+        /// delivers 144 frames in 1.33 MB where `mjpeg` manages 24 in
+        /// 11.2 MB and the PNG-carrying formats 26 in 92.8 MB. `h264` works
+        /// on every booted simulator, so no state remains in which these are
+        /// the better choice.
+        ///
+        /// Android keeps its equivalents: `adb screenrecord` is unavailable
+        /// on some devices, and there the screencap loop is the only way to
+        /// stream at all.
+        var isDeprecated: Bool {
+            switch self {
+            case .mjpeg, .raw, .ffmpeg: true
+            case .h264, .bgra: false
+            }
+        }
+
+        /// One-line reason shown once when a deprecated format is used.
+        var deprecationNotice: String {
+            "warning: --format \(rawValue) is deprecated on iOS and will be removed. Use --format h264 — a native H.264 stream in MPEG-TS, roughly 6x the frame rate at an eighth of the bytes, with no host-side codec pass. Preview it with `| ffplay -f mpegts -probesize 32 -fflags nobuffer -`.\n"
+        }
     }
 
     /// Summary of a completed stream run. The actual video bytes are
@@ -55,7 +77,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
     @OptionGroup public var device: DeviceOptions
 
-    @Option(help: "Output format: h264 (native H.264 Annex B passthrough — fastest, recommended), mjpeg, raw, ffmpeg (screenshot-backed, deprecated), bgra (experimental raw pixels). Default: mjpeg. No frame count is reported for h264/bgra.")
+    @Option(help: "Output format: h264 (native H.264 in MPEG-TS — fastest, recommended), mjpeg, raw, ffmpeg (DEPRECATED screenshot loop, ~6x slower and ~8x larger; will be removed), bgra (experimental raw pixels). Default: mjpeg. No frame count is reported for bgra.")
     public var format: OutputFormat = .mjpeg
 
     @Option(help: "Frames per second (1-30, default: 10)")
@@ -111,6 +133,10 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     }
 
     public func execute() async throws -> ExecutionResult {
+        if format.isDeprecated {
+            FileHandle.standardError.write(Data(format.deprecationNotice.utf8))
+        }
+
         let logger = SimUseLogger()
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
