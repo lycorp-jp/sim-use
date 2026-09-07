@@ -248,7 +248,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             FileHandle.standardError.write(Data("Starting h264 video stream from simulator \(simulator.udid)...\n".utf8))
             FileHandle.standardError.write(Data("Format: h264, FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
             FileHandle.standardError.write(Data("Note: H.264 in MPEG-TS (carries PTS, so players pace correctly). Preview it live:\n".utf8))
-            FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f mpegts -probesize 32 -fflags nobuffer -\n".utf8))
+            FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f mpegts -analyzeduration 0 -probesize 32768 -i -\n".utf8))
         default:
             configuration = FBVideoStreamConfiguration(
                 format: .bgra,

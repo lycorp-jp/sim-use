@@ -58,6 +58,36 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
         consume(tables)
     }
 
+    /// Emit the program tables plus a clock reference, without waiting for a
+    /// picture. Called periodically so a player's clock keeps advancing on a
+    /// still screen, and so a consumer attaching mid-stream sees the tables
+    /// promptly.
+    ///
+    /// `hostTime` must be the caller's current clock reading, not the last
+    /// picture's: the PCR is what a player builds its own clock from, so it
+    /// has to track real elapsed time. Pinning it to the last frame's PTS
+    /// leaves it stalled whenever frames arrive slower than the keep-alive
+    /// interval, and a stalled clock desynchronises the player — observed as
+    /// a picture that tracks fine for a minute and then falls behind, with
+    /// the decode queue suddenly filling.
+    public func writeKeepAlive(hostTime: TimeInterval) {
+        let bytes: Data = state.withLock { state in
+            var out = state.muxer.programTables()
+            guard let firstHostTime = state.firstHostTime else {
+                // No picture yet, so the stream clock has not started. Tables
+                // alone are enough for a consumer to learn the structure.
+                state.lastTablesHostTime = 0
+                return out
+            }
+            // Never behind the last picture: PTS must not precede the PCR.
+            let elapsed = max(state.lastPTS, hostTime - firstHostTime)
+            out.append(state.muxer.clockReference(at: elapsed))
+            state.lastTablesHostTime = elapsed
+            return out
+        }
+        consume(bytes)
+    }
+
     public func append(accessUnit: H264AccessUnit, sps: Data, pps: Data, hostTime: TimeInterval) throws {
         // Everything that touches the muxer happens under the lock; the
         // consumer is called outside it, because it can block on a pipe and

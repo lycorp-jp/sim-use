@@ -311,7 +311,7 @@ The output path goes to stdout; progress messages go to stderr.
 # reach for. H.264 in MPEG-TS on both platforms, with no host-side codec pass.
 # TS carries PTS, so players pace off the stream and stay in sync indefinitely.
 sim-use stream-video --device $UDID --format h264 | \
-  ffplay -f mpegts -probesize 32 -fflags nobuffer -
+  ffplay -f mpegts -analyzeduration 0 -probesize 32768 -i -
 
 # Or mux it straight to a file
 sim-use stream-video --device $UDID --format h264 | ffmpeg -f mpegts -i - -c copy out.mp4
@@ -337,6 +337,18 @@ sim-use record-video --device $UDID --format gif --fps 15 --scale 0.4 --output d
 iOS — one H.264 configuration, differing only in whether the encoded bytes are
 muxed into an MP4 or copied to stdout. Measured on a booted iPhone 17 Pro,
 `h264` streams ~24 fps at ~220 KB/s where `mjpeg` manages ~4 fps at ~1.9 MB/s.
+
+Those two ffplay flags are not decoration. `-analyzeduration 0` is required
+because Android's capture is variable-frame-rate: while the screen is still,
+`screenrecord` emits no frames at all and the stream thins to just its program
+tables and clock references (a few KB/s). ffplay's default is to analyse five
+seconds of *media* before presenting anything, which on a sparse stream can
+take arbitrarily long in wall-clock terms — in practice it never starts.
+`-probesize 32768` gives it enough bytes to identify the stream while staying
+small enough to stay responsive. Do **not** add `-fflags nobuffer` here: it
+starves the probe of the data it needs and ffplay never opens the stream.
+(Verified on both platforms; the flags are harmless on iOS, which is
+constant-frame-rate and dense enough to open either way.)
 
 Both platforms carry `h264` in MPEG-TS, and the reason is worth knowing: a
 bare H.264 elementary stream has no timestamps at all, so a player has to

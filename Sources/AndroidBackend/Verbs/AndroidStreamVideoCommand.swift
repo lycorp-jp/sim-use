@@ -213,7 +213,8 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
         FileHandle.standardError.write(Data("Streaming Android device \(serial) (h264 in MPEG-TS)...\n".utf8))
         FileHandle.standardError.write(Data("Note: carries PTS, so players pace correctly. Preview it live:\n".utf8))
-        FileHandle.standardError.write(Data("  sim-use android stream-video --format h264 --device \(serial) | ffplay -f mpegts -probesize 32 -fflags nobuffer -\n".utf8))
+        FileHandle.standardError.write(Data("  sim-use android stream-video --format h264 --device \(serial) | ffplay -f mpegts -analyzeduration 0 -probesize 32768 -i -\n".utf8))
+        FileHandle.standardError.write(Data("Note: capture is variable-frame-rate — a still screen produces no frames, so the picture holds until the device moves again.\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 
         let sink = StdoutStreamSink()
@@ -274,8 +275,8 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
                 // consumer. Without it a still screen produces no frames,
                 // nothing is ever written, and a closed pipe would go
                 // unnoticed until the device happened to move again.
-                if Date().timeIntervalSince(lastKeepAlive) >= 0.5 {
-                    tsWriter.writeProgramTables()
+                if Date().timeIntervalSince(lastKeepAlive) >= 0.1 {
+                    tsWriter.writeKeepAlive(hostTime: ProcessInfo.processInfo.systemUptime)
                     lastKeepAlive = Date()
                 }
             }

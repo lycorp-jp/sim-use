@@ -45,6 +45,24 @@ public struct MPEGTSMuxer {
 
     public init() {}
 
+    /// A packet on the video PID carrying only an adaptation field with the
+    /// PCR — no payload.
+    ///
+    /// The clock has to keep advancing even when the encoder emits nothing.
+    /// `screenrecord` is variable-frame-rate and sends no frames at all
+    /// while the screen is still, so without this a player's clock would
+    /// stall and it would stop presenting until the device happened to move.
+    public mutating func clockReference(at seconds: TimeInterval) -> Data {
+        let ticks = UInt64(max(0, seconds) * Self.timescale)
+        return packetize(
+            payload: Data(),
+            pid: Self.videoPID,
+            continuity: &videoContinuity,
+            isStart: false,
+            adaptation: Self.adaptationField(isIDR: false, pcr: ticks)
+        )
+    }
+
     /// Program tables, which a player needs before it can interpret any
     /// elementary stream. Re-emitted periodically so a consumer that joins
     /// mid-stream can start decoding.
@@ -72,9 +90,13 @@ public struct MPEGTSMuxer {
         var isFirst = true
         while offset < pes.count {
             // The first packet of an access unit carries the adaptation
-            // field (random-access flag, and the PCR on a keyframe), which
-            // eats into its payload capacity.
-            let adaptation: Data? = isFirst ? Self.adaptationField(isIDR: isIDR, pcr: isIDR ? ticks : nil) : nil
+            // field, which eats into its payload capacity. Every access
+            // unit carries the PCR, not just keyframes: a player builds its
+            // clock from the PCR and the standard wants one at least every
+            // 100 ms, so emitting it per keyframe only — `screenrecord`
+            // sends those rarely — leaves ffplay without a clock and it
+            // never starts presenting.
+            let adaptation: Data? = isFirst ? Self.adaptationField(isIDR: isIDR, pcr: ticks) : nil
             let capacity = Self.payloadSize - (adaptation?.count ?? 0)
             let chunk = pes[pes.index(pes.startIndex, offsetBy: offset)..<pes.index(pes.startIndex, offsetBy: min(offset + capacity, pes.count))]
             out.append(
