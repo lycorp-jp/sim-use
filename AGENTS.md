@@ -50,6 +50,18 @@ make e2e-matrix     # iOS across Xcode 26/27 × Device Hub closed/open legs (~35
 make eval           # agent evals (real `claude -p` cost; prompts before running)
 ```
 
+**The Android emulator must run on a hardware GPU** (`-gpu host`, or the
+default `auto`, which picks it). Booted with `-gpu swiftshader_indirect`,
+SurfaceFlinger delivers no frame callbacks, so `screenrecord` emits only its
+opening SPS/PPS/IDR: a 5 s capture holds **2 frames where hardware rendering
+holds ~110**, and `stream-video --format h264` yields ~30 KB instead of ~3 MB.
+Every video E2E still passes in that state, and legitimately so — the suites
+run against a still playground screen, which under a correct variable-frame-rate
+encoder also produces exactly that one opening frame. No assertion can separate
+the two cases without driving sustained motion, and doing that from the test is
+itself enough to make the emulator briefly unresponsive. So if Android video
+capture ever looks empty, check the GPU mode before suspecting the code.
+
 E2E suites compile always but skip unless `SIM_USE_E2E=1` (iOS) / `SIM_USE_E2E_ANDROID=1` (Android) is set — `make test` never touches a device, which is why CI needs no simulator. The runners set those vars for you.
 
 **Budget the time: a full green `make e2e-ios` run is ~15 minutes.** The iOS suites drive real HID gestures and wait on simulator animations/keyboard settling, so per-suite waits dominate — this is expected, not a hang. `make e2e` (both platforms) is ~20+ min. When you only touched one platform, run just that platform's target. The runners keep going past a failed suite and print a full pass/fail map at the end, so read the summary rather than assuming the first red aborted the rest.
