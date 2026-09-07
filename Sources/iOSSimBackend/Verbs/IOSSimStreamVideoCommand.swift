@@ -48,7 +48,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
         /// One-line reason shown once when a deprecated format is used.
         var deprecationNotice: String {
-            "warning: --format \(rawValue) is deprecated on iOS and will be removed. Use --format h264 — a native H.264 stream in MPEG-TS, roughly 6x the frame rate at an eighth of the bytes, with no host-side codec pass. Preview it with `| ffplay -f mpegts -probesize 32 -fflags nobuffer -`.\n"
+            "warning: --format \(rawValue) is deprecated on iOS and will be removed. Use --format h264 — a native H.264 stream in MPEG-TS, roughly 6x the frame rate at an eighth of the bytes, with no host-side codec pass. Preview it with `| ffplay -f mpegts -analyzeduration 0 -probesize 32768 -i -`.\n"
         }
     }
 
