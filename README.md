@@ -307,15 +307,19 @@ The output path goes to stdout; progress messages go to stderr.
 ### Video streaming & recording
 
 ```bash
-# Native H.264 live stream (cross-platform) — the fastest path and the one to
-# reach for. iOS drives FBVideoStream at a constant --fps; Android is an adb
-# screenrecord passthrough at the device's native variable frame rate.
-# Neither pays a host-side codec pass. Preview it live in ffplay:
-sim-use stream-video --device $UDID --format h264 | \
-  ffplay -f h264 -probesize 32 -fflags nobuffer -
+# Native H.264 live stream — the fastest path and the one to reach for.
+# Neither platform pays a host-side codec pass.
 
-# Or mux it straight to a file
-sim-use stream-video --device $UDID --format h264 | ffmpeg -f h264 -i - -c copy out.mp4
+# iOS: H.264 in MPEG-TS at a constant --fps. TS carries PTS, so players pace
+# correctly and stay in sync indefinitely.
+sim-use stream-video --device $UDID --format h264 | \
+  ffplay -f mpegts -probesize 32 -fflags nobuffer -
+
+# Android: adb screenrecord passthrough — bare Annex B at the device's native
+# variable frame rate. Good for archiving; see the note below before using it
+# for live preview.
+sim-use stream-video --device emulator-5554 --format h264 | \
+  ffmpeg -f h264 -i - -c copy out.mp4
 
 # Screenshot-backed formats (deprecated — an order of magnitude slower and
 # larger than h264; use h264 unless you specifically need per-frame images)
@@ -338,6 +342,15 @@ sim-use record-video --device $UDID --format gif --fps 15 --scale 0.4 --output d
 iOS — one H.264 configuration, differing only in whether the encoded bytes are
 muxed into an MP4 or copied to stdout. Measured on a booted iPhone 17 Pro,
 `h264` streams ~24 fps at ~220 KB/s where `mjpeg` manages ~4 fps at ~1.9 MB/s.
+
+The two platforms' `h264` differ in container, and it matters for live
+viewing. iOS emits MPEG-TS, which carries PTS on a 90 kHz clock. Android
+passes `screenrecord`'s bare Annex B through untouched, and Annex B has no
+timestamps at all — a player has to guess the frame rate (ffprobe reads such a
+stream as 25 fps whatever it really is), so if the guess is low the picture
+falls further behind the device every second, without bound. Prefer Android's
+`h264` for archiving to a file, and re-container it if you need to watch it
+live: `… --format h264 | ffmpeg -f h264 -i - -c copy -f mpegts - | ffplay -f mpegts -`.
 
 `record-video` captures a real H.264 stream and muxes it straight into the
 MP4 (passthrough — no per-frame screenshot re-encoding). iOS records at a

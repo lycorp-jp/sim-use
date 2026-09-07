@@ -167,7 +167,7 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         scale: Double,
         cancellationFlag: CancellationFlag
     ) async throws {
-        let config = FBVideoStreamConfiguration.h264Capture(fps: fps, quality: quality, scale: scale)
+        let config = FBVideoStreamConfiguration.h264Capture(fps: fps, quality: quality, scale: scale, transport: .annexB)
 
         let recorder = try H264PassthroughRecorder(outputURL: outputURL)
         var recorderFinalized = false

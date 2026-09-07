@@ -244,11 +244,11 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         let configuration: FBVideoStreamConfiguration
         switch format {
         case .h264:
-            configuration = .h264Capture(fps: fps, quality: quality, scale: scale)
+            configuration = .h264Capture(fps: fps, quality: quality, scale: scale, transport: .mpegts)
             FileHandle.standardError.write(Data("Starting h264 video stream from simulator \(simulator.udid)...\n".utf8))
             FileHandle.standardError.write(Data("Format: h264, FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
-            FileHandle.standardError.write(Data("Note: H.264 Annex B passthrough. Preview it live:\n".utf8))
-            FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f h264 -probesize 32 -fflags nobuffer -\n".utf8))
+            FileHandle.standardError.write(Data("Note: H.264 in MPEG-TS (carries PTS, so players pace correctly). Preview it live:\n".utf8))
+            FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f mpegts -probesize 32 -fflags nobuffer -\n".utf8))
         default:
             configuration = FBVideoStreamConfiguration(
                 format: .bgra,
