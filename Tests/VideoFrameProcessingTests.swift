@@ -5,9 +5,9 @@ import AppKit
 import CoreGraphics
 import SimUseVideo
 
-/// Unit coverage for the frame-processing utilities behind the JPEG
-/// streaming formats and the screencap-based recording fallbacks —
-/// pure image plumbing, no device needed.
+/// Unit coverage for the frame-processing utilities behind the streaming
+/// formats and the screencap-based recording fallbacks — pure image
+/// plumbing, no device needed.
 @Suite("VideoFrameUtilities — frame processing")
 struct VideoFrameProcessingTests {
     /// A solid-color PNG generated in-process, standing in for a
@@ -55,6 +55,13 @@ struct VideoFrameProcessingTests {
         return try #require(rep.representation(using: .png, properties: [:]))
     }
 
+    private func makeImage(width: Int, height: Int) throws -> CGImage {
+        try #require(VideoFrameUtilities.makeCGImage(from: try makePNG(width: width, height: height)))
+    }
+
+    private static let pngMagic = Data([0x89, 0x50, 0x4E, 0x47])
+    private static let jpegMagic = Data([0xFF, 0xD8])
+
     @Test("makeCGImage decodes PNG data and rejects garbage")
     func makeCGImage() throws {
         let png = try makePNG(width: 64, height: 48)
@@ -88,45 +95,104 @@ struct VideoFrameProcessingTests {
         #expect(tiny.height >= 2)
     }
 
-    @Test("processJPEGData passes data through untouched at default settings")
-    func processPassthrough() async throws {
-        // Pins the intentional fast path shared with iOS streaming: at
-        // scale 1.0 / quality 80 the frame is forwarded byte-for-byte
-        // (no decode/re-encode), whatever its container format.
-        let png = try makePNG(width: 32, height: 32)
-        let out = try await VideoFrameUtilities.processJPEGData(png, scale: 1.0, quality: 80)
-        #expect(out == png)
+    // MARK: - encodeFrame: the single pass a captured frame pays
+
+    @Test("encodeFrame writes the container it was asked for")
+    func encodeFrameContainers() throws {
+        let image = try makeImage(width: 64, height: 48)
+
+        let png = try VideoFrameUtilities.encodeFrame(image, as: .png, scale: 1.0)
+        #expect(png.starts(with: Self.pngMagic))
+
+        let jpeg = try VideoFrameUtilities.encodeFrame(image, as: .jpeg(quality: 80), scale: 1.0)
+        #expect(jpeg.starts(with: Self.jpegMagic))
+
+        for data in [png, jpeg] {
+            let decoded = try #require(VideoFrameUtilities.makeCGImage(from: data))
+            #expect(decoded.width == 64)
+            #expect(decoded.height == 48)
+        }
     }
 
-    @Test("non-default quality re-encodes to JPEG")
-    func processReencodesQuality() async throws {
-        let png = try makePNG(width: 64, height: 64)
-        let out = try await VideoFrameUtilities.processJPEGData(png, scale: 1.0, quality: 50)
-        #expect(out != png)
-        #expect(out.prefix(2) == Data([0xFF, 0xD8]))
-        let reencoded = try #require(VideoFrameUtilities.makeCGImage(from: out))
-        #expect(reencoded.width == 64)
-        #expect(reencoded.height == 64)
-    }
-
-    @Test("JPEG quality changes encoded output size")
-    func processAppliesQuality() async throws {
-        let png = try makePatternPNG(width: 128, height: 96)
-        let low = try await VideoFrameUtilities.processJPEGData(png, scale: 1.0, quality: 20)
-        let high = try await VideoFrameUtilities.processJPEGData(png, scale: 1.0, quality: 90)
-
-        #expect(low != high)
+    @Test("encodeFrame honours JPEG quality")
+    func encodeFrameQuality() throws {
+        let image = try #require(VideoFrameUtilities.makeCGImage(from: try makePatternPNG(width: 128, height: 96)))
+        let low = try VideoFrameUtilities.encodeFrame(image, as: .jpeg(quality: 20), scale: 1.0)
+        let high = try VideoFrameUtilities.encodeFrame(image, as: .jpeg(quality: 90), scale: 1.0)
         #expect(low.count < high.count)
     }
 
-    @Test("scaling re-encodes to JPEG at the requested pixel dimensions")
-    func processScales() async throws {
+    @Test("encodeFrame scales within the same pass, in either container")
+    func encodeFrameScales() throws {
+        let image = try makeImage(width: 100, height: 60)
+
+        for container in [FrameContainer.png, .jpeg(quality: 80)] {
+            let out = try VideoFrameUtilities.encodeFrame(image, as: container, scale: 0.5)
+            let scaled = try #require(VideoFrameUtilities.makeCGImage(from: out))
+            #expect(scaled.width == 50)
+            #expect(scaled.height == 30)
+        }
+    }
+
+    // MARK: - transcodeFrame: for captures that cannot pick their container
+
+    @Test("transcodeFrame passes a matching lossless container through byte-for-byte")
+    func transcodePassthrough() async throws {
+        // The zero-transcode path: `screencap -p` already emits exactly what
+        // the PNG-carrying formats want, so the bytes must not be touched.
+        let png = try makePNG(width: 32, height: 32)
+        let out = try VideoFrameUtilities.transcodeFrame(png, to: .png, scale: 1.0)
+        #expect(out == png)
+    }
+
+    @Test("transcodeFrame encodes PNG input into JPEG when the sink needs JPEG")
+    func transcodeToJPEG() throws {
+        // Regression for MJPEG frames carrying PNG payloads under an
+        // `image/jpeg` header at the default settings.
+        let png = try makePNG(width: 32, height: 32)
+        let out = try VideoFrameUtilities.transcodeFrame(png, to: .jpeg(quality: 80), scale: 1.0)
+        #expect(out.starts(with: Self.jpegMagic))
+        let decoded = try #require(VideoFrameUtilities.makeCGImage(from: out))
+        #expect(decoded.width == 32)
+        #expect(decoded.height == 32)
+    }
+
+    @Test("transcodeFrame never passes JPEG through, so --quality is always honoured")
+    func transcodeAlwaysReencodesJPEG() throws {
+        // JPEG bytes carry no record of the quality they were encoded at,
+        // so a JPEG sink has to encode rather than trust the input.
+        let image = try #require(VideoFrameUtilities.makeCGImage(from: try makePatternPNG(width: 128, height: 96)))
+        let source = try VideoFrameUtilities.encodeFrame(image, as: .jpeg(quality: 95), scale: 1.0)
+
+        let out = try VideoFrameUtilities.transcodeFrame(source, to: .jpeg(quality: 20), scale: 1.0)
+        #expect(out != source)
+        #expect(out.count < source.count)
+    }
+
+    @Test("transcodeFrame re-encodes a scaled frame back into its own container")
+    func transcodeScales() throws {
         let png = try makePNG(width: 100, height: 60)
-        let out = try await VideoFrameUtilities.processJPEGData(png, scale: 0.5, quality: 80)
-        #expect(out.prefix(2) == Data([0xFF, 0xD8]))
+        let out = try VideoFrameUtilities.transcodeFrame(png, to: .png, scale: 0.5)
+        #expect(out.starts(with: Self.pngMagic))
         let scaled = try #require(VideoFrameUtilities.makeCGImage(from: out))
         #expect(scaled.width == 50)
         #expect(scaled.height == 30)
+    }
+
+    @Test("mimeType matches the bytes each container actually produces")
+    func mimeTypeMatchesPayload() throws {
+        // The bug this contract exists to prevent: a frame header that
+        // advertises a container the payload isn't.
+        let image = try makeImage(width: 32, height: 32)
+
+        for container in [FrameContainer.png, .jpeg(quality: 80)] {
+            let data = try VideoFrameUtilities.encodeFrame(image, as: container, scale: 1.0)
+            let expectedMagic = container == .png ? Self.pngMagic : Self.jpegMagic
+            #expect(data.starts(with: expectedMagic), "\(container.mimeType) payload has the wrong magic bytes")
+        }
+
+        #expect(FrameContainer.png.mimeType == "image/png")
+        #expect(FrameContainer.jpeg(quality: 80).mimeType == "image/jpeg")
     }
 
     @Test("estimateBitrate clamps to its floor and ceiling and grows with quality")

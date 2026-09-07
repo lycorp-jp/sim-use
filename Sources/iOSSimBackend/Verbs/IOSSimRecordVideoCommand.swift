@@ -215,10 +215,11 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         scale: Double,
         cancellationFlag: CancellationFlag
     ) async throws {
-        let initialFrameData = try await VideoFrameUtilities.captureScreenshotData(from: simulator)
-        guard let initialImage = VideoFrameUtilities.makeCGImage(from: initialFrameData) else {
-            throw CLIError(errorDescription: "Failed to decode simulator screenshot")
-        }
+        // Frames come off the framebuffer un-encoded: the recorder wants a
+        // CGImage, so encoding to PNG only to decode it straight back was
+        // pure overhead on the one path that already has no fps headroom.
+        let frameSource = try await SimulatorFrameSource(simulator: simulator)
+        let initialImage = try frameSource.currentFrame()
 
         let dimensions = VideoFrameUtilities.computeDimensions(for: initialImage, scale: scale)
         let recorder = try H264StreamRecorder(
@@ -240,16 +241,14 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
             let frameStart = Date()
 
             do {
-                let frameData = try await VideoFrameUtilities.captureScreenshotData(from: simulator)
-                if let cgImage = VideoFrameUtilities.makeCGImage(from: frameData) {
-                    let now = Date()
-                    var presentationTime = CMTime(seconds: now.timeIntervalSince(writerStartTime), preferredTimescale: 600)
-                    if presentationTime <= lastPresentationTime {
-                        presentationTime = CMTimeAdd(lastPresentationTime, CMTime(value: 1, timescale: 600))
-                    }
-                    try recorder.append(image: cgImage, presentationTime: presentationTime)
-                    lastPresentationTime = presentationTime
+                let cgImage = try frameSource.currentFrame()
+                let now = Date()
+                var presentationTime = CMTime(seconds: now.timeIntervalSince(writerStartTime), preferredTimescale: 600)
+                if presentationTime <= lastPresentationTime {
+                    presentationTime = CMTimeAdd(lastPresentationTime, CMTime(value: 1, timescale: 600))
                 }
+                try recorder.append(image: cgImage, presentationTime: presentationTime)
+                lastPresentationTime = presentationTime
             } catch let error as VideoWriterStallError {
                 throw error
             } catch {

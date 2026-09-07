@@ -4,7 +4,7 @@ import Foundation
 
 @Suite("Stream Video Command Tests", .serialized, .enabled(if: isE2EEnabled))
 struct StreamVideoTests {
-    @Test("Stream video outputs MJPEG data with HTTP headers")
+    @Test("mjpeg frames are JPEG, and are labelled as JPEG")
     func streamVideoMJPEG() async throws {
         let result = try await streamVideoForDuration(format: "mjpeg", duration: 3.0)
 
@@ -12,22 +12,35 @@ struct StreamVideoTests {
         #expect(!result.output.isEmpty, "Should have stderr messages")
         #expect(result.output.contains("Starting screenshot-based video stream"))
         #expect(result.output.contains("Format: mjpeg"))
+
+        let frame = try firstMJPEGFrame(in: result.data)
+        #expect(frame.contentType == "image/jpeg")
+        #expect(frame.contentLength == frame.payload.count)
+        #expect(frame.payload.starts(with: [0xFF, 0xD8]), "frame payload is not JPEG")
     }
 
-    @Test("Stream video outputs raw JPEG data for ffmpeg format")
+    @Test("ffmpeg format concatenates untranscoded PNG frames")
     func streamVideoFFmpeg() async throws {
         let result = try await streamVideoForDuration(format: "ffmpeg", duration: 2.0)
 
         #expect(isAcceptableStreamExitCode(result.exitCode), "Unexpected exit code: \(result.exitCode)")
         #expect(result.output.contains("Format: ffmpeg"))
+        // ffmpeg's `image2pipe` demuxer sniffs the container, so frames go
+        // out losslessly, exactly as captured.
+        #expect(result.data.starts(with: [0x89, 0x50, 0x4E, 0x47]), "stream does not open with a PNG frame")
     }
 
-    @Test("Stream video outputs raw JPEG with length prefix for raw format")
+    @Test("raw format prefixes each untranscoded PNG frame with a 4-byte length")
     func streamVideoRaw() async throws {
         let result = try await streamVideoForDuration(format: "raw", duration: 2.0)
 
         #expect(isAcceptableStreamExitCode(result.exitCode), "Unexpected exit code: \(result.exitCode)")
         #expect(result.output.contains("Format: raw"))
+
+        try #require(result.data.count > 8)
+        let length = result.data.prefix(4).reduce(UInt32(0)) { ($0 << 8) | UInt32($1) }
+        #expect(Int(length) <= result.data.count)
+        #expect(result.data.dropFirst(4).starts(with: [0x89, 0x50, 0x4E, 0x47]), "frame payload is not PNG")
     }
 
     @Test("Stream video with custom FPS")
@@ -49,7 +62,7 @@ struct StreamVideoTests {
         )
 
         #expect(isAcceptableStreamExitCode(result.exitCode), "Unexpected exit code: \(result.exitCode)")
-        #expect(result.output.contains("Quality: 50"))
+        #expect(result.output.contains("Frames: jpeg q50"))
         #expect(result.output.contains("Scale: 0.5"))
     }
 

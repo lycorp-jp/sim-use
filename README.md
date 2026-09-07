@@ -330,6 +330,22 @@ sim-use record-video --device $UDID --format gif                      # sim-use-
 sim-use record-video --device $UDID --format gif --fps 15 --scale 0.4 --output demo.gif
 ```
 
+`stream-video`'s screenshot-backed formats each carry the container their
+consumers can actually decode, and the capture is encoded into it exactly
+once — no frame is transcoded just to change its label:
+
+| `--format` | frames | consumer |
+|---|---|---|
+| `mjpeg` | JPEG (`--quality`, default 80) | browsers, `ffmpeg -f mpjpeg`, MJPEG clients — none of which accept another container |
+| `ffmpeg` | PNG, lossless | `ffmpeg -f image2pipe`, which sniffs the container |
+| `raw` | PNG, lossless | your own reader; each frame carries a 4-byte big-endian length prefix |
+| `bgra` (iOS) / `h264` (Android) | raw pixels / H.264 Annex B | not screenshot-backed |
+
+`--quality` therefore only bites on `mjpeg`; the PNG formats are lossless,
+and trade roughly 7x the bytes per frame for it (measured on a booted
+iPhone 17 Pro home screen: 455 KB/frame at `mjpeg`'s default quality vs
+3.5 MB/frame as PNG). Reach for `mjpeg` when the stream leaves the machine.
+
 `record-video` captures a real H.264 stream and muxes it straight into the
 MP4 (passthrough — no per-frame screenshot re-encoding). iOS records at a
 constant `--fps` (default 30, max 60); Android records at the device's

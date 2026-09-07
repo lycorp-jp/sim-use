@@ -28,6 +28,17 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
         case raw
         case ffmpeg
         case h264
+
+        /// The container this format's consumers can decode, or nil for
+        /// `h264`, which is a byte passthrough. Matches the iOS surface —
+        /// `stream-video` promises byte-identical framing across platforms.
+        func frameContainer(quality: Int) -> FrameContainer? {
+            switch self {
+            case .mjpeg: .jpeg(quality: quality)
+            case .raw, .ffmpeg: .png
+            case .h264: nil
+            }
+        }
     }
 
     /// Summary of a completed stream run. The video bytes are written to
@@ -62,7 +73,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
     @Option(help: "Frames per second for the JPEG formats (1-30, default: 10). Ignored by --format h264 (native variable frame rate).")
     public var fps: Int?
 
-    @Option(help: "JPEG quality for the JPEG formats / bitrate factor for h264 (1-100, default: 80)")
+    @Option(help: "JPEG quality for mjpeg / bitrate factor for h264 (1-100, default: 80). Ignored by raw/ffmpeg, which carry lossless PNG frames.")
     public var quality: Int = 80
 
     @Option(help: "Scale factor (0.1-1.0, default: 1.0)")
@@ -157,12 +168,15 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
                 cancellationFlag: cancellationFlag
             )
         case .mjpeg, .raw, .ffmpeg:
-            return try await streamJPEGFrames(
+            guard let container = format.frameContainer(quality: quality) else {
+                throw CLIError(errorDescription: "Format \(format.rawValue) does not carry encoded frames")
+            }
+            return try await streamFrames(
                 adb: adb,
                 serial: serial,
                 format: format,
+                container: container,
                 fps: fps ?? 10,
-                quality: quality,
                 scale: scale,
                 cancellationFlag: cancellationFlag
             )
@@ -283,17 +297,17 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
     /// `mjpeg` = multipart/x-mixed-replace with `--mjpegstream` boundaries,
     /// `raw` = 4-byte big-endian length prefix per frame,
     /// `ffmpeg` = bare concatenated frames.
-    private static func streamJPEGFrames(
+    private static func streamFrames(
         adb: Adb,
         serial: String,
         format: OutputFormat,
+        container: FrameContainer,
         fps: Int,
-        quality: Int,
         scale: Double,
         cancellationFlag: CancellationFlag
     ) async throws -> ExecutionResult {
         FileHandle.standardError.write(Data("Starting screencap-based video stream from Android device \(serial)...\n".utf8))
-        FileHandle.standardError.write(Data("Format: \(format.rawValue), FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
+        FileHandle.standardError.write(Data("Format: \(format.rawValue), FPS: \(fps), Frames: \(container), Scale: \(scale)\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 
         let frameInterval = 1.0 / Double(fps)
@@ -318,11 +332,11 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
             do {
                 let frameData = try AndroidRecordVideoCommand.captureAndroidScreencap(adbPath: adbPath, serial: serial)
-                let processedData = try await VideoFrameUtilities.processJPEGData(frameData, scale: scale, quality: quality)
+                let processedData = try VideoFrameUtilities.transcodeFrame(frameData, to: container, scale: scale)
 
                 switch format {
                 case .mjpeg:
-                    let frameHeader = "\(mjpegBoundary)\r\nContent-Type: image/jpeg\r\nContent-Length: \(processedData.count)\r\n\r\n"
+                    let frameHeader = "\(mjpegBoundary)\r\nContent-Type: \(container.mimeType)\r\nContent-Length: \(processedData.count)\r\n\r\n"
                     sink.write(Data(frameHeader.utf8))
                     sink.write(processedData)
                     sink.write(Data("\r\n".utf8))

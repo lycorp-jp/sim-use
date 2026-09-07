@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `stream-video` frames now match the container they are labelled with, and are encoded exactly once. Both platforms' screenshot-backed formats treated the default `--scale 1.0` / `--quality 80` as an unconditional passthrough while every MJPEG frame header claimed `image/jpeg`, so at default settings strict MJPEG clients were handed PNG payloads under a JPEG MIME type. Each format now declares the container its consumers can actually decode — `mjpeg` carries JPEG (ffmpeg's `mpjpeg` demuxer and IP-camera clients reject anything else), while `raw` and `ffmpeg` carry the capture's lossless PNG untouched, since `raw` delimits frames with its own length prefix and the documented `ffmpeg` pipeline sniffs the container via `-f image2pipe`. On iOS the capture is read off the framebuffer as a `CGImage` and encoded once into the format's container, replacing a PNG encode plus a decode plus a re-encode; on Android `screencap`'s PNG now reaches `raw`/`ffmpeg` with no transcode at all, and only `mjpeg` pays an encode. The iOS `record-video` screenshot fallback stopped round-tripping every frame through PNG as well. The run banner now reports the frame container (`Frames: jpeg q80`) in place of a `--quality` that never applied to the PNG formats, and `--quality`'s help says which formats it affects. (#94 — thanks @SunsetWan for the diagnosis and the MJPEG frame-parsing test helper!)
+
+
+### Fixed
+
 - The bundled skill preflight now rejects an older `sim-use` CLI before device discovery and prints the Homebrew upgrade command, instead of misdiagnosing newly documented device types as disconnected.
 
 ## [0.14.0] - 2026-08-27

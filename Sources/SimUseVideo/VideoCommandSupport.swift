@@ -61,6 +61,61 @@ public struct VideoWriterStallError: Error, LocalizedError, Equatable {
     }
 }
 
+/// The wire container a captured frame is carried in.
+///
+/// Stream formats differ in what their consumers can actually decode, so
+/// each one names its container and the capture path encodes into it
+/// exactly once. Nothing re-containers bytes just to change their label.
+public enum FrameContainer: Equatable, Sendable, CustomStringConvertible {
+    /// Lossless. `--format raw` delimits frames itself and ffmpeg's
+    /// `image2pipe` demuxer sniffs the container, so both carry PNG
+    /// straight from the capture with no re-encode.
+    case png
+    /// Motion JPEG only accepts JPEG: ffmpeg's `mpjpeg` demuxer and the
+    /// IP-camera clients that read `multipart/x-mixed-replace` reject
+    /// every other container.
+    case jpeg(quality: Int)
+
+    public var mimeType: String {
+        switch self {
+        case .png: "image/png"
+        case .jpeg: "image/jpeg"
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .png: "png (lossless)"
+        case .jpeg(let quality): "jpeg q\(quality)"
+        }
+    }
+
+    /// Leading bytes identifying an encoded frame as this container.
+    var magicBytes: [UInt8] {
+        switch self {
+        case .png: [0x89, 0x50, 0x4E, 0x47]
+        case .jpeg: [0xFF, 0xD8]
+        }
+    }
+
+    var typeIdentifier: CFString {
+        switch self {
+        case .png: "public.png" as CFString
+        case .jpeg: "public.jpeg" as CFString
+        }
+    }
+
+    var destinationProperties: CFDictionary? {
+        switch self {
+        case .png:
+            // Lossless: `--quality` has no meaning here.
+            nil
+        case .jpeg(let quality):
+            [kCGImageDestinationLossyCompressionQuality: Double(quality) / 100.0] as CFDictionary
+        }
+    }
+}
+
 public struct VideoFrameUtilities {
     public static func makeCGImage(from data: Data) -> CGImage? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
@@ -69,13 +124,29 @@ public struct VideoFrameUtilities {
         return CGImageSourceCreateImageAtIndex(source, 0, nil)
     }
 
-    public static func processJPEGData(_ data: Data, scale: Double, quality: Int) async throws -> Data {
-        if scale < 1.0 {
-            return try await scaleJPEGData(data, scale: scale, quality: quality)
-        } else if quality != 80 {
-            return try await reencodeJPEGData(data, quality: quality)
+    /// Encode a freshly captured frame into `container`, applying `scale`
+    /// in the same pass. This is the one codec pass a frame from an
+    /// un-encoded source has to pay.
+    public static func encodeFrame(_ image: CGImage, as container: FrameContainer, scale: Double) throws -> Data {
+        let source = scale < 1.0 ? try resize(image, scale: scale) : image
+        return try encode(source, as: container)
+    }
+
+    /// Re-container an already-encoded frame, skipping the work when the
+    /// bytes are already what the sink needs. Only capture paths that
+    /// cannot choose their container need this — Android's `screencap`
+    /// emits PNG and nothing else.
+    public static func transcodeFrame(_ data: Data, to container: FrameContainer, scale: Double) throws -> Data {
+        // Passthrough is sound only for a lossless container: JPEG bytes
+        // carry no record of the quality they were encoded at, so
+        // honouring `--quality` means encoding them ourselves.
+        if scale >= 1.0, container == .png, data.starts(with: container.magicBytes) {
+            return data
         }
-        return data
+        guard let image = makeCGImage(from: data) else {
+            throw VideoProcessingError.failedToDecodeImage
+        }
+        return try encodeFrame(image, as: container, scale: scale)
     }
 
     public static func computeDimensions(for image: CGImage, scale: Double) -> (width: Int, height: Int) {
@@ -86,21 +157,18 @@ public struct VideoFrameUtilities {
         return (max(evenWidth, 2), max(evenHeight, 2))
     }
 
-    private static func encodeJPEG(_ image: CGImage, quality: Int) throws -> Data {
+    private static func encode(_ image: CGImage, as container: FrameContainer) throws -> Data {
         guard let data = CFDataCreateMutable(nil, 0),
               let destination = CGImageDestinationCreateWithData(
                   data,
-                  "public.jpeg" as CFString,
+                  container.typeIdentifier,
                   1,
                   nil
               ) else {
             throw VideoProcessingError.failedToEncodeImage
         }
 
-        let properties = [
-            kCGImageDestinationLossyCompressionQuality: Double(quality) / 100.0
-        ] as CFDictionary
-        CGImageDestinationAddImage(destination, image, properties)
+        CGImageDestinationAddImage(destination, image, container.destinationProperties)
 
         guard CGImageDestinationFinalize(destination) else {
             throw VideoProcessingError.failedToEncodeImage
@@ -109,11 +177,7 @@ public struct VideoFrameUtilities {
         return data as Data
     }
 
-    private static func scaleJPEGData(_ data: Data, scale: Double, quality: Int) async throws -> Data {
-        guard let image = makeCGImage(from: data) else {
-            throw VideoProcessingError.failedToDecodeImage
-        }
-
+    private static func resize(_ image: CGImage, scale: Double) throws -> CGImage {
         let dimensions = computeDimensions(for: image, scale: scale)
         guard let context = CGContext(
             data: nil,
@@ -142,16 +206,9 @@ public struct VideoFrameUtilities {
             throw VideoProcessingError.failedToEncodeImage
         }
 
-        return try encodeJPEG(scaledImage, quality: quality)
+        return scaledImage
     }
 
-    private static func reencodeJPEGData(_ data: Data, quality: Int) async throws -> Data {
-        guard let image = makeCGImage(from: data) else {
-            throw VideoProcessingError.failedToDecodeImage
-        }
-
-        return try encodeJPEG(image, quality: quality)
-    }
 }
 
 public final class H264StreamRecorder: Sendable {

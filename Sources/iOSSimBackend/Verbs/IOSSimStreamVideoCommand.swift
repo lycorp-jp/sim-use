@@ -17,6 +17,22 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         case raw
         case ffmpeg
         case bgra
+
+        /// The container this format's consumers can decode, or nil for
+        /// `bgra`, which carries raw pixels rather than encoded frames.
+        func frameContainer(quality: Int) -> FrameContainer? {
+            switch self {
+            // Motion JPEG is JPEG by definition and by consumer: ffmpeg's
+            // `mpjpeg` demuxer rejects any other container.
+            case .mjpeg: .jpeg(quality: quality)
+            // `raw` delimits frames with its own length prefix, and the
+            // documented `ffmpeg` pipeline sniffs the container
+            // (`-f image2pipe`), so both carry the capture losslessly and
+            // untranscoded.
+            case .raw, .ffmpeg: .png
+            case .bgra: nil
+            }
+        }
     }
 
     /// Summary of a completed stream run. The actual video bytes are
@@ -50,7 +66,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     @Option(help: "Frames per second (1-30, default: 10)")
     public var fps: Int = 10
 
-    @Option(help: "JPEG quality (1-100, default: 80)")
+    @Option(help: "JPEG quality for mjpeg (1-100, default: 80). Ignored by raw/ffmpeg, which carry lossless PNG frames.")
     public var quality: Int = 80
 
     @Option(help: "Scale factor (0.1-1.0, default: 1.0)")
@@ -132,7 +148,15 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             // frame counts; return a zero-summary so `format(_:)` emits nothing.
             return ExecutionResult(framesStreamed: 0, durationSeconds: 0, format: format)
         default:
-            return try await streamCompressedFrames(from: targetSimulator, format: format, cancellationFlag: cancellationFlag)
+            guard let container = format.frameContainer(quality: quality) else {
+                throw CLIError(errorDescription: "Format \(format.rawValue) does not carry encoded frames")
+            }
+            return try await streamCompressedFrames(
+                from: targetSimulator,
+                format: format,
+                container: container,
+                cancellationFlag: cancellationFlag
+            )
         }
     }
 
@@ -141,12 +165,14 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     private func streamCompressedFrames(
         from simulator: FBSimulator,
         format: OutputFormat,
+        container: FrameContainer,
         cancellationFlag: CancellationFlag
     ) async throws -> ExecutionResult {
         FileHandle.standardError.write(Data("Starting screenshot-based video stream from simulator \(simulator.udid)...\n".utf8))
-        FileHandle.standardError.write(Data("Format: \(format.rawValue), FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
+        FileHandle.standardError.write(Data("Format: \(format.rawValue), FPS: \(fps), Frames: \(container), Scale: \(scale)\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 
+        let frameSource = try await SimulatorFrameSource(simulator: simulator)
         let frameInterval = 1.0 / Double(fps)
         let mjpegBoundary = "--mjpegstream"
         let destination = FileHandle.standardOutput
@@ -170,12 +196,15 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             let frameStartTime = Date()
 
             do {
-                let screenshotData = try await VideoFrameUtilities.captureScreenshotData(from: simulator)
-                let processedData = try await VideoFrameUtilities.processJPEGData(screenshotData, scale: scale, quality: quality)
+                let processedData = try VideoFrameUtilities.encodeFrame(
+                    frameSource.currentFrame(),
+                    as: container,
+                    scale: scale
+                )
 
                 switch format {
                 case .mjpeg:
-                    let frameHeader = "\(mjpegBoundary)\r\nContent-Type: image/jpeg\r\nContent-Length: \(processedData.count)\r\n\r\n"
+                    let frameHeader = "\(mjpegBoundary)\r\nContent-Type: \(container.mimeType)\r\nContent-Length: \(processedData.count)\r\n\r\n"
                     destination.write(Data(frameHeader.utf8))
                     destination.write(processedData)
                     destination.write(Data("\r\n".utf8))

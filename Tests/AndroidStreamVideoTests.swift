@@ -15,18 +15,22 @@ struct AndroidStreamVideoTests {
         #expect(result.stdout.starts(with: [0x00, 0x00, 0x00, 0x01]))
     }
 
-    @Test("mjpeg stream carries iOS-parity multipart framing")
+    @Test("mjpeg stream carries iOS-parity multipart framing, with JPEG frames")
     func mjpegSmoke() async throws {
         let result = try await streamForDuration(format: "mjpeg", duration: 4.0)
 
         #expect(isAcceptableStreamExitCode(result.exitCode), "Unexpected exit code: \(result.exitCode)")
-        let text = String(decoding: result.stdout.prefix(4096), as: UTF8.self)
-        #expect(text.contains("--mjpegstream"))
-        #expect(text.contains("Content-Type: image/jpeg"))
         #expect(result.stderr.contains("Format: mjpeg"))
+
+        // `screencap` only emits PNG, so this is the one Android format that
+        // has to transcode — assert it actually did.
+        let frame = try firstMJPEGFrame(in: result.stdout)
+        #expect(frame.contentType == "image/jpeg")
+        #expect(frame.contentLength == frame.payload.count)
+        #expect(frame.payload.starts(with: [0xFF, 0xD8]), "frame payload is not JPEG")
     }
 
-    @Test("raw format prefixes each frame with a 4-byte length")
+    @Test("raw format prefixes each untranscoded PNG frame with a 4-byte length")
     func rawFraming() async throws {
         let result = try await streamForDuration(format: "raw", duration: 3.0)
 
@@ -37,6 +41,8 @@ struct AndroidStreamVideoTests {
         // room to carry (screencap frames are tens of KB to a few MB).
         #expect(length > 100)
         #expect(Int(length) <= result.stdout.count)
+        // `screencap -p` output reaches stdout with no re-encode.
+        #expect(result.stdout.dropFirst(4).starts(with: [0x89, 0x50, 0x4E, 0x47]), "frame payload is not PNG")
     }
 
     @Test("h264 stream survives a screenrecord segment restart")
