@@ -4,6 +4,20 @@ import Foundation
 
 @Suite("Stream Video Command Tests", .serialized, .enabled(if: isE2EEnabled))
 struct StreamVideoTests {
+    @Test("h264 passthrough emits Annex B bytes and stops cleanly")
+    func streamVideoH264() async throws {
+        let result = try await streamVideoForDuration(format: "h264", fps: 30, duration: 3.0)
+
+        #expect(isAcceptableStreamExitCode(result.exitCode), "Unexpected exit code: \(result.exitCode)")
+        #expect(result.output.contains("Format: h264"))
+        #expect(result.output.contains("h264 stream is now running"))
+        // Native passthrough carries orders of magnitude more frames per
+        // second than the screenshot loop, so a 3 s capture is substantial.
+        #expect(result.data.count > 10_000, "expected a real byte stream, got \(result.data.count) bytes")
+        // The stream opens with an Annex B start code (SPS).
+        #expect(result.data.starts(with: [0x00, 0x00, 0x00, 0x01]))
+    }
+
     @Test("Stream video outputs MJPEG data with HTTP headers")
     func streamVideoMJPEG() async throws {
         let result = try await streamVideoForDuration(format: "mjpeg", duration: 3.0)
@@ -79,7 +93,7 @@ struct StreamVideoTests {
         let udid = try TestHelpers.requireSimulatorUDID()
 
         let simUsePath = try TestHelpers.getSimUsePath()
-        let fullCommand = "\(simUsePath) ios stream-video --format h264 --udid \(udid)"
+        let fullCommand = "\(simUsePath) ios stream-video --format webm --udid \(udid)"
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")

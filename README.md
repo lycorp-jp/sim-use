@@ -307,17 +307,21 @@ The output path goes to stdout; progress messages go to stderr.
 ### Video streaming & recording
 
 ```bash
-# MJPEG stream (cross-platform)
-sim-use stream-video --device $UDID --fps 10 --format mjpeg > stream.mjpeg
+# Native H.264 live stream (cross-platform) — the fastest path and the one to
+# reach for. iOS drives FBVideoStream at a constant --fps; Android is an adb
+# screenrecord passthrough at the device's native variable frame rate.
+# Neither pays a host-side codec pass. Preview it live in ffplay:
+sim-use stream-video --device $UDID --format h264 | \
+  ffplay -f h264 -probesize 32 -fflags nobuffer -
 
-# Pipe into ffmpeg
+# Or mux it straight to a file
+sim-use stream-video --device $UDID --format h264 | ffmpeg -f h264 -i - -c copy out.mp4
+
+# Screenshot-backed formats (deprecated — an order of magnitude slower and
+# larger than h264; use h264 unless you specifically need per-frame images)
+sim-use stream-video --device $UDID --fps 10 --format mjpeg > stream.mjpeg
 sim-use stream-video --device $UDID --fps 30 --format ffmpeg | \
   ffmpeg -f image2pipe -framerate 30 -i - -c:v libx264 -preset ultrafast out.mp4
-
-# Native H.264 live stream (Android-only): adb screenrecord passthrough —
-# variable frame rate, cheap, high quality. Preview it live in ffplay:
-sim-use stream-video --device emulator-5554 --format h264 | \
-  ffplay -f h264 -probesize 32 -fflags nobuffer -
 
 # Record MP4 directly (cross-platform)
 sim-use record-video --device $UDID --output recording.mp4            # 30 fps default
@@ -329,6 +333,11 @@ sim-use record-video --device $UDID --output demo.gif                 # format i
 sim-use record-video --device $UDID --format gif                      # sim-use-video-<timestamp>.gif
 sim-use record-video --device $UDID --format gif --fps 15 --scale 0.4 --output demo.gif
 ```
+
+`record-video` and `stream-video --format h264` drive the *same* capture on
+iOS — one H.264 configuration, differing only in whether the encoded bytes are
+muxed into an MP4 or copied to stdout. Measured on a booted iPhone 17 Pro,
+`h264` streams ~24 fps at ~220 KB/s where `mjpeg` manages ~4 fps at ~1.9 MB/s.
 
 `record-video` captures a real H.264 stream and muxes it straight into the
 MP4 (passthrough — no per-frame screenshot re-encoding). iOS records at a

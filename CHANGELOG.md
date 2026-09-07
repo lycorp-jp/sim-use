@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `stream-video --format h264` now works on iOS, not just Android: a native `FBVideoStream` H.264 Annex B passthrough copied straight to stdout with no host-side codec pass. On a booted iPhone 17 Pro this delivers ~24 fps at ~1.3 MB per 6 s, against the screenshot loop's ~4.1 fps at ~11 MB — roughly 5.9x the frame rate for an eighth of the bytes. It consumes exactly like the Android leg: `sim-use stream-video --format h264 --device $UDID | ffplay -f h264 -probesize 32 -fflags nobuffer -`. The top-level `stream-video` no longer rejects `h264` for iOS targets, so the only platform-exclusive format left is the experimental iOS-only `bgra`. (#132)
+
+### Changed
+
+- iOS `record-video` and `stream-video` now drive the same capture. Both build one `FBVideoStreamConfiguration.h264Capture(fps:quality:scale:)` and differ only in where the encoded bytes land — `record-video` into the shared `H264MuxingPipeline` → MP4 (the muxer Android has always used, and which was written for both), `stream-video` into stdout. Recording no longer goes through idb's separate in-process file writer. Output is equivalent: the MP4 stays a regular non-fragmented file that QuickTime, Finder and `GIFTranscoder` all read, `--fps` is still honoured as a constant rate, and the finalize path still survives a 100 ms-grace SIGTERM across repeated runs. Frame timestamps now come from host arrival time rather than the encoder's sample clock, which measures as ~6 ms of inter-frame jitter against the previous ~3 ms — both far inside a 33 ms frame at 30 fps. (#132)
+
+
 ### Fixed
 
 - The bundled skill preflight now rejects an older `sim-use` CLI before device discovery and prints the Homebrew upgrade command, instead of misdiagnosing newly documented device types as disconnected.
