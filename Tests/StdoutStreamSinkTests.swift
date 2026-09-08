@@ -8,14 +8,8 @@ import Foundation
 /// the pipe fills.
 @Suite("StdoutStreamSink")
 struct StdoutStreamSinkTests {
-    private final class Flag: @unchecked Sendable {
-        private let lock = NSLock()
-        private var value = false
-        var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
-        func set() { lock.lock(); value = true; lock.unlock() }
-    }
-
-    private final class Done: @unchecked Sendable {
+    /// A one-way flag readable from another thread.
+    private final class Latch: @unchecked Sendable {
         private let lock = NSLock()
         private var value = false
         var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
@@ -31,8 +25,8 @@ struct StdoutStreamSinkTests {
         #expect(pipe(&fds) == 0)
         defer { close(fds[0]); close(fds[1]) }
 
-        let abort = Flag()
-        let returned = Done()
+        let abort = Latch()
+        let returned = Latch()
         let sink = StdoutStreamSink(fileDescriptor: fds[1], shouldAbort: { abort.isSet })
 
         // Far more than any pipe buffer, so the write cannot complete.

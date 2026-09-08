@@ -38,6 +38,31 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
     /// Largest gap the stream's timeline will advance between two pictures,
     /// however long the real pause between them was.
     ///
+    /// This is a knowing deviation from the transport's clock model, and the
+    /// alternative was measured rather than assumed. A wall-clock timeline
+    /// with the clock sampled every 40 ms through the idle stretch — which is
+    /// what the standard asks for — leaves the preview unable to recover at
+    /// all: after 10 s and after 30 s of stillness, the picture had still not
+    /// caught up 30 s later. Capping the gap instead recovers in 0.45 s and
+    /// 0.51 s.
+    ///
+    /// The reason is that a player schedules presentation from the pictures'
+    /// own timestamps, not from the transport clock. ffplay's master clock
+    /// (there is no audio) is driven by the last picture it showed, so an
+    /// advancing PCR does not move it; the next picture, stamped with the
+    /// time it really arrived, is simply due far in that clock's future. The
+    /// consequence is that the transport clock cannot be sampled during an
+    /// idle stretch either — restating the previous value is what produced a
+    /// corrupt-packet warning per picture — so PCR repetition exceeds the
+    /// 100 ms the standard allows whenever the screen is still.
+    ///
+    /// That is acceptable here and would not be in a broadcast mux: this
+    /// stream feeds ffplay, ffmpeg and browsers, all of which schedule from
+    /// PTS. A receiver that disciplines its own clock from the PCR may not
+    /// hold sync across an idle stretch; the resuming picture declares a
+    /// transport discontinuity so that such a receiver at least knows to
+    /// resynchronise rather than treating it as late.
+    ///
     /// A live preview's contract is "show me the newest frame", not
     /// "reproduce the wall clock" — that second one is `record-video`'s job,
     /// and it keeps real arrival times for exactly that reason. Capture here

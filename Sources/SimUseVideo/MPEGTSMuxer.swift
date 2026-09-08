@@ -20,10 +20,9 @@ import Foundation
 /// no PCR-only packets (the PCR rides the video PID's adaptation field). That
 /// is all a viewer needs, and every field below is fixed by ISO/IEC 13818-1.
 public struct MPEGTSMuxer {
-    /// 188 bytes, of which 4 are the header. Fixed by the standard.
+    /// Fixed by the standard: 188-byte packets with a 4-byte header.
     static let packetSize = 188
-    static let headerSize = 4
-    static let payloadSize = packetSize - headerSize
+    static let payloadSize = packetSize - 4
 
     static let syncByte: UInt8 = 0x47
     static let patPID: UInt16 = 0x0000

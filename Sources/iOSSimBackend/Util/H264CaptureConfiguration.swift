@@ -5,18 +5,12 @@ import Foundation
 extension FBVideoStreamConfiguration {
     /// The H.264 encoder settings shared by `record-video` and
     /// `stream-video`, so the two verbs cannot drift apart on how the picture
-    /// is encoded. What they do not share is `transport`, because the two
-    /// sinks need different framing:
+    /// is encoded.
     ///
-    /// - `.annexB` for the file sink. `H264MuxingPipeline` parses Annex B
-    ///   start codes and rebuilds a timeline from host arrival time.
-    /// - `.mpegts` for the stdout sink. Annex B carries no presentation
-    ///   timestamps, so a player has to guess the frame rate — ffprobe reads
-    ///   a bare stream as 25 fps regardless of `--fps`. Feeding a 30 fps
-    ///   capture to a consumer that paces at 25 accumulates roughly 5 frames
-    ///   of lag per second, unbounded: the picture drifts minutes behind the
-    ///   device. MPEG-TS carries PTS/DTS on a 90 kHz clock, so the player
-    ///   paces correctly and the queue stays empty.
+    /// `transport` is deliberately not shared: the file sink needs `.annexB`
+    /// because `H264MuxingPipeline` parses start codes, while the stdout sink
+    /// needs `.mpegts` because a bare elementary stream carries no timestamps
+    /// for a player to pace off. See `MPEGTSMuxer` for what that costs.
     static func h264Capture(
         fps: Int,
         quality: Int,

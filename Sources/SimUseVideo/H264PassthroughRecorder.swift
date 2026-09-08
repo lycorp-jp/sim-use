@@ -32,10 +32,12 @@ public enum H264PassthroughError: Error, LocalizedError, Equatable {
 /// Muxes an already-encoded H.264 elementary stream into an MP4 without
 /// re-encoding. Access units (from `AnnexBStreamParser`) are rewrapped as
 /// AVCC-framed `CMSampleBuffer`s and appended to a passthrough
-/// `AVAssetWriterInput`. Presentation timestamps come from the host arrival
-/// clock, since the source (Android's `adb screenrecord`, the only remaining
-/// caller — iOS records through idb's native file recorder instead) doesn't
-/// embed timing.
+/// `AVAssetWriterInput`.
+///
+/// Presentation timestamps come from the host arrival clock. That holds for
+/// every caller by construction: an Annex B elementary stream carries no
+/// per-access-unit timing, so arrival is the only clock available — whether
+/// the bytes came from `adb screenrecord` or from iOS's `FBVideoStream`.
 public final class H264PassthroughRecorder: H264AccessUnitSink {
     /// Mutable + non-Sendable writer state, confined to the lock.
     private struct State {
