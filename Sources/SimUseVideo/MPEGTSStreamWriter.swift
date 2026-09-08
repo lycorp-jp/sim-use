@@ -11,11 +11,8 @@ import os
 public final class MPEGTSStreamWriter: H264AccessUnitSink {
     private struct State {
         var muxer = MPEGTSMuxer()
-        /// Arrival time of the previous picture, used to measure the real gap
-        /// between consecutive frames.
         var lastHostTime: TimeInterval?
-        /// The stream's own timeline, which advances by the real inter-frame
-        /// gap but never by more than `maxFrameGap`. See `append`.
+        /// The stream's own timeline, which is not wall time. See `maxFrameGap`.
         var streamTime: TimeInterval = 0
         var framesWritten: Int64 = 0
     }
@@ -52,11 +49,10 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
     /// The cost, stated plainly: PCR repetition exceeds the 100 ms the
     /// standard allows whenever the screen is still, because a timeline that
     /// only advances on a picture has no honest clock value to send in
-    /// between — and restating the previous one made ffmpeg report every
-    /// following picture as corrupt. Fine for a preview; not for a broadcast
-    /// mux. The resuming picture declares a discontinuity so a
-    /// clock-disciplining receiver knows to resynchronise. `record-video`
-    /// keeps real elapsed time for anyone who needs it.
+    /// between. Fine for a preview; not for a broadcast mux. The resuming
+    /// picture declares a discontinuity so a clock-disciplining receiver
+    /// knows to resynchronise, and `record-video` keeps real elapsed time
+    /// for anyone who needs it.
     private static let maxFrameGap: TimeInterval = 0.2
 
     private let state: OSAllocatedUnfairLock<State>
@@ -77,11 +73,10 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
     /// a closed one gets noticed, and on a variable-frame-rate source the
     /// first picture may never come at all.
     ///
-    /// Deliberately carries no clock. A PCR is a sample of the transmission
-    /// clock and has to advance; this timeline only advances when a picture
-    /// arrives, so during an idle stretch there is no honest value to send.
-    /// Repeating the previous one made ffmpeg report every following picture
-    /// as corrupt. Each picture carries its own PCR instead.
+    /// Deliberately carries no clock: there is no honest one to send while
+    /// the screen is idle (see `maxFrameGap`), and repeating the previous
+    /// value made ffmpeg report every following picture as corrupt. Each
+    /// picture carries its own PCR instead.
     public func emitProgramTables() {
         state.withLock { state in
             consume(state.muxer.programTables())

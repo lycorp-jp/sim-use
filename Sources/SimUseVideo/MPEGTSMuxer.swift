@@ -17,8 +17,8 @@ import Foundation
 /// is the format broadcast and HLS use.
 ///
 /// Deliberately minimal: one program, one video elementary stream, no audio,
-/// no PCR-only packets (the PCR rides the video PID's adaptation field). That
-/// is all a viewer needs, and every field below is fixed by ISO/IEC 13818-1.
+/// and the PCR riding the video PID's adaptation field. That is all a viewer
+/// needs, and every field below is fixed by ISO/IEC 13818-1.
 public struct MPEGTSMuxer {
     /// Fixed by the standard: 188-byte packets with a 4-byte header.
     static let packetSize = 188
@@ -57,10 +57,12 @@ public struct MPEGTSMuxer {
     /// A packet on the video PID carrying only an adaptation field with the
     /// PCR — no payload.
     ///
-    /// The clock has to keep advancing even when the encoder emits nothing.
-    /// `screenrecord` is variable-frame-rate and sends no frames at all
-    /// while the screen is still, so without this a player's clock would
-    /// stall and it would stop presenting until the device happened to move.
+    /// Nothing emits these today. It is the standards-shaped way to keep the
+    /// clock advancing while a variable-frame-rate source sends no pictures,
+    /// and that design was implemented and measured against the alternative
+    /// the stream writer ships — see `MPEGTSStreamWriter.maxFrameGap` for why
+    /// it lost. Kept because it is the right primitive for anyone revisiting
+    /// that trade-off with a different consumer in mind.
     public mutating func clockReference(at seconds: TimeInterval) -> Data {
         let ticks = UInt64(max(0, seconds) * Self.timescale)
         var packet = Data(capacity: Self.packetSize)
@@ -121,13 +123,11 @@ public struct MPEGTSMuxer {
         var offset = 0
         var isFirst = true
         while offset < pes.count {
-            // The first packet of an access unit carries the adaptation
-            // field, which eats into its payload capacity. Every access
-            // unit carries the PCR, not just keyframes: a player builds its
-            // clock from the PCR and the standard wants one at least every
-            // 100 ms, so emitting it per keyframe only — `screenrecord`
-            // sends those rarely — leaves ffplay without a clock and it
-            // never starts presenting.
+            // Every access unit carries the PCR, not just keyframes: a
+            // player builds its clock from the PCR and the standard wants
+            // one at least every 100 ms, so emitting it per keyframe only
+            // — `screenrecord` sends those rarely — leaves ffplay without a
+            // clock and it never starts presenting.
             let adaptation: Data? = isFirst
                 ? Self.adaptationField(isIDR: isIDR, pcr: pcrTicks, discontinuity: discontinuity)
                 : nil
@@ -161,8 +161,7 @@ public struct MPEGTSMuxer {
         adaptation: Data? = nil
     ) -> Data {
         var adaptationField = adaptation ?? Data()
-        let used = payload.count + adaptationField.count
-        if used < Self.payloadSize {
+        if payload.count + adaptationField.count < Self.payloadSize {
             adaptationField = Self.stuffedAdaptationField(
                 existing: adaptationField,
                 targetLength: Self.payloadSize - payload.count
