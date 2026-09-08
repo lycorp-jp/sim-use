@@ -10,8 +10,8 @@ import SimUseVideo
 /// Two engines behind one flag surface:
 ///
 ///   * `h264` — `adb exec-out screenrecord --output-format=h264 -`,
-///     re-containered into MPEG-TS (no re-encoding)
-///     passthrough: variable frame rate, cheap, high quality. screenrecord's
+///     re-containered into MPEG-TS without re-encoding: variable frame
+///     rate, cheap, high quality. screenrecord's
 ///     per-invocation time limit is papered over by restarting it and
 ///     continuing the byte stream (same segment loop as
 ///     `AndroidRecordVideoCommand`, minus the muxer); each new segment
@@ -33,9 +33,9 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
     /// Summary of a completed stream run. The video bytes are written to
     /// stdout inline during `execute()` — they are a side channel, not part
-    /// of the Result (same posture as `IOSSimStreamVideoCommand`). The JPEG
-    /// formats count frames; `h264` is a byte-passthrough with no frame
-    /// notion, so it reports bytes instead.
+    /// of the Result (same posture as `IOSSimStreamVideoCommand`). Every
+    /// format counts frames; `h264` also reports bytes, which is all there
+    /// is to say about a run that produced no picture at all.
     public struct ExecutionResult: Codable {
         public let framesStreamed: UInt64
         public let bytesStreamed: UInt64
@@ -95,9 +95,9 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
         guard result.durationSeconds > 0 else { return .empty }
-        // h264 used to be a byte passthrough with no frame count; it now
-        // parses the stream to re-container it, so report frames like every
-        // other format and match what the top-level verb prints.
+        // Frames are the useful unit and what the top-level verb prints.
+        // A still screen under a variable-frame-rate source can genuinely
+        // produce none, and bytes are the only thing left to report.
         if result.framesStreamed == 0 {
             guard result.bytesStreamed > 0 else { return .empty }
             let line = String(
@@ -317,8 +317,6 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
         let elapsed = Date().timeIntervalSince(startTime)
         return ExecutionResult(
-            // Re-containering parses the stream, so unlike the old
-            // byte-passthrough this path knows its frame count.
             framesStreamed: UInt64(pipeline.framesWritten),
             bytesStreamed: sink.bytesWritten,
             durationSeconds: elapsed,
