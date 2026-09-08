@@ -3,10 +3,10 @@ import Foundation
 @preconcurrency import FBControlCore
 
 extension FBVideoStreamConfiguration {
-    /// The H.264 capture configuration shared by `record-video` and
-    /// `stream-video`. Both verbs drive the identical framebuffer encode; the
-    /// only thing that varies is `transport`, because the two sinks need
-    /// different framing:
+    /// The H.264 encoder settings shared by `record-video` and
+    /// `stream-video`, so the two verbs cannot drift apart on how the picture
+    /// is encoded. What they do not share is `transport`, because the two
+    /// sinks need different framing:
     ///
     /// - `.annexB` for the file sink. `H264MuxingPipeline` parses Annex B
     ///   start codes and rebuilds a timeline from host arrival time.

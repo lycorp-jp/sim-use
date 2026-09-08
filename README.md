@@ -313,7 +313,9 @@ The output path goes to stdout; progress messages go to stderr.
 sim-use stream-video --device $UDID --format h264 | \
   ffplay -f mpegts -analyzeduration 0 -probesize 32768 -i -
 
-# Or mux it straight to a file
+# Muxing the preview to a file works, but it is a live capture, not an
+# archive: idle stretches are compressed (see below). For a faithful
+# recording use `record-video`.
 sim-use stream-video --device $UDID --format h264 | ffmpeg -f mpegts -i - -c copy out.mp4
 
 # Screenshot-backed formats (deprecated — an order of magnitude slower and
@@ -333,10 +335,21 @@ sim-use record-video --device $UDID --format gif                      # sim-use-
 sim-use record-video --device $UDID --format gif --fps 15 --scale 0.4 --output demo.gif
 ```
 
-`record-video` and `stream-video --format h264` drive the *same* capture on
-iOS — one H.264 configuration, differing only in whether the encoded bytes are
-muxed into an MP4 or copied to stdout. Measured on a booted iPhone 17 Pro,
-`h264` streams ~24 fps at ~220 KB/s where `mjpeg` manages ~4 fps at ~1.9 MB/s.
+On iOS, `record-video` and `stream-video --format h264` share one set of
+H.264 encoder settings (`--fps`, `--quality`, `--scale`, keyframe interval)
+through a single factory, so the two verbs cannot drift apart on how the
+picture is encoded. They do differ downstream: recording takes Annex B through
+the host-side muxer into an MP4, while streaming takes MPEG-TS straight to
+stdout. Measured on a booted iPhone 17 Pro, `h264` streams ~24 fps at
+~220 KB/s where `mjpeg` manages ~4 fps at ~1.9 MB/s.
+
+`stream-video` is a *preview*: its timeline advances by the real gap between
+pictures but never by more than 0.2 s, so an idle screen does not leave a hole
+a player has to sit through before it reaches the next picture. That is the
+right trade when the question is "what is on screen now", and it means the
+stream is not a faithful record of elapsed time — piping it to a file turns a
+60-second pause into 0.2 seconds of output. `record-video` keeps real arrival
+times and is what to use for an archive.
 
 Those two ffplay flags are not decoration. `-analyzeduration 0` is required
 because Android's capture is variable-frame-rate: while the screen is still,
