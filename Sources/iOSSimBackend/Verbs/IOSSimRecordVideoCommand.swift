@@ -8,14 +8,11 @@ import AVFoundation
 import SimUseCore
 import SimUseVideo
 
-/// iOS Simulator backend for the `record-video` verb. Recording uses idb's
-/// native in-process file recorder (`FBSimulator.startRecording(toFile:
-/// configuration:)`), which drives `FBSimulatorVideoStream` in eager
-/// (fixed-rate) H.264 mode and muxes straight into an `.mp4` via its own
-/// `AVAssetWriter`-backed file writer — the same passthrough-muxing
-/// architecture this command used to hand-roll, now upstream's own
-/// maintained implementation. `--fps` maps directly to the stream's eager
-/// cadence, so the requested rate is honored and playback is smooth.
+/// iOS Simulator backend for the `record-video` verb.
+///
+/// Captures native H.264 off the framebuffer and muxes it without
+/// re-encoding, falling back to a screenshot loop only if that stream cannot
+/// start. The types below name the pieces.
 public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "record-video",

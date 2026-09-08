@@ -47,9 +47,6 @@ struct StreamVideoFormatMappingTests {
         #expect(ios.format == .h264)
     }
 
-    // stdout carries the raw video bytes, so the summary envelope can
-    // never share it — all three surfaces must reject the flag at
-    // validation time rather than corrupt the stream after the fact.
     // The deprecation is per-platform on purpose: on a simulator `h264`
     // strictly dominates the screenshot loop, but on Android the same loop
     // is the only way to stream from a device whose `screenrecord` does not
@@ -68,6 +65,9 @@ struct StreamVideoFormatMappingTests {
         #expect(notice.contains("mjpeg"), "the notice must name the format being used")
     }
 
+    // stdout carries the raw video bytes, so the summary envelope can never
+    // share it — all three surfaces must reject the flag at validation time
+    // rather than corrupt the stream after the fact.
     @Test("--json is rejected on every stream-video surface")
     func jsonRejectedEverywhere() {
         #expect(throws: (any Error).self) {

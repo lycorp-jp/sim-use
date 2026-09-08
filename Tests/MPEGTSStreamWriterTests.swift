@@ -125,7 +125,7 @@ struct MPEGTSStreamWriterTests {
     func idleIsDeclared() throws {
         let sink = RecordingSink()
         let writer = MPEGTSStreamWriter(consume: { sink.consume($0) })
-        writer.writeProgramTables()
+        writer.emitProgramTables()
 
         // Two pictures a normal frame apart: the timeline advanced, nothing
         // to declare.
@@ -154,12 +154,12 @@ struct MPEGTSStreamWriterTests {
         // is the coherent option.
         let sink = RecordingSink()
         let writer = MPEGTSStreamWriter(consume: { sink.consume($0) })
-        writer.writeProgramTables()
+        writer.emitProgramTables()
         try writer.append(accessUnit: accessUnit(isIDR: true, bytes: 600),
                           sps: sps, pps: pps, hostTime: 0)
         let afterFrame = pcrValues(in: sink.joined).count
 
-        for _ in 0..<5 { writer.writeKeepAlive() }
+        for _ in 0..<5 { writer.emitProgramTables() }
         #expect(
             pcrValues(in: sink.joined).count == afterFrame,
             "keep-alives added PCR samples the timeline cannot justify"
@@ -177,7 +177,7 @@ struct MPEGTSStreamWriterTests {
     func batchesAreWholePackets() throws {
         let sink = RecordingSink()
         let writer = MPEGTSStreamWriter(consume: { sink.consume($0) })
-        writer.writeProgramTables()
+        writer.emitProgramTables()
         for i in 0..<20 {
             try writer.append(accessUnit: accessUnit(isIDR: i == 0, bytes: 900),
                               sps: sps, pps: pps, hostTime: Double(i) * 0.03)
@@ -198,7 +198,7 @@ struct MPEGTSStreamWriterTests {
         // batch spliced into it destroys 188-byte alignment outright.
         let sink = OverlapDetectingSink()
         let writer = MPEGTSStreamWriter(consume: { sink.consume($0) })
-        writer.writeProgramTables()
+        writer.emitProgramTables()
 
         let appender = Thread {
             for i in 0..<40 {
@@ -208,7 +208,7 @@ struct MPEGTSStreamWriterTests {
             }
         }
         let keeper = Thread {
-            for i in 0..<40 { writer.writeKeepAlive() }
+            for i in 0..<40 { writer.emitProgramTables() }
         }
         appender.start(); keeper.start()
         while !appender.isFinished || !keeper.isFinished { Thread.sleep(forTimeInterval: 0.01) }
@@ -233,7 +233,7 @@ struct MPEGTSStreamWriterTests {
         // counters then arrive out of order.
         let sink = RecordingSink(delay: 0.001)
         let writer = MPEGTSStreamWriter(consume: { sink.consume($0) })
-        writer.writeProgramTables()
+        writer.emitProgramTables()
 
         let appender = Thread {
             for i in 0..<80 {
@@ -244,7 +244,7 @@ struct MPEGTSStreamWriterTests {
         }
         let keeper = Thread {
             for i in 0..<80 {
-                writer.writeKeepAlive()
+                writer.emitProgramTables()
             }
         }
         appender.start()

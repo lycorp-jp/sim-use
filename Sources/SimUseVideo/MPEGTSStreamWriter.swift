@@ -17,8 +17,6 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
         /// The stream's own timeline, which advances by the real inter-frame
         /// gap but never by more than `maxFrameGap`. See `append`.
         var streamTime: TimeInterval = 0
-        /// Stream-relative time of the last PAT/PMT emission.
-        var lastTablesTime: TimeInterval = -.infinity
         var framesWritten: Int64 = 0
     }
 
@@ -38,92 +36,54 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
     /// Largest gap the stream's timeline will advance between two pictures,
     /// however long the real pause between them was.
     ///
-    /// This is a knowing deviation from the transport's clock model, and the
-    /// alternative was measured rather than assumed. A wall-clock timeline
-    /// with the clock sampled every 40 ms through the idle stretch — which is
-    /// what the standard asks for — leaves the preview unable to recover at
-    /// all: after 10 s and after 30 s of stillness, the picture had still not
-    /// caught up 30 s later. Capping the gap instead recovers in 0.45 s and
-    /// 0.51 s.
+    /// A knowing deviation from the transport's clock model, kept because the
+    /// standards-shaped alternative was measured and is worse. A wall-clock
+    /// timeline with the clock sampled every 40 ms through the idle stretch
+    /// left the preview unrecovered 30 s after both a 10 s and a 30 s pause;
+    /// capping the gap recovers in 0.45 s and 0.51 s.
     ///
-    /// The reason is that a player schedules presentation from the pictures'
-    /// own timestamps, not from the transport clock. ffplay's master clock
-    /// (there is no audio) is driven by the last picture it showed, so an
-    /// advancing PCR does not move it; the next picture, stamped with the
-    /// time it really arrived, is simply due far in that clock's future. The
-    /// consequence is that the transport clock cannot be sampled during an
-    /// idle stretch either — restating the previous value is what produced a
-    /// corrupt-packet warning per picture — so PCR repetition exceeds the
-    /// 100 ms the standard allows whenever the screen is still.
+    /// The reason is that ffplay holds the current picture for a duration it
+    /// derives from the *next* picture's PTS, so a wall-clock gap keeps the
+    /// stale picture on screen for exactly that long. Sampling the transport
+    /// clock does not change that schedule. (Measured against the ffplay
+    /// invocation the README documents; other consumers may schedule
+    /// differently.)
     ///
-    /// That is acceptable here and would not be in a broadcast mux: this
-    /// stream feeds ffplay, ffmpeg and browsers, all of which schedule from
-    /// PTS. A receiver that disciplines its own clock from the PCR may not
-    /// hold sync across an idle stretch; the resuming picture declares a
-    /// transport discontinuity so that such a receiver at least knows to
-    /// resynchronise rather than treating it as late.
-    ///
-    /// A live preview's contract is "show me the newest frame", not
-    /// "reproduce the wall clock" — that second one is `record-video`'s job,
-    /// and it keeps real arrival times for exactly that reason. Capture here
-    /// is variable-frame-rate: a still screen produces no frames at all, so
-    /// stamping the next picture with its true arrival time opens a hole in
-    /// the timeline as long as the pause. A player then has to play through
-    /// that hole before it reaches the new picture, which is seen as the
-    /// preview running minutes behind after the screen has been idle a
-    /// while. Capping the gap keeps the timeline compact, so the newest
-    /// picture is always about to be presented.
+    /// The cost, stated plainly: PCR repetition exceeds the 100 ms the
+    /// standard allows whenever the screen is still, because a timeline that
+    /// only advances on a picture has no honest clock value to send in
+    /// between — and restating the previous one made ffmpeg report every
+    /// following picture as corrupt. Fine for a preview; not for a broadcast
+    /// mux. The resuming picture declares a discontinuity so a
+    /// clock-disciplining receiver knows to resynchronise. `record-video`
+    /// keeps real elapsed time for anyone who needs it.
     private static let maxFrameGap: TimeInterval = 0.2
 
     private let state: OSAllocatedUnfairLock<State>
     private let consume: @Sendable (Data) -> Void
-    private let tableInterval: TimeInterval
 
     public var framesWritten: Int64 { state.withLock { $0.framesWritten } }
 
-    /// - Parameters:
-    ///   - tableInterval: How often to re-emit PAT/PMT. A consumer that
-    ///     attaches mid-stream cannot interpret anything until it has seen
-    ///     them, so they repeat rather than being sent only once.
-    ///   - consume: Receives transport-stream bytes in order. Called on the
-    ///     capture thread; may block (writing to a pipe does).
-    public init(
-        tableInterval: TimeInterval = 1.0,
-        consume: @escaping @Sendable (Data) -> Void
-    ) {
-        self.tableInterval = tableInterval
+    /// - Parameter consume: Receives transport-stream bytes in order. Called
+    ///   on the caller's thread and may block, which is the backpressure.
+    public init(consume: @escaping @Sendable (Data) -> Void) {
         self.consume = consume
         self.state = OSAllocatedUnfairLock(initialState: State())
     }
 
-    /// Emit the program tables straight away, before any picture has been
-    /// parsed. A consumer cannot interpret the stream until it has seen
-    /// them, and on a variable-frame-rate source the first frame may be
-    /// arbitrarily far off — a still screen produces none at all — so
-    /// waiting for one would leave an attached player with nothing to read.
-    public func writeProgramTables() {
-        state.withLock { state in
-            state.lastTablesTime = 0
-            consume(state.muxer.programTables())
-        }
-    }
-
-    /// Re-announce the program tables, without waiting for a picture. Called
-    /// periodically so a consumer attaching mid-stream learns the structure
-    /// promptly, and so a closed pipe is noticed even while the screen is
-    /// still and no pictures are being produced.
+    /// Announce the program structure. Called once before the first picture
+    /// and periodically after, which serves three purposes: a consumer
+    /// attaching mid-stream can learn the structure, reaching the pipe is how
+    /// a closed one gets noticed, and on a variable-frame-rate source the
+    /// first picture may never come at all.
     ///
     /// Deliberately carries no clock. A PCR is a sample of the transmission
     /// clock and has to advance; this timeline only advances when a picture
     /// arrives, so during an idle stretch there is no honest value to send.
-    /// Repeating the previous one made every following picture arrive against
-    /// a clock that had stood still, which ffmpeg reports as `Packet
-    /// corrupt` — verified by interleaving keep-alives into an offline mux of
-    /// a captured stream: none without, one per picture with. Each picture
-    /// carries its own PCR, so the clock is sampled exactly when it moves.
-    public func writeKeepAlive() {
+    /// Repeating the previous one made ffmpeg report every following picture
+    /// as corrupt. Each picture carries its own PCR instead.
+    public func emitProgramTables() {
         state.withLock { state in
-            state.lastTablesTime = state.streamTime
             consume(state.muxer.programTables())
         }
     }
@@ -158,10 +118,6 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
             let pts = state.streamTime
 
             var out = Data()
-            if pts - state.lastTablesTime >= tableInterval {
-                out.append(state.muxer.programTables())
-                state.lastTablesTime = pts
-            }
             out.append(
                 state.muxer.packets(
                     annexB: Self.annexB(accessUnit: accessUnit, sps: sps, pps: pps),

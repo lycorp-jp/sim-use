@@ -72,7 +72,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
     public static let configuration = CommandConfiguration(
         commandName: "stream-video",
-        abstract: "Stream simulator frames to stdout using screenshot capture"
+        abstract: "Stream simulator video to stdout"
     )
 
     @OptionGroup public var device: DeviceOptions

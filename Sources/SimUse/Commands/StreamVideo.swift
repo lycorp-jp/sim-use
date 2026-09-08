@@ -31,7 +31,6 @@ struct StreamVideo: SimUseExecutableCommand {
         let framesStreamed: UInt64
         let bytesStreamed: UInt64?
         let durationSeconds: Double
-        let format: String
     }
 
     static let configuration = CommandConfiguration(
@@ -144,7 +143,6 @@ struct StreamVideo: SimUseExecutableCommand {
             framesStreamed: result.framesStreamed,
             bytesStreamed: nil,
             durationSeconds: result.durationSeconds,
-            format: result.format.rawValue
         )
     }
 
@@ -180,7 +178,6 @@ struct StreamVideo: SimUseExecutableCommand {
             framesStreamed: result.framesStreamed,
             bytesStreamed: result.bytesStreamed,
             durationSeconds: result.durationSeconds,
-            format: result.format.rawValue
         )
     }
 }

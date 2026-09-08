@@ -9,7 +9,8 @@ import SimUseVideo
 ///
 /// Two engines behind one flag surface:
 ///
-///   * `h264` — native `adb exec-out screenrecord --output-format=h264 -`
+///   * `h264` — `adb exec-out screenrecord --output-format=h264 -`,
+///     re-containered into MPEG-TS (no re-encoding)
 ///     passthrough: variable frame rate, cheap, high quality. screenrecord's
 ///     per-invocation time limit is papered over by restarting it and
 ///     continuing the byte stream (same segment loop as
@@ -56,7 +57,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
     @OptionGroup public var device: AndroidDeviceOptions
 
-    @Option(help: "Output format: h264 (native screenrecord passthrough), mjpeg, raw, ffmpeg (screencap JPEG loop). Default: mjpeg")
+    @Option(help: "Output format: h264 (screenrecord in MPEG-TS, no re-encoding — fastest, recommended), mjpeg, raw, ffmpeg (screencap JPEG loop). Default: mjpeg")
     public var format: OutputFormat = .mjpeg
 
     @Option(help: "Frames per second for the JPEG formats (1-30, default: 10). Ignored by --format h264 (native variable frame rate).")
@@ -94,7 +95,10 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
         guard result.durationSeconds > 0 else { return .empty }
-        if result.format == .h264 {
+        // h264 used to be a byte passthrough with no frame count; it now
+        // parses the stream to re-container it, so report frames like every
+        // other format and match what the top-level verb prints.
+        if result.framesStreamed == 0 {
             guard result.bytesStreamed > 0 else { return .empty }
             let line = String(
                 format: "Streamed %llu bytes in %.1f seconds\n",
@@ -103,7 +107,6 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
             )
             return CommandOutput(stderr: line)
         }
-        guard result.framesStreamed > 0 else { return .empty }
         let avgFPS = Double(result.framesStreamed) / result.durationSeconds
         let line = String(
             format: "Streamed %llu frames in %.1f seconds (%.1f FPS average)\n",
@@ -228,7 +231,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
         // Announce the stream structure before the first picture: on a
         // variable-frame-rate source a still screen yields no frames at all,
         // and a consumer that attached would otherwise read nothing.
-        tsWriter.writeProgramTables()
+        tsWriter.emitProgramTables()
 
         let fatalBox = FirstErrorBox()
         let pipeline = H264MuxingPipeline(sink: tsWriter, onFatalError: { error in
@@ -276,7 +279,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
                 // nothing is ever written, and a closed pipe would go
                 // unnoticed until the device happened to move again.
                 if Date().timeIntervalSince(lastKeepAlive) >= 0.1 {
-                    tsWriter.writeKeepAlive()
+                    tsWriter.emitProgramTables()
                     lastKeepAlive = Date()
                 }
             }
