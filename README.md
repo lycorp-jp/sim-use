@@ -354,7 +354,7 @@ times and is what to use for an archive.
 Those two ffplay flags are not decoration. `-analyzeduration 0` is required
 because Android's capture is variable-frame-rate: while the screen is still,
 `screenrecord` emits no frames at all and the stream thins to just its program
-tables and clock references (a few KB/s). ffplay's default is to analyse five
+tables (a few KB/s). ffplay's default is to analyse five
 seconds of *media* before presenting anything, which on a sparse stream can
 take arbitrarily long in wall-clock terms — in practice it never starts.
 `-probesize 32768` gives it enough bytes to identify the stream while staying

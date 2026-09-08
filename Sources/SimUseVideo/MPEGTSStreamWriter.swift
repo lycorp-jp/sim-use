@@ -119,9 +119,15 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
             // Advance the timeline by the real gap, clamped. Frames arriving
             // in one chunk share an arrival time, so a zero gap still needs
             // one tick to keep PTS strictly increasing.
+            // A gap longer than the cap means the screen was idle and the
+            // timeline is about to skip real elapsed time. That has to be
+            // declared, not just done: the clock this picture arrives
+            // against is genuinely not continuous with the last one.
+            var discontinuity = false
             if let lastHostTime = state.lastHostTime {
-                let gap = min(max(0, hostTime - lastHostTime), Self.maxFrameGap)
-                state.streamTime += max(gap, Self.minFrameStep)
+                let realGap = max(0, hostTime - lastHostTime)
+                discontinuity = realGap > Self.maxFrameGap
+                state.streamTime += max(min(realGap, Self.maxFrameGap), Self.minFrameStep)
             }
             state.lastHostTime = hostTime
             let pts = state.streamTime
@@ -135,7 +141,8 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
                 state.muxer.packets(
                     annexB: Self.annexB(accessUnit: accessUnit, sps: sps, pps: pps),
                     pts: pts,
-                    isIDR: accessUnit.isIDR
+                    isIDR: accessUnit.isIDR,
+                    discontinuity: discontinuity
                 )
             )
             state.framesWritten += 1

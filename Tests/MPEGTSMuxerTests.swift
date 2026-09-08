@@ -202,6 +202,28 @@ struct MPEGTSMuxerTests {
         #expect(pts > pcr, "PTS (\(pts)) must lead PCR (\(pcr)) so the picture can be decoded before it is due")
     }
 
+    @Test("a compacted gap is signalled as a transport discontinuity")
+    func discontinuityIsSignalled() {
+        var muxer = MPEGTSMuxer()
+        _ = muxer.packets(annexB: Data(repeating: 0x11, count: 200), pts: 1.0, isIDR: true)
+
+        // A picture whose timeline gap was compacted arrives against a clock
+        // that jumped. ISO/IEC 13818-1 2.4.3.4 has a bit for exactly this:
+        // without it the jump is simply a broken clock, and a receiver that
+        // disciplines its STC from the PCR has no way to know it should
+        // resynchronise rather than treat the picture as wildly late.
+        let after = muxer.packets(annexB: Data(repeating: 0x22, count: 200), pts: 1.2,
+                                  isIDR: false, discontinuity: true)
+        let flags = after[after.startIndex + 5]
+        #expect(flags & 0x80 != 0, "discontinuity_indicator must be set on a compacted gap")
+
+        // And it must not be set when the timeline ran normally, or a
+        // receiver would resynchronise on every picture.
+        let normal = muxer.packets(annexB: Data(repeating: 0x33, count: 200), pts: 1.24,
+                                   isIDR: false, discontinuity: false)
+        #expect(normal[normal.startIndex + 5] & 0x80 == 0, "discontinuity_indicator must stay clear normally")
+    }
+
     @Test("a PCR-only packet carries no payload and does not consume a continuity number")
     func clockReferencePacketShape() {
         var muxer = MPEGTSMuxer()

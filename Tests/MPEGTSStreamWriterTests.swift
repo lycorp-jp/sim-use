@@ -106,6 +106,44 @@ struct MPEGTSStreamWriterTests {
         return out
     }
 
+    /// Offsets of packets whose adaptation field declares a discontinuity.
+    private func discontinuityPackets(in stream: Data) -> [Int] {
+        var out: [Int] = []
+        var offset = 0
+        while offset + 188 <= stream.count {
+            let b = stream.startIndex + offset
+            let afc = (stream[b + 3] >> 4) & 0x03
+            if (afc == 2 || afc == 3), stream[b + 4] > 0, stream[b + 5] & 0x80 != 0 {
+                out.append(offset / 188)
+            }
+            offset += 188
+        }
+        return out
+    }
+
+    @Test("an idle stretch is declared as a discontinuity, a normal gap is not")
+    func idleIsDeclared() throws {
+        let sink = RecordingSink()
+        let writer = MPEGTSStreamWriter(consume: { sink.consume($0) })
+        writer.writeProgramTables()
+
+        // Two pictures a normal frame apart: the timeline advanced, nothing
+        // to declare.
+        try writer.append(accessUnit: accessUnit(isIDR: true, bytes: 500),
+                          sps: sps, pps: pps, hostTime: 0)
+        try writer.append(accessUnit: accessUnit(isIDR: false, bytes: 500),
+                          sps: sps, pps: pps, hostTime: 0.033)
+        #expect(discontinuityPackets(in: sink.joined).isEmpty,
+                "a normal inter-frame gap must not be flagged")
+
+        // Now a 30-second idle stretch. The timeline compacts it to the cap,
+        // so the clock genuinely jumps and the receiver has to be told.
+        try writer.append(accessUnit: accessUnit(isIDR: true, bytes: 500),
+                          sps: sps, pps: pps, hostTime: 30.0)
+        #expect(discontinuityPackets(in: sink.joined).count == 1,
+                "the picture resuming after an idle stretch must declare a discontinuity")
+    }
+
     @Test("a keep-alive does not restate the clock")
     func keepAliveCarriesNoClock() throws {
         // The PCR is a sample of the transmission clock and must advance.

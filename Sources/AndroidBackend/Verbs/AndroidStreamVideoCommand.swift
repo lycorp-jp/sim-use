@@ -217,7 +217,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
         FileHandle.standardError.write(Data("Note: capture is variable-frame-rate — a still screen produces no frames, so the picture holds until the device moves again.\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 
-        let sink = StdoutStreamSink()
+        let sink = StdoutStreamSink(shouldAbort: { Task.isCancelled || cancellationFlag.isCancelled() })
         let tsWriter = MPEGTSStreamWriter { data in
             if !sink.write(data) {
                 // Consumer closed its end (ffplay quit, `head` done).
@@ -345,7 +345,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
         let frameInterval = 1.0 / Double(fps)
         let mjpegBoundary = "--mjpegstream"
-        let sink = StdoutStreamSink()
+        let sink = StdoutStreamSink(shouldAbort: { Task.isCancelled || cancellationFlag.isCancelled() })
 
         if format == .mjpeg {
             let header = "HTTP/1.1 200 OK\r\nContent-Type: multipart/x-mixed-replace; boundary=\(mjpegBoundary)\r\n\r\n"
@@ -428,42 +428,70 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 /// callback while the command loop polls `isBroken`.
 final class StdoutStreamSink: Sendable {
     private let state = OSAllocatedUnfairLock(initialState: (bytes: UInt64(0), broken: false))
+    private let fileDescriptor: Int32
+    private let shouldAbort: @Sendable () -> Bool
 
-    init() {
+    /// - Parameters:
+    ///   - fileDescriptor: where bytes go; injectable so the blocking
+    ///     behaviour can be tested against a pipe nobody drains.
+    ///   - shouldAbort: consulted while waiting for room. A consumer that
+    ///     holds the pipe open but stops reading never produces EPIPE — the
+    ///     pipe just fills and stays full — so without this the write blocks
+    ///     forever and the command cannot honour Ctrl-C or reap adb.
+    init(fileDescriptor: Int32 = STDOUT_FILENO, shouldAbort: @escaping @Sendable () -> Bool) {
         signal(SIGPIPE, SIG_IGN)
+        self.fileDescriptor = fileDescriptor
+        self.shouldAbort = shouldAbort
+        // Non-blocking, so a full pipe surfaces as EAGAIN and the wait below
+        // stays under our control rather than the kernel's.
+        let flags = fcntl(fileDescriptor, F_GETFL)
+        if flags != -1 {
+            _ = fcntl(fileDescriptor, F_SETFL, flags | O_NONBLOCK)
+        }
     }
 
     var bytesWritten: UInt64 { state.withLock { $0.bytes } }
     var isBroken: Bool { state.withLock { $0.broken } }
 
-    /// Write all of `data` to stdout. Returns false once the pipe is
-    /// broken; subsequent calls are no-ops.
+    /// Write all of `data`. Returns false once the pipe is broken (further
+    /// calls are no-ops) or when cancellation interrupted the write.
     @discardableResult
     func write(_ data: Data) -> Bool {
         guard !isBroken else { return false }
-        let ok = data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> Bool in
-            guard let base = buffer.baseAddress else { return true }
+        /// Why a write stopped short: cancellation is not a pipe failure and
+        /// must not latch the sink closed.
+        enum Outcome { case complete, cancelled, brokenPipe }
+        let outcome: Outcome = data.withUnsafeBytes { (buffer: UnsafeRawBufferPointer) -> Outcome in
+            guard let base = buffer.baseAddress else { return .complete }
             var offset = 0
             while offset < buffer.count {
-                let written = Darwin.write(STDOUT_FILENO, base.advanced(by: offset), buffer.count - offset)
+                if shouldAbort() { return .cancelled }
+                let written = Darwin.write(fileDescriptor, base.advanced(by: offset), buffer.count - offset)
                 if written > 0 {
                     offset += written
                     continue
                 }
-                if written < 0 && errno == EINTR {
-                    continue
+                if written < 0 {
+                    if errno == EINTR { continue }
+                    if errno == EAGAIN || errno == EWOULDBLOCK {
+                        // Wait for room in short slices so cancellation is
+                        // noticed promptly.
+                        var fd = pollfd(fd: fileDescriptor, events: Int16(POLLOUT), revents: 0)
+                        _ = poll(&fd, 1, 100)
+                        continue
+                    }
                 }
-                return false
+                return .brokenPipe
             }
-            return true
+            return .complete
         }
         state.withLock { state in
-            if ok {
-                state.bytes += UInt64(data.count)
-            } else {
-                state.broken = true
+            switch outcome {
+            case .complete: state.bytes += UInt64(data.count)
+            case .brokenPipe: state.broken = true
+            case .cancelled: break
             }
         }
-        return ok
+        return outcome == .complete
     }
 }

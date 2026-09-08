@@ -99,8 +99,19 @@ public struct MPEGTSMuxer {
     ///   - annexB: the access unit in Annex B framing (start codes intact).
     ///   - pts: presentation time in seconds from the start of the stream.
     ///   - isIDR: whether this unit is a random-access point, which sets the
-    ///     adaptation field's random-access indicator and carries the PCR.
-    public mutating func packets(annexB: Data, pts: TimeInterval, isIDR: Bool) -> Data {
+    ///     adaptation field's random-access indicator.
+    ///   - discontinuity: set when the timeline jumped rather than advanced
+    ///     — the clock this picture arrives against is not continuous with
+    ///     the previous one. Declaring it is what makes a compacted timeline
+    ///     legitimate instead of merely a broken clock: a receiver that
+    ///     disciplines its own clock from the PCR resynchronises rather than
+    ///     treating the picture as wildly late.
+    public mutating func packets(
+        annexB: Data,
+        pts: TimeInterval,
+        isIDR: Bool,
+        discontinuity: Bool = false
+    ) -> Data {
         let ticks = UInt64((max(0, pts) + Self.decodeLead) * Self.timescale)
         // The clock trails the presentation time by the decode allowance.
         let pcrTicks = UInt64(max(0, pts) * Self.timescale)
@@ -118,7 +129,9 @@ public struct MPEGTSMuxer {
             // 100 ms, so emitting it per keyframe only — `screenrecord`
             // sends those rarely — leaves ffplay without a clock and it
             // never starts presenting.
-            let adaptation: Data? = isFirst ? Self.adaptationField(isIDR: isIDR, pcr: pcrTicks) : nil
+            let adaptation: Data? = isFirst
+                ? Self.adaptationField(isIDR: isIDR, pcr: pcrTicks, discontinuity: discontinuity)
+                : nil
             let capacity = Self.payloadSize - (adaptation?.count ?? 0)
             let chunk = pes[pes.index(pes.startIndex, offsetBy: offset)..<pes.index(pes.startIndex, offsetBy: min(offset + capacity, pes.count))]
             out.append(
@@ -174,10 +187,11 @@ public struct MPEGTSMuxer {
         return packet
     }
 
-    /// Adaptation field carrying the random-access indicator and, on a
-    /// keyframe, the program clock reference.
-    static func adaptationField(isIDR: Bool, pcr: UInt64?) -> Data {
+    /// Adaptation field carrying the discontinuity and random-access
+    /// indicators plus the program clock reference.
+    static func adaptationField(isIDR: Bool, pcr: UInt64?, discontinuity: Bool = false) -> Data {
         var flags: UInt8 = 0
+        if discontinuity { flags |= 0x80 }  // discontinuity_indicator
         if isIDR { flags |= 0x40 }          // random_access_indicator
         if pcr != nil { flags |= 0x10 }     // PCR_flag
 
