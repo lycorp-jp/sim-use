@@ -23,8 +23,17 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
     }
 
     private static let startCode = Data([0x00, 0x00, 0x00, 0x01])
-    /// One 90 kHz tick, the smallest step that keeps PTS strictly increasing.
-    private static let ptsEpsilon: TimeInterval = 1.0 / 90_000
+
+    /// Smallest step between two pictures that arrived together.
+    ///
+    /// A chunk off the capture pipe often carries several access units, which
+    /// all share one arrival time, so they need separating. A single 90 kHz
+    /// tick is enough to keep PTS strictly increasing but collapses to the
+    /// same value in a coarser downstream timebase — `ffmpeg` then rejects
+    /// them as non-monotonic when muxing to a file. A millisecond survives
+    /// any sane timebase and, at a handful of pictures per chunk, moves the
+    /// timeline by single-digit milliseconds.
+    private static let minFrameStep: TimeInterval = 0.001
 
     /// Largest gap the stream's timeline will advance between two pictures,
     /// however long the real pause between them was.
@@ -68,51 +77,51 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
     /// arbitrarily far off — a still screen produces none at all — so
     /// waiting for one would leave an attached player with nothing to read.
     public func writeProgramTables() {
-        let tables: Data = state.withLock { state in
+        state.withLock { state in
             state.lastTablesTime = 0
-            return state.muxer.programTables()
+            consume(state.muxer.programTables())
         }
-        consume(tables)
     }
 
-    /// Emit the program tables plus a clock reference, without waiting for a
-    /// picture. Called periodically so a player's clock keeps advancing on a
-    /// still screen, and so a consumer attaching mid-stream sees the tables
-    /// promptly.
+    /// Re-announce the program tables, without waiting for a picture. Called
+    /// periodically so a consumer attaching mid-stream learns the structure
+    /// promptly, and so a closed pipe is noticed even while the screen is
+    /// still and no pictures are being produced.
     ///
-    /// `hostTime` must be the caller's current clock reading, not the last
-    /// picture's: the PCR is what a player builds its own clock from, so it
-    /// has to track real elapsed time. Pinning it to the last frame's PTS
-    /// leaves it stalled whenever frames arrive slower than the keep-alive
-    /// interval, and a stalled clock desynchronises the player — observed as
-    /// a picture that tracks fine for a minute and then falls behind, with
-    /// the decode queue suddenly filling.
-    public func writeKeepAlive(hostTime: TimeInterval) {
-        let bytes: Data = state.withLock { state in
-            var out = state.muxer.programTables()
+    /// Deliberately carries no clock. A PCR is a sample of the transmission
+    /// clock and has to advance; this timeline only advances when a picture
+    /// arrives, so during an idle stretch there is no honest value to send.
+    /// Repeating the previous one made every following picture arrive against
+    /// a clock that had stood still, which ffmpeg reports as `Packet
+    /// corrupt` — verified by interleaving keep-alives into an offline mux of
+    /// a captured stream: none without, one per picture with. Each picture
+    /// carries its own PCR, so the clock is sampled exactly when it moves.
+    public func writeKeepAlive() {
+        state.withLock { state in
             state.lastTablesTime = state.streamTime
-            // The clock reference rides the stream's own timeline, not the
-            // wall clock. They deliberately diverge across an idle period:
-            // if the PCR ran ahead while no pictures were produced, the next
-            // picture's PTS would already be in the player's past and it
-            // would be discarded as late.
-            out.append(state.muxer.clockReference(at: state.streamTime))
-            return out
+            consume(state.muxer.programTables())
         }
-        consume(bytes)
     }
 
     public func append(accessUnit: H264AccessUnit, sps: Data, pps: Data, hostTime: TimeInterval) throws {
-        // Everything that touches the muxer happens under the lock; the
-        // consumer is called outside it, because it can block on a pipe and
-        // holding the lock across that would stall the capture thread.
-        let packets: Data = state.withLock { state in
+        // Generation and delivery are one critical section on purpose. The
+        // muxer stamps continuity counters as it generates, so bytes have to
+        // reach the consumer in the order they were generated — a keep-alive
+        // that overtook an earlier picture would put those counters on the
+        // wire backwards and a receiver would discard packets as duplicates.
+        // Releasing the lock before writing also lets a partly written batch
+        // have another spliced into it, destroying 188-byte alignment.
+        //
+        // A blocking write therefore holds the lock and the capture thread
+        // waits. That is the backpressure working: with nowhere to put the
+        // bytes there is nothing useful to do with more of them.
+        state.withLock { state in
             // Advance the timeline by the real gap, clamped. Frames arriving
             // in one chunk share an arrival time, so a zero gap still needs
             // one tick to keep PTS strictly increasing.
             if let lastHostTime = state.lastHostTime {
                 let gap = min(max(0, hostTime - lastHostTime), Self.maxFrameGap)
-                state.streamTime += max(gap, Self.ptsEpsilon)
+                state.streamTime += max(gap, Self.minFrameStep)
             }
             state.lastHostTime = hostTime
             let pts = state.streamTime
@@ -130,9 +139,8 @@ public final class MPEGTSStreamWriter: H264AccessUnitSink {
                 )
             )
             state.framesWritten += 1
-            return out
+            consume(out)
         }
-        consume(packets)
     }
 
     /// Rebuild Annex B framing for one access unit.

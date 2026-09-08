@@ -36,6 +36,16 @@ public struct MPEGTSMuxer {
     /// MPEG-TS timestamps run on a 90 kHz clock.
     static let timescale: Double = 90_000
 
+    /// How far a picture's PTS leads the clock delivered alongside it.
+    ///
+    /// A receiver starts its clock from the PCR and presents a picture when
+    /// that clock reaches the picture's PTS. With PTS equal to PCR the
+    /// picture is due the instant it arrives, leaving no time to decode it —
+    /// ffmpeg reports every such picture as `Packet corrupt`. 100 ms is the
+    /// usual small decode allowance and costs nothing on a live preview: it
+    /// shifts the whole timeline by a constant, not per picture.
+    static let decodeLead: Double = 0.1
+
     /// Continuity counters are per-PID and wrap at 16; a decoder uses them to
     /// detect dropped packets, so they have to advance exactly once per
     /// packet emitted on that PID.
@@ -54,13 +64,23 @@ public struct MPEGTSMuxer {
     /// stall and it would stop presenting until the device happened to move.
     public mutating func clockReference(at seconds: TimeInterval) -> Data {
         let ticks = UInt64(max(0, seconds) * Self.timescale)
-        return packetize(
-            payload: Data(),
-            pid: Self.videoPID,
-            continuity: &videoContinuity,
-            isStart: false,
-            adaptation: Self.adaptationField(isIDR: false, pcr: ticks)
-        )
+        var packet = Data(capacity: Self.packetSize)
+        packet.append(Self.syncByte)
+        packet.append(UInt8((Self.videoPID >> 8) & 0x1F))
+        packet.append(UInt8(Self.videoPID & 0xFF))
+        // adaptation_field_control = 0b10: adaptation field, no payload.
+        // The continuity counter deliberately does not advance — a receiver
+        // uses it to detect loss, and the standard only counts packets that
+        // carry payload, so burning a number here would make it report drops
+        // that never happened.
+        packet.append(0x20 | (videoContinuity & 0x0F))
+
+        // The whole 184-byte body is the adaptation field.
+        var field = Self.adaptationField(isIDR: false, pcr: ticks)
+        field = Self.stuffedAdaptationField(existing: field, targetLength: Self.payloadSize)
+        packet.append(field)
+        assert(packet.count == Self.packetSize, "PCR packet must be 188 bytes, got \(packet.count)")
+        return packet
     }
 
     /// Program tables, which a player needs before it can interpret any
@@ -81,7 +101,9 @@ public struct MPEGTSMuxer {
     ///   - isIDR: whether this unit is a random-access point, which sets the
     ///     adaptation field's random-access indicator and carries the PCR.
     public mutating func packets(annexB: Data, pts: TimeInterval, isIDR: Bool) -> Data {
-        let ticks = UInt64(max(0, pts) * Self.timescale)
+        let ticks = UInt64((max(0, pts) + Self.decodeLead) * Self.timescale)
+        // The clock trails the presentation time by the decode allowance.
+        let pcrTicks = UInt64(max(0, pts) * Self.timescale)
         var pes = Self.pesHeader(payloadSize: annexB.count, pts: ticks)
         pes.append(annexB)
 
@@ -96,7 +118,7 @@ public struct MPEGTSMuxer {
             // 100 ms, so emitting it per keyframe only — `screenrecord`
             // sends those rarely — leaves ffplay without a clock and it
             // never starts presenting.
-            let adaptation: Data? = isFirst ? Self.adaptationField(isIDR: isIDR, pcr: ticks) : nil
+            let adaptation: Data? = isFirst ? Self.adaptationField(isIDR: isIDR, pcr: pcrTicks) : nil
             let capacity = Self.payloadSize - (adaptation?.count ?? 0)
             let chunk = pes[pes.index(pes.startIndex, offsetBy: offset)..<pes.index(pes.startIndex, offsetBy: min(offset + capacity, pes.count))]
             out.append(
@@ -238,7 +260,11 @@ public struct MPEGTSMuxer {
     static func patPayload() -> Data {
         var section = Data()
         section.append(0x00)                            // table_id: PAT
-        section.append(contentsOf: [0x00, 0x0D])         // section_syntax + length (13)
+        // section_syntax_indicator(1) | '0' | reserved(11) | length(12).
+        // The indicator and reserved bits are mandatory: a receiver that
+        // reads PSI properly rejects a section without them, which shows up
+        // as a program carrying no streams.
+        section.append(contentsOf: [0xB0, 0x0D])         // length 13
         section.append(contentsOf: [0x00, 0x01])         // transport_stream_id
         section.append(0xC1)                            // version 0, current
         section.append(0x00)                            // section_number
@@ -255,7 +281,10 @@ public struct MPEGTSMuxer {
     static func pmtPayload() -> Data {
         var section = Data()
         section.append(0x02)                            // table_id: PMT
-        section.append(contentsOf: [0x00, 0x11])         // section_syntax + length (17)
+        // length 18 = program_number(2) + version(1) + section_number(1) +
+        // last_section_number(1) + PCR_PID(2) + program_info_length(2) +
+        // stream_type(1) + elementary_PID(2) + ES_info_length(2) + CRC(4)
+        section.append(contentsOf: [0xB0, 0x12])
         section.append(contentsOf: [0x00, 0x01])         // program_number
         section.append(0xC1)                            // version 0, current
         section.append(0x00)

@@ -276,7 +276,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
                 // nothing is ever written, and a closed pipe would go
                 // unnoticed until the device happened to move again.
                 if Date().timeIntervalSince(lastKeepAlive) >= 0.1 {
-                    tsWriter.writeKeepAlive(hostTime: ProcessInfo.processInfo.systemUptime)
+                    tsWriter.writeKeepAlive()
                     lastKeepAlive = Date()
                 }
             }

@@ -81,6 +81,79 @@ struct MPEGTSMuxerTests {
         #expect(decoded == ticks, "PTS did not survive the round trip: \(decoded) != \(ticks)")
     }
 
+    /// Parsed view of a PSI section, so the tests below can assert the header
+    /// fields a real receiver reads rather than just the PID it arrived on.
+    private struct PSISection {
+        let tableID: UInt8
+        let syntaxIndicator: Bool
+        let reservedBits: UInt8      // the two bits after section_syntax_indicator + '0'
+        let sectionLength: Int
+        let body: Data               // table_id through CRC inclusive
+    }
+
+    private func parseSection(inPacketAt offset: Int, of stream: Data) throws -> PSISection {
+        let base = stream.startIndex + offset
+        try #require(stream[base] == 0x47)
+        let adaptationControl = (stream[base + 3] >> 4) & 0x03
+        var cursor = base + 4
+        if adaptationControl == 2 || adaptationControl == 3 {
+            cursor += Int(stream[cursor]) + 1        // adaptation_field_length + itself
+        }
+        cursor += Int(stream[cursor]) + 1            // pointer_field + itself
+        let tableID = stream[cursor]
+        let hi = stream[cursor + 1]
+        let lo = stream[cursor + 2]
+        let length = (Int(hi & 0x0F) << 8) | Int(lo)
+        return PSISection(
+            tableID: tableID,
+            syntaxIndicator: hi & 0x80 != 0,
+            reservedBits: (hi >> 4) & 0x03,
+            sectionLength: length,
+            body: Data(stream[cursor..<(cursor + 3 + length)])
+        )
+    }
+
+    @Test("PAT is a syntactically valid section a receiver can parse")
+    func patSectionHeader() throws {
+        var muxer = MPEGTSMuxer()
+        let tables = muxer.programTables()
+        let pat = try parseSection(inPacketAt: 0, of: tables)
+
+        #expect(pat.tableID == 0x00, "PAT table_id")
+        #expect(pat.syntaxIndicator, "section_syntax_indicator must be 1 or a receiver cannot read the section")
+        #expect(pat.reservedBits == 0x03, "the two reserved bits are set in a conformant section")
+        // transport_stream_id(2) + version(1) + section_number(1) +
+        // last_section_number(1) + program(2) + PMT PID(2) + CRC(4)
+        #expect(pat.sectionLength == 13, "PAT section_length")
+        // CRC-32/MPEG-2 over the whole section, CRC included, leaves zero.
+        #expect(MPEGTSMuxer.crc32MPEG(pat.body) == 0, "PAT CRC does not verify")
+    }
+
+    @Test("PMT declares the H.264 stream and PCR PID a receiver needs")
+    func pmtSectionHeader() throws {
+        var muxer = MPEGTSMuxer()
+        let tables = muxer.programTables()
+        let pmt = try parseSection(inPacketAt: 188, of: tables)
+
+        #expect(pmt.tableID == 0x02, "PMT table_id")
+        #expect(pmt.syntaxIndicator, "section_syntax_indicator must be 1")
+        #expect(pmt.reservedBits == 0x03)
+        // program_number(2) + version(1) + section_number(1) +
+        // last_section_number(1) + PCR_PID(2) + program_info_length(2) +
+        // stream_type(1) + elementary_PID(2) + ES_info_length(2) + CRC(4)
+        #expect(pmt.sectionLength == 18, "PMT section_length")
+        #expect(MPEGTSMuxer.crc32MPEG(pmt.body) == 0, "PMT CRC does not verify")
+
+        // The fields that actually associate the elementary stream: without
+        // these a receiver sees a program with no streams.
+        let b = pmt.body
+        let pcrPID = (UInt16(b[b.startIndex + 8] & 0x1F) << 8) | UInt16(b[b.startIndex + 9])
+        #expect(pcrPID == 0x0100, "PCR_PID must name the video PID, got \(String(pcrPID, radix: 16))")
+        #expect(b[b.startIndex + 12] == 0x1B, "stream_type must be H.264 (0x1B)")
+        let esPID = (UInt16(b[b.startIndex + 13] & 0x1F) << 8) | UInt16(b[b.startIndex + 14])
+        #expect(esPID == 0x0100, "elementary_PID must be the video PID")
+    }
+
     @Test("PSI sections use CRC-32/MPEG-2, not zlib's CRC")
     func psiChecksum() {
         // Known-answer test: CRC-32/MPEG-2 of "123456789".
@@ -99,6 +172,68 @@ struct MPEGTSMuxerTests {
         let flags = stream[stream.startIndex + 5]
         #expect(flags & 0x40 != 0, "random_access_indicator must be set on an IDR")
         #expect(flags & 0x10 != 0, "PCR_flag must be set on an IDR")
+    }
+
+    @Test("a picture's PTS is ahead of the clock that delivers it")
+    func ptsLeadsPCR() throws {
+        var muxer = MPEGTSMuxer()
+        let stream = muxer.packets(annexB: Data(repeating: 0x55, count: 400), pts: 2.0, isIDR: true)
+        let base = stream.startIndex
+
+        // The first packet carries both the adaptation field (with the PCR)
+        // and the start of the PES (with the PTS).
+        let adaptationLength = Int(stream[base + 4])
+        #expect(stream[base + 5] & 0x10 != 0, "PCR_flag must be set")
+        let pcr = (UInt64(stream[base + 6]) << 25) | (UInt64(stream[base + 7]) << 17)
+            | (UInt64(stream[base + 8]) << 9) | (UInt64(stream[base + 9]) << 1)
+            | (UInt64(stream[base + 10]) >> 7)
+
+        let pesStart = base + 4 + adaptationLength + 1
+        let p = stream[pesStart...]
+        let pi = p.startIndex
+        let pts = (UInt64((p[pi + 9] >> 1) & 0x07) << 30) | (UInt64(p[pi + 10]) << 22)
+            | (UInt64(p[pi + 11] >> 1) << 15) | (UInt64(p[pi + 12]) << 7) | (UInt64(p[pi + 13] >> 1))
+
+        // A receiver starts its clock from the PCR and presents the picture
+        // when the clock reaches the PTS. With PTS == PCR the picture is due
+        // the instant it arrives, leaving no time to decode it — ffmpeg
+        // reports every such picture as `Packet corrupt`. The PTS has to
+        // lead the clock that delivered it.
+        #expect(pts > pcr, "PTS (\(pts)) must lead PCR (\(pcr)) so the picture can be decoded before it is due")
+    }
+
+    @Test("a PCR-only packet carries no payload and does not consume a continuity number")
+    func clockReferencePacketShape() {
+        var muxer = MPEGTSMuxer()
+        // Establish a continuity position on the video PID first.
+        let frame = muxer.packets(annexB: Data(repeating: 0x33, count: 300), pts: 1.0, isIDR: true)
+        let lastFrameCC = frame[frame.startIndex + (frame.count / 188 - 1) * 188 + 3] & 0x0F
+
+        let pcr = muxer.clockReference(at: 1.5)
+        #expect(pcr.count == 188)
+        #expect(pcr[pcr.startIndex] == 0x47)
+
+        // adaptation_field_control == 0b10: adaptation field only, no payload.
+        // Signalling 0b11 while stuffing away all 184 bytes claims a payload
+        // that is not there.
+        let afc = (pcr[pcr.startIndex + 3] >> 4) & 0x03
+        #expect(afc == 0x02, "PCR-only packet must signal adaptation-field-only, got 0b\(String(afc, radix: 2))")
+
+        // ISO/IEC 13818-1 2.4.3.3: the counter does not advance on a packet
+        // whose adaptation_field_control is '00' or '10'. So a PCR packet
+        // repeats the current value without consuming it, and the next
+        // payload packet takes that same number — leaving the payload-only
+        // sequence unbroken, which is what a receiver checks for loss.
+        let pcrCC = pcr[pcr.startIndex + 3] & 0x0F
+        #expect(pcrCC == (lastFrameCC + 1) & 0x0F, "PCR packet carries the current counter value")
+
+        let next = muxer.packets(annexB: Data(repeating: 0x44, count: 100), pts: 2.0, isIDR: false)
+        let nextCC = next[next.startIndex + 3] & 0x0F
+        #expect(nextCC == pcrCC, "the next payload packet consumes the number the PCR packet did not")
+
+        // And it really does carry the clock.
+        let flags = pcr[pcr.startIndex + 5]
+        #expect(flags & 0x10 != 0, "PCR_flag must be set")
     }
 
     @Test("stuffing pads a short tail to exactly one packet")
