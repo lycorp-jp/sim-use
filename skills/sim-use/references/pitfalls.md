@@ -54,7 +54,7 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 **Recipe:**
 1. Compare the outline with the visible screen. If it contains the expected picker controls, continue normally.
-2. If visible app controls are missing on an iOS simulator, check whether app accessibility was enabled before the app launched. The current preference value alone does not establish the state at launch. See [idb's accessibility guidance](https://github.com/facebook/idb/blob/main/website/docs/accessibility.mdx).
+2. If visible app controls are missing on an iOS simulator, check whether app accessibility was enabled before the app launched. The current preference value alone does not establish the state at launch. See [idb's accessibility guidance](https://github.com/facebook/idb/blob/main/website/docs/idb/accessibility.mdx).
 3. If needed, enable app accessibility for that simulator, then relaunch the target app and re-read `ui`:
 
    ```bash
