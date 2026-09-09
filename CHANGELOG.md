@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- iOS `stream-video --format h264` / `bgra`: a consumer that stops reading (ffplay paused, a wedged downstream tool) no longer makes Ctrl-C hang. The native stream went through idb's blocking file writer, which sat in `write(2)` on the encoder thread with `stopStreaming()` waiting behind it, so the command could not end short of SIGKILL. It now writes through the same interruptible stdout sink as Android — one that waits for room and checks cancellation between waits, and leaves the descriptor's flags untouched so the terminal (or stderr under `2>&1`) is never switched into non-blocking mode. A consumer that closes the pipe now ends the stream in an orderly way (stop messages, exit 0) instead of the process dying of SIGPIPE.
 - The bundled skill preflight now rejects an older `sim-use` CLI before device discovery and prints the Homebrew upgrade command, instead of misdiagnosing newly documented device types as disconnected.
 
 ## [0.14.0] - 2026-08-27

@@ -351,7 +351,8 @@ a player has to sit through before it reaches the next picture. That is the
 right trade when the question is "what is on screen now", and it means the
 stream is not a faithful record of elapsed time — piping it to a file turns a
 60-second pause into 0.2 seconds of output. `record-video` keeps real arrival
-times and is what to use for an archive.
+times and is what to use for an archive. Ctrl-C ends a stream, and so does
+quitting the player: a closed pipe is an orderly stop on both platforms.
 
 `-probesize 32768` is not decoration. ffplay identifies the stream by reading
 a bounded amount of it, and the default budget is measured in seconds of

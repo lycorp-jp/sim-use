@@ -258,10 +258,15 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     /// Copies a native `FBVideoStream` straight to stdout, with no
     /// host-side codec pass.
     ///
-    /// `h264` runs the very configuration `record-video` muxes into an MP4:
-    /// the two verbs drive the same framebuffer encode and differ only in
-    /// their sink. `bgra` carries raw pixels for callers that want them
-    /// unencoded.
+    /// `h264` runs the encoder settings `record-video` muxes into an MP4:
+    /// the two verbs drive the same framebuffer encode and differ in
+    /// transport (MPEG-TS here, Annex B into the muxer there) and sink.
+    /// `bgra` carries raw pixels for callers that want them unencoded.
+    ///
+    /// Bytes reach stdout through `StdoutStreamSink` rather than idb's
+    /// blocking file writer, so a consumer that stops reading cannot pin the
+    /// encoder thread past Ctrl-C, and one that closes the pipe ends the
+    /// stream in an orderly way instead of killing the process with SIGPIPE.
     private func streamNative(
         from simulator: FBSimulator,
         format: OutputFormat,
@@ -292,7 +297,12 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
         let label = format.rawValue
         do {
-            let stdoutConsumer = FBFileWriter.syncWriter(withFileDescriptor: STDOUT_FILENO, closeOnEndOfFile: false)
+            let sink = StdoutStreamSink(shouldAbort: { Task.isCancelled || cancellationFlag.isCancelled() })
+            let stdoutConsumer = StdoutStreamConsumer(sink: sink) {
+                // Consumer closed its end (ffplay quit, `head` done): stop
+                // producing rather than erroring out.
+                cancellationFlag.cancel()
+            }
             // The stream comes back already running — attach failures throw
             // here instead of surfacing asynchronously.
             let videoStream = try await simulator.createStream(configuration: configuration, to: stdoutConsumer)
