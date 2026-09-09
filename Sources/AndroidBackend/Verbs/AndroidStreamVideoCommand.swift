@@ -13,10 +13,10 @@ import SimUseVideo
 ///     re-containered into MPEG-TS without re-encoding: variable frame
 ///     rate, cheap, high quality. screenrecord's
 ///     per-invocation time limit is papered over by restarting it and
-///     continuing the byte stream (same segment loop as
-///     `AndroidRecordVideoCommand`, minus the muxer); each new segment
-///     re-emits SPS/PPS, which mainstream decoders (ffplay, ffmpeg) accept
-///     mid-stream.
+///     continuing the stream (same segment loop as
+///     `AndroidRecordVideoCommand`, with the MP4 recorder swapped for the
+///     transport-stream writer); each new segment re-emits SPS/PPS, which
+///     mainstream decoders (ffplay, ffmpeg) accept mid-stream.
 ///   * `mjpeg` / `raw` / `ffmpeg` — a `screencap`-per-frame loop
 ///     (~7–8 FPS ceiling) with byte-identical on-the-wire framing to the
 ///     iOS `stream-video` formats, so existing consumers work unchanged.
@@ -216,7 +216,7 @@ public struct AndroidStreamVideoCommand: SimUseExecutableCommand {
 
         FileHandle.standardError.write(Data("Streaming Android device \(serial) (h264 in MPEG-TS)...\n".utf8))
         FileHandle.standardError.write(Data("Note: carries PTS, so players pace correctly. Preview it live:\n".utf8))
-        FileHandle.standardError.write(Data("  sim-use android stream-video --format h264 --device \(serial) | ffplay -f mpegts -analyzeduration 0 -probesize 32768 -i -\n".utf8))
+        FileHandle.standardError.write(Data("  sim-use android stream-video --format h264 --device \(serial) | ffplay -f mpegts -probesize 32768 -i -\n".utf8))
         FileHandle.standardError.write(Data("Note: capture is variable-frame-rate — a still screen produces no frames, so the picture holds until the device moves again.\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 

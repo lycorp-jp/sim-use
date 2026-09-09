@@ -311,7 +311,7 @@ The output path goes to stdout; progress messages go to stderr.
 # reach for. H.264 in MPEG-TS on both platforms, with no host-side codec pass.
 # TS carries PTS, so players pace off the stream and stay in sync indefinitely.
 sim-use stream-video --device $UDID --format h264 | \
-  ffplay -f mpegts -analyzeduration 0 -probesize 32768 -i -
+  ffplay -f mpegts -probesize 32768 -i -
 
 # Muxing the preview to a file works, but it is a live capture, not an
 # archive: idle stretches are compressed (see below). For a faithful
@@ -353,17 +353,19 @@ stream is not a faithful record of elapsed time — piping it to a file turns a
 60-second pause into 0.2 seconds of output. `record-video` keeps real arrival
 times and is what to use for an archive.
 
-Those two ffplay flags are not decoration. `-analyzeduration 0` is required
-because Android's capture is variable-frame-rate: while the screen is still,
-`screenrecord` emits no frames at all and the stream thins to just its program
-tables (a few KB/s). ffplay's default is to analyse five
-seconds of *media* before presenting anything, which on a sparse stream can
-take arbitrarily long in wall-clock terms — in practice it never starts.
-`-probesize 32768` gives it enough bytes to identify the stream while staying
-small enough to stay responsive. Do **not** add `-fflags nobuffer` here: it
-starves the probe of the data it needs and ffplay never opens the stream.
-(Verified on both platforms; the flags are harmless on iOS, which is
-constant-frame-rate and dense enough to open either way.)
+`-probesize 32768` is not decoration. ffplay identifies the stream by reading
+a bounded amount of it, and the default budget is measured in seconds of
+*media*. Android's capture is variable-frame-rate: while the screen is still,
+`screenrecord` emits no pictures at all and the stream thins to just its
+program tables (a few KB/s), so a media-time budget can take arbitrarily long
+in wall-clock terms to fill. Bounding the probe by bytes instead lets it
+return after a picture or two. Two things do not help: `-analyzeduration 0`
+(zero selects ffmpeg's default window rather than disabling it, and the open
+measured identically with and without it) and `-fflags nobuffer` (it starves
+the probe of the data it needs and ffplay never opens the stream). One
+consequence to know about: a still Android screen sends no pictures, so the
+window appears only once something on the device moves. iOS streams at a
+constant rate and opens at once.
 
 Both platforms carry `h264` in MPEG-TS, and the reason is worth knowing: a
 bare H.264 elementary stream has no timestamps at all, so a player has to

@@ -10,10 +10,10 @@ import iOSSimBackend
 /// surface and resolves the target platform, then delegates to:
 ///
 ///   * `IOSSimStreamVideoCommand.execute()` for iOS Simulator UDIDs
-///     (native `FBVideoStream` h264 passthrough and raw `bgra`, plus the
+///     (native `FBVideoStream` h264 in MPEG-TS and raw `bgra`, plus the
 ///     deprecated screenshot-capture formats).
-///   * `AndroidStreamVideoCommand.stream()` for adb serials (native
-///     `screenrecord` h264 passthrough + screencap JPEG formats).
+///   * `AndroidStreamVideoCommand.stream()` for adb serials (`screenrecord`
+///     h264 re-containered into MPEG-TS + screencap JPEG formats).
 struct StreamVideo: SimUseExecutableCommand {
     /// Union of both backends' formats. `h264` and the deprecated
     /// `mjpeg` / `raw` / `ffmpeg` are shared; `bgra` is iOS-only (raw
