@@ -342,8 +342,9 @@ H.264 encoder settings (`--fps`, `--quality`, `--scale`, keyframe interval)
 through a single factory, so the two verbs cannot drift apart on how the
 picture is encoded. They do differ downstream: recording takes Annex B through
 the host-side muxer into an MP4, while streaming takes MPEG-TS straight to
-stdout. Measured on a booted iPhone 17 Pro, `h264` streams ~24 fps at
-~220 KB/s where `mjpeg` manages ~4 fps at ~1.9 MB/s.
+stdout. `h264` streams at a constant `--fps` (default 30, which is also the
+streaming cap); measured on a booted iPhone 17 Pro it runs ~220 KB/s at
+30 fps where `mjpeg` manages ~4 fps at ~1.9 MB/s.
 
 `stream-video` is a *preview*: its timeline advances by the real gap between
 pictures but never by more than 0.2 s, so an idle screen does not leave a hole

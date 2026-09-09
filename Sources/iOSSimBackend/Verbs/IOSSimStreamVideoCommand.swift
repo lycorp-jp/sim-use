@@ -77,11 +77,15 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
     @OptionGroup public var device: DeviceOptions
 
-    @Option(help: "Output format: h264 (native H.264 in MPEG-TS — fastest, recommended), mjpeg, raw, ffmpeg (DEPRECATED screenshot loop, ~6x slower and ~8x larger; will be removed), bgra (experimental raw pixels). Default: mjpeg. No frame count is reported for bgra.")
+    @Option(help: "Output format: h264 (native H.264 in MPEG-TS — fastest, recommended), mjpeg, raw, ffmpeg (DEPRECATED screenshot loop, ~6x slower and ~8x larger; will be removed), bgra (experimental raw pixels). Default: mjpeg. The native formats (h264, bgra) report no frame count.")
     public var format: OutputFormat = .mjpeg
 
-    @Option(help: "Frames per second (1-30, default: 10)")
-    public var fps: Int = 10
+    @Option(help: "Frames per second (1-30). Default: 30 for h264, 10 for the screenshot formats.")
+    public var fps: Int?
+
+    /// `h264` runs at the constant rate `record-video` defaults to; the
+    /// screenshot loop cannot sustain that and keeps its lower default.
+    var effectiveFPS: Int { fps ?? (format == .h264 ? 30 : 10) }
 
     @Option(help: "Encode quality (1-100, default: 80): H.264 rate control for h264, JPEG quality for the screenshot formats.")
     public var quality: Int = 80
@@ -180,10 +184,10 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         cancellationFlag: CancellationFlag
     ) async throws -> ExecutionResult {
         FileHandle.standardError.write(Data("Starting screenshot-based video stream from simulator \(simulator.udid)...\n".utf8))
-        FileHandle.standardError.write(Data("Format: \(format.rawValue), FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
+        FileHandle.standardError.write(Data("Format: \(format.rawValue), FPS: \(effectiveFPS), Quality: \(quality), Scale: \(scale)\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 
-        let frameInterval = 1.0 / Double(fps)
+        let frameInterval = 1.0 / Double(effectiveFPS)
         let mjpegBoundary = "--mjpegstream"
         let destination = FileHandle.standardOutput
 
@@ -227,7 +231,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
                 frameCount += 1
 
-                if frameCount % UInt64(max(1, fps)) == 0 {
+                if frameCount % UInt64(max(1, effectiveFPS)) == 0 {
                     let elapsed = Date().timeIntervalSince(startTime)
                     if elapsed > 0 {
                         let actualFPS = Double(frameCount) / elapsed
@@ -275,9 +279,9 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         let configuration: FBVideoStreamConfiguration
         switch format {
         case .h264:
-            configuration = .h264Capture(fps: fps, quality: quality, scale: scale, transport: .mpegts)
+            configuration = .h264Capture(fps: effectiveFPS, quality: quality, scale: scale, transport: .mpegts)
             FileHandle.standardError.write(Data("Starting h264 video stream from simulator \(simulator.udid)...\n".utf8))
-            FileHandle.standardError.write(Data("Format: h264, FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
+            FileHandle.standardError.write(Data("Format: h264, FPS: \(effectiveFPS), Quality: \(quality), Scale: \(scale)\n".utf8))
             FileHandle.standardError.write(Data("Note: H.264 in MPEG-TS (carries PTS, so players pace correctly). Preview it live:\n".utf8))
             FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f mpegts -probesize 32768 -i -\n".utf8))
         default:
