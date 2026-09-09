@@ -43,6 +43,7 @@ class Ctx:
     device: Optional[str] = None
     sim_use_bin: str = "sim-use"
     platform: Optional[str] = None  # "ios" or "android", detected
+    remote_content_recovered: bool = False
     errors: list = field(default_factory=list)
 
     def run_sim_use(self, *args: str, check: bool = False) -> subprocess.CompletedProcess:
@@ -163,8 +164,15 @@ def autofix_boot_simulator(ctx: Ctx) -> bool:
 
 
 def check_ui_responds(ctx: Ctx) -> bool:
+    ctx.remote_content_recovered = False
     envelope = ctx.run_sim_use_json("ui")
-    return envelope is not None and envelope.get("ok") is True
+    if envelope is None or envelope.get("ok") is not True:
+        return False
+    advisory = envelope.get("advisory")
+    ctx.remote_content_recovered = (
+        isinstance(advisory, dict) and advisory.get("kind") == "remote_content_recovery"
+    )
+    return True
 
 
 def autofix_daemon_restart(ctx: Ctx) -> bool:
@@ -229,12 +237,19 @@ def main():
 
     print("sim-use preflight\n")
     passed = run_checks(shared_checks(), ctx)
+    if ctx.remote_content_recovered:
+        print("  WARN  UI content: remote_content_recovery")
+        print("        The app tree was empty; content was recovered from other processes.")
+        print("        This can be normal for a system picker. Compare the outline with the visible screen.")
+        print("        If visible app controls are missing on an iOS simulator, check")
+        print("        ApplicationAccessibilityEnabled in com.apple.Accessibility before an app relaunch.")
     print()
 
     if passed:
         device_label = ctx.device or "(auto-resolved)"
         platform_label = ctx.platform or "unknown"
-        print(f"All checks passed. Device: {device_label} ({platform_label})")
+        summary = "Preflight passed with a content warning" if ctx.remote_content_recovered else "All checks passed"
+        print(f"{summary}. Device: {device_label} ({platform_label})")
         sys.exit(0)
     else:
         print(f"Preflight failed: {', '.join(ctx.errors)}")

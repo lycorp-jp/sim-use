@@ -46,6 +46,25 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 2. Dismiss it: tap the appropriate button (`Allow`, `Don't Allow`, `Cancel`), or `sim-use button home` to go home.
 3. Re-run `ui` to confirm you're back in the app.
 
+## Missing app controls after remote content recovery
+
+**Symptom:** Preflight passes with a content warning, or `ui --json --no-raw` returns `ok: true` with `advisory.kind: remote_content_recovery`.
+
+**Why:** The app tree was empty, so sim-use recovered accessibility content from other processes. This can be normal for a system picker; the advisory alone does not mean the app is broken.
+
+**Recipe:**
+1. Compare the outline with the visible screen. If it contains the expected picker controls, continue normally.
+2. If visible app controls are missing on an iOS simulator, check whether app accessibility was enabled before the app launched. The current preference value alone does not establish the state at launch. See [idb's accessibility guidance](https://github.com/facebook/idb/blob/main/website/docs/idb/accessibility.mdx).
+3. If needed, enable app accessibility for that simulator, then relaunch the target app and re-read `ui`:
+
+   ```bash
+   xcrun simctl spawn <UDID> defaults write com.apple.Accessibility ApplicationAccessibilityEnabled -bool true
+   ```
+
+4. If controls are still missing, inspect the app with Accessibility Inspector or VoiceOver to check what it exposes.
+
+This setting applies to iOS simulators. Preflight only prints guidance; it does not apply the setting, relaunch the app, or restart the daemon for a content warning.
+
 ## iOS: paste drops text
 
 **Symptom:** `sim-use paste 'text'` succeeds but the text field stays empty.

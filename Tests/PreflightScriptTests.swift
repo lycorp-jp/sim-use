@@ -59,6 +59,76 @@ struct PreflightScriptTests {
         }
     }
 
+    @Test("remote content recovery warns without failing or restarting the daemon", arguments: [
+        #"{"ok":true,"advisory":{"kind":"remote_content_recovery"},"data":{"platform":"ios","screen":{"width":0,"height":0},"entries":[{"role":"StaticText","label":"12:00"}]}}"#,
+        #"{"ok":true,"advisory":{"kind":"remote_content_recovery"},"data":{"platform":"ios","entries":[{"role":"Button","label":"Browse"},{"role":"Button","label":"Cancel"}]}}"#,
+    ])
+    func remoteContentRecoveryWarns(uiResponse: String) async throws {
+        let fixture = try makeFakeSimUse(versionStamp: "0.14.0", uiResponse: uiResponse)
+        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
+
+        let result = try await runPreflight(fakeSimUse: fixture.executable)
+
+        #expect(result.exitCode == 0)
+        #expect(result.output.contains("PASS  sim-use ui returns a valid response"))
+        #expect(result.output.contains("WARN"))
+        #expect(result.output.contains("remote_content_recovery"))
+        #expect(result.output.contains("system picker"))
+        #expect(result.output.contains("If visible app controls are missing"))
+        #expect(result.output.contains("ApplicationAccessibilityEnabled"))
+        #expect(result.output.contains("relaunch"))
+        #expect(result.output.contains("Preflight passed with a content warning"))
+        #expect(!result.output.contains("All checks passed"))
+        #expect(!result.output.contains("FAIL"))
+        #expect(!result.output.contains("FIX"))
+
+        let log = try String(contentsOf: fixture.logFile, encoding: .utf8)
+        #expect(log == "--version\ndevices --json\nui --json --device target-device\n")
+    }
+
+    @Test("successful reads without the recovery advisory keep the existing result", arguments: [
+        #"{"ok":true,"data":{"platform":"ios","entries":[{"role":"StaticText","label":"12:00"}]}}"#,
+        #"{"ok":true,"advisory":null,"data":{"outline":"App: Test"}}"#,
+        #"{"ok":true,"advisory":{"kind":"orientation_uncertain"},"data":{"outline":"App: Test"}}"#,
+        #"{"ok":true,"data":{"platform":"android","entries":[]}}"#,
+        #"{"ok":true,"data":{"kind":"physical","outline":"Button: Close"}}"#,
+    ])
+    func successfulReadWithoutRecoveryDoesNotWarn(uiResponse: String) async throws {
+        let fixture = try makeFakeSimUse(versionStamp: "0.14.0", uiResponse: uiResponse)
+        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
+
+        let result = try await runPreflight(fakeSimUse: fixture.executable)
+
+        #expect(result.exitCode == 0)
+        #expect(result.output.contains("All checks passed"))
+        #expect(!result.output.contains("WARN"))
+        #expect(!result.output.contains("ApplicationAccessibilityEnabled"))
+    }
+
+    @Test("unsuccessful UI reads still retry and fail", arguments: [
+        (response: #"{"ok":false,"advisory":{"kind":"remote_content_recovery"}}"#, exitCode: 0),
+        (response: #"{"ok":true,"advisory":{"kind":"remote_content_recovery"}}"#, exitCode: 7),
+        (response: "invalid JSON", exitCode: 0),
+    ])
+    func unsuccessfulReadStillFails(_ testCase: (response: String, exitCode: Int)) async throws {
+        let fixture = try makeFakeSimUse(
+            versionStamp: "0.14.0",
+            uiResponse: testCase.response,
+            uiExitCode: testCase.exitCode
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
+
+        let result = try await runPreflight(fakeSimUse: fixture.executable)
+
+        #expect(result.exitCode == 1)
+        #expect(result.output.contains("FAIL  sim-use ui returns a valid response"))
+        #expect(result.output.contains("Preflight failed: ui_responds"))
+        #expect(!result.output.contains("WARN"))
+
+        let log = try String(contentsOf: fixture.logFile, encoding: .utf8)
+        #expect(log == "--version\ndevices --json\nui --json --device target-device\ndaemon stop --all\nui --json --device target-device\n")
+    }
+
     private func runPreflight(fakeSimUse: URL) async throws -> (output: String, exitCode: Int32) {
         try await CommandRunner.run(
             "python3 skills/sim-use/scripts/preflight.py --device target-device --sim-use-bin \(fakeSimUse.path)",
@@ -68,7 +138,9 @@ struct PreflightScriptTests {
 
     private func makeFakeSimUse(
         versionStamp: String,
-        versionExitCode: Int = 0
+        versionExitCode: Int = 0,
+        uiResponse: String = #"{"ok":true,"data":{"outline":"App: Test"}}"#,
+        uiExitCode: Int = 0
     ) throws -> (tempRoot: URL, executable: URL, logFile: URL) {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -79,7 +151,9 @@ struct PreflightScriptTests {
         try fakeSimUseScript(
             logFile: logFile.path,
             versionStamp: versionStamp,
-            versionExitCode: versionExitCode
+            versionExitCode: versionExitCode,
+            uiResponse: uiResponse,
+            uiExitCode: uiExitCode
         ).write(to: executable, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
 
@@ -89,7 +163,9 @@ struct PreflightScriptTests {
     private func fakeSimUseScript(
         logFile: String,
         versionStamp: String,
-        versionExitCode: Int
+        versionExitCode: Int,
+        uiResponse: String,
+        uiExitCode: Int
     ) -> String {
         """
         #!/bin/bash
@@ -114,7 +190,13 @@ struct PreflightScriptTests {
             echo "ui must receive --device" >&2
             exit 3
           fi
-          echo '{"ok":true,"data":{"outline":"App: Test"}}'
+          cat <<'PREFLIGHT_UI_RESPONSE'
+        \(uiResponse)
+        PREFLIGHT_UI_RESPONSE
+          exit \(uiExitCode)
+        fi
+
+        if [[ "$*" == "daemon stop --all" ]]; then
           exit 0
         fi
 

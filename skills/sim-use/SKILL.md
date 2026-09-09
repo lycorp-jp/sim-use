@@ -17,6 +17,8 @@ This verifies sim-use is installed and compatible with the skill, the device is 
 2. `sim-use devices` — confirm the target device is listed and booted/connected.
 3. `sim-use ui --device <UDID>` — confirm you can read the screen.
 
+A successful response does not guarantee that the outline contains the expected app controls. Preflight reports `remote_content_recovery` as a content warning and still exits successfully; recovery can be normal for a system picker. Compare the outline with the visible screen. If app controls are missing, follow [Missing app controls after remote content recovery](references/pitfalls.md#missing-app-controls-after-remote-content-recovery). The warning does not change settings or restart anything.
+
 `--device` is optional when only one simulator is booted or one daemon is running. For Android, run `sim-use android init --device <serial>` once to install the bridge APK. Attached physical iPhones/iPads appear in `sim-use devices` with kind `physical` and route through the top-level verbs too — but only `ui`, selector-based `tap` and `screenshot`; every other verb rejects on that target. See *Physical iOS devices* below before driving one.
 
 ## 1. The observe-act loop
