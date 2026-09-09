@@ -17,6 +17,17 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         case raw
         case ffmpeg
         case bgra
+        case h264
+
+        /// Formats served by a native `FBVideoStream` copied straight to
+        /// stdout, with no host-side codec pass. The screenshot-backed
+        /// formats re-encode every frame instead.
+        var isNativeStream: Bool {
+            switch self {
+            case .bgra, .h264: true
+            case .mjpeg, .raw, .ffmpeg: false
+            }
+        }
     }
 
     /// Summary of a completed stream run. The actual video bytes are
@@ -44,13 +55,13 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
     @OptionGroup public var device: DeviceOptions
 
-    @Option(help: "Output format: mjpeg, raw, ffmpeg, bgra (default: mjpeg; bgra is experimental: no frame count is reported)")
+    @Option(help: "Output format: h264 (native H.264 Annex B passthrough — fastest, recommended), mjpeg, raw, ffmpeg (screenshot-backed, deprecated), bgra (experimental raw pixels). Default: mjpeg. No frame count is reported for h264/bgra.")
     public var format: OutputFormat = .mjpeg
 
     @Option(help: "Frames per second (1-30, default: 10)")
     public var fps: Int = 10
 
-    @Option(help: "JPEG quality (1-100, default: 80)")
+    @Option(help: "Encode quality (1-100, default: 80): H.264 rate control for h264, JPEG quality for the screenshot formats.")
     public var quality: Int = 80
 
     @Option(help: "Scale factor (0.1-1.0, default: 1.0)")
@@ -125,15 +136,14 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         }
         defer { signalObserver.invalidate() }
 
-        switch format {
-        case .bgra:
-            try await streamBGRA(to: targetSimulator, cancellationFlag: cancellationFlag)
-            // BGRA path drives streaming via FBVideoStream and does not track
-            // frame counts; return a zero-summary so `format(_:)` emits nothing.
+        if format.isNativeStream {
+            try await streamNative(from: targetSimulator, format: format, cancellationFlag: cancellationFlag)
+            // The native paths copy encoded bytes through FBVideoStream and
+            // do not track frame counts; return a zero-summary so
+            // `format(_:)` emits nothing.
             return ExecutionResult(framesStreamed: 0, durationSeconds: 0, format: format)
-        default:
-            return try await streamCompressedFrames(from: targetSimulator, format: format, cancellationFlag: cancellationFlag)
         }
+        return try await streamCompressedFrames(from: targetSimulator, format: format, cancellationFlag: cancellationFlag)
     }
 
     // MARK: - Screenshot-based streaming
@@ -185,7 +195,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
                     destination.write(processedData)
                 case .ffmpeg:
                     destination.write(processedData)
-                case .bgra:
+                case .bgra, .h264:
                     break
                 }
 
@@ -217,32 +227,50 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         return ExecutionResult(framesStreamed: frameCount, durationSeconds: elapsed, format: format)
     }
 
-    // MARK: - Legacy BGRA streaming
+    // MARK: - Native FBVideoStream passthrough
 
-    private func streamBGRA(
-        to simulator: FBSimulator,
+    /// Copies a native `FBVideoStream` straight to stdout, with no
+    /// host-side codec pass.
+    ///
+    /// `h264` runs the very configuration `record-video` muxes into an MP4:
+    /// the two verbs drive the same framebuffer encode and differ only in
+    /// their sink. `bgra` carries raw pixels for callers that want them
+    /// unencoded.
+    private func streamNative(
+        from simulator: FBSimulator,
+        format: OutputFormat,
         cancellationFlag: CancellationFlag
     ) async throws {
-        FileHandle.standardError.write(Data("Starting BGRA video stream from simulator \(simulator.udid)...\n".utf8))
-        FileHandle.standardError.write(Data("Format: bgra, Quality: \(quality), Scale: \(scale)\n".utf8))
-        FileHandle.standardError.write(Data("Note: This is raw pixel data. Use ffmpeg to convert:\n".utf8))
-        FileHandle.standardError.write(Data("  sim-use ios stream-video --format bgra --udid <UDID> | ffmpeg -f rawvideo -pixel_format bgra -video_size WIDTHxHEIGHT -i - output.mp4\n".utf8))
-        FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
-
-        do {
-            let config = FBVideoStreamConfiguration(
+        let configuration: FBVideoStreamConfiguration
+        switch format {
+        case .h264:
+            configuration = .h264Capture(fps: fps, quality: quality, scale: scale, transport: .mpegts)
+            FileHandle.standardError.write(Data("Starting h264 video stream from simulator \(simulator.udid)...\n".utf8))
+            FileHandle.standardError.write(Data("Format: h264, FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
+            FileHandle.standardError.write(Data("Note: H.264 in MPEG-TS (carries PTS, so players pace correctly). Preview it live:\n".utf8))
+            FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f mpegts -probesize 32 -fflags nobuffer -\n".utf8))
+        default:
+            configuration = FBVideoStreamConfiguration(
                 format: .bgra,
                 framesPerSecond: nil,
                 rateControl: .quality(Double(quality) / 100.0),
                 scaleFactor: scale,
                 keyFrameRate: nil
             )
+            FileHandle.standardError.write(Data("Starting BGRA video stream from simulator \(simulator.udid)...\n".utf8))
+            FileHandle.standardError.write(Data("Format: bgra, Quality: \(quality), Scale: \(scale)\n".utf8))
+            FileHandle.standardError.write(Data("Note: This is raw pixel data. Use ffmpeg to convert:\n".utf8))
+            FileHandle.standardError.write(Data("  sim-use ios stream-video --format bgra --udid <UDID> | ffmpeg -f rawvideo -pixel_format bgra -video_size WIDTHxHEIGHT -i - output.mp4\n".utf8))
+        }
+        FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 
+        let label = format.rawValue
+        do {
             let stdoutConsumer = FBFileWriter.syncWriter(withFileDescriptor: STDOUT_FILENO, closeOnEndOfFile: false)
             // The stream comes back already running — attach failures throw
             // here instead of surfacing asynchronously.
-            let videoStream = try await simulator.createStream(configuration: config, to: stdoutConsumer)
-            FileHandle.standardError.write(Data("BGRA stream is now running...\n".utf8))
+            let videoStream = try await simulator.createStream(configuration: configuration, to: stdoutConsumer)
+            FileHandle.standardError.write(Data("\(label) stream is now running...\n".utf8))
 
             // Mid-stream termination surfaces through awaitCompletion();
             // box the error and flip a flag so the cancellation-aware wait
@@ -279,12 +307,12 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
                 throw error
             }
 
-            FileHandle.standardError.write(Data("\nStopping BGRA stream...\n".utf8))
+            FileHandle.standardError.write(Data("\nStopping \(label) stream...\n".utf8))
             try await videoStream.stopStreaming()
             await completionTask.value
-            FileHandle.standardError.write(Data("BGRA stream stopped\n".utf8))
+            FileHandle.standardError.write(Data("\(label) stream stopped\n".utf8))
         } catch {
-            throw CLIError(errorDescription: "Failed to stream BGRA video: \(error.localizedDescription)")
+            throw CLIError(errorDescription: "Failed to stream \(label) video: \(error.localizedDescription)")
         }
     }
 }

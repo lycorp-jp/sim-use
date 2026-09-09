@@ -10,15 +10,15 @@ import iOSSimBackend
 /// surface and resolves the target platform, then delegates to:
 ///
 ///   * `IOSSimStreamVideoCommand.execute()` for iOS Simulator UDIDs
-///     (screenshot-capture JPEG formats + the raw `bgra` FBVideoStream).
+///     (native `FBVideoStream` h264 passthrough and raw `bgra`, plus the
+///     deprecated screenshot-capture formats).
 ///   * `AndroidStreamVideoCommand.stream()` for adb serials (native
 ///     `screenrecord` h264 passthrough + screencap JPEG formats).
 struct StreamVideo: SimUseExecutableCommand {
-    /// Union of both backends' formats. `mjpeg` / `raw` / `ffmpeg` are
-    /// shared; `bgra` is iOS-only (raw FBVideoStream pixels) and `h264`
-    /// is Android-only for now (iOS H.264 passthrough is a separate
-    /// follow-up) — the platform mismatch cases fail with a pointer to
-    /// the right alternative.
+    /// Union of both backends' formats. `h264` and the deprecated
+    /// `mjpeg` / `raw` / `ffmpeg` are shared; `bgra` is iOS-only (raw
+    /// FBVideoStream pixels) and fails on Android with a pointer to the
+    /// right alternative.
     enum OutputFormat: String, ExpressibleByArgument, Codable {
         case mjpeg
         case raw
@@ -41,10 +41,10 @@ struct StreamVideo: SimUseExecutableCommand {
 
     @OptionGroup var device: DeviceOptions
 
-    @Option(help: "Output format: mjpeg, raw, ffmpeg (both platforms); bgra (iOS-only); h264 (Android-only). Default: mjpeg")
+    @Option(help: "Output format: h264 (native passthrough on both platforms — fastest, recommended); mjpeg, raw, ffmpeg (screenshot-backed, deprecated); bgra (iOS-only raw pixels). Default: mjpeg")
     var format: OutputFormat = .mjpeg
 
-    @Option(help: "Frames per second (1-30, default: 10). Ignored by --format h264 (native variable frame rate).")
+    @Option(help: "Frames per second (1-30, default: 10). On iOS --format h264 records at this constant rate; Android's h264 ignores it (native variable frame rate).")
     var fps: Int?
 
     @Option(help: "JPEG quality (1-100, default: 80)")
@@ -113,15 +113,15 @@ struct StreamVideo: SimUseExecutableCommand {
         }
     }
 
-    /// Map the top-level format onto the iOS backend's enum; nil for the
-    /// Android-only `h264`.
+    /// Map the top-level format onto the iOS backend's enum. Every format
+    /// has an iOS mapping; only `bgra` lacks an Android one.
     static func iosFormat(for format: OutputFormat) -> IOSSimStreamVideoCommand.OutputFormat? {
         switch format {
         case .mjpeg: return .mjpeg
         case .raw: return .raw
         case .ffmpeg: return .ffmpeg
         case .bgra: return .bgra
-        case .h264: return nil
+        case .h264: return .h264
         }
     }
 
@@ -138,9 +138,6 @@ struct StreamVideo: SimUseExecutableCommand {
     }
 
     private func executeIOSSim() async throws -> ExecutionResult {
-        guard Self.iosFormat(for: format) != nil else {
-            throw CLIError(errorDescription: "--format h264 is Android-only for now (iOS H.264 passthrough is a separate follow-up). Use record-video for an H.264 file, or mjpeg/raw/ffmpeg to stream.")
-        }
         let sub = makeIOSSubcommand()
         let result = try await sub.execute()
         return ExecutionResult(
@@ -157,8 +154,8 @@ struct StreamVideo: SimUseExecutableCommand {
     /// `ForwarderInitializationGuardTests`.
     func makeIOSSubcommand() -> IOSSimStreamVideoCommand {
         var sub = IOSSimStreamVideoCommand()
-        // h264 has no iOS mapping and is rejected before this point; the
-        // fallback value keeps this constructor total for the guard test.
+        // Every top-level format maps to iOS; the fallback only keeps this
+        // constructor total.
         sub.format = Self.iosFormat(for: format) ?? .mjpeg
         sub.fps = fps ?? 10
         sub.quality = quality

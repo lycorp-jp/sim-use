@@ -4,6 +4,28 @@ import Foundation
 
 @Suite("Stream Video Command Tests", .serialized, .enabled(if: isE2EEnabled))
 struct StreamVideoTests {
+    @Test("h264 emits MPEG-TS carrying timestamps, and stops cleanly")
+    func streamVideoH264() async throws {
+        let result = try await streamVideoForDuration(format: "h264", fps: 30, duration: 3.0)
+
+        #expect(isAcceptableStreamExitCode(result.exitCode), "Unexpected exit code: \(result.exitCode)")
+        #expect(result.output.contains("Format: h264"))
+        #expect(result.output.contains("h264 stream is now running"))
+        // Native passthrough carries far more frames per second than the
+        // screenshot loop, so a 3 s capture is substantial.
+        #expect(result.data.count > 10_000, "expected a real byte stream, got \(result.data.count) bytes")
+
+        // MPEG-TS, not bare Annex B — the transport must carry PTS or a
+        // player paces on a guessed frame rate and drifts ever further
+        // behind the device. Every 188-byte packet opens with sync byte 0x47.
+        #expect(result.data.first == 0x47, "stream does not open with the MPEG-TS sync byte")
+        let packetStarts = stride(from: 0, to: min(result.data.count, 188 * 20), by: 188)
+        #expect(
+            packetStarts.allSatisfy { result.data[result.data.startIndex + $0] == 0x47 },
+            "stream is not aligned to 188-byte MPEG-TS packets"
+        )
+    }
+
     @Test("Stream video outputs MJPEG data with HTTP headers")
     func streamVideoMJPEG() async throws {
         let result = try await streamVideoForDuration(format: "mjpeg", duration: 3.0)
@@ -79,7 +101,7 @@ struct StreamVideoTests {
         let udid = try TestHelpers.requireSimulatorUDID()
 
         let simUsePath = try TestHelpers.getSimUsePath()
-        let fullCommand = "\(simUsePath) ios stream-video --format h264 --udid \(udid)"
+        let fullCommand = "\(simUsePath) ios stream-video --format webm --udid \(udid)"
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")

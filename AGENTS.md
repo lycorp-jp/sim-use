@@ -50,6 +50,32 @@ make e2e-matrix     # iOS across Xcode 26/27 × Device Hub closed/open legs (~35
 make eval           # agent evals (real `claude -p` cost; prompts before running)
 ```
 
+**Run the Android emulator headless (`-no-window`) for video work.**
+`screenrecord` only produces frames while SurfaceFlinger is compositing, and
+with a windowed emulator that depends on the window being genuinely visible —
+frames stop when it is on another Space or occluded, which makes any
+automation of capture unreliable. Headless uses offscreen rendering and is
+stable. Measured over 5 s of sustained interaction:
+
+| GPU | window | frames |
+|---|---|---|
+| `swiftshader_indirect` | visible | 2 |
+| `host` | visible | 110 |
+| `host` | on another Space | 1 |
+| `swiftshader_indirect` | **`-no-window`** | **31** |
+
+Note the failure is the window, not the GPU mode: hardware rendering with an
+invisible window is as dead as software rendering.
+
+The video E2E suites pass either way, and legitimately so — they run against
+a still playground screen, and `screenrecord` is strictly variable-frame-rate,
+so a still screen yields exactly one opening frame whether or not capture is
+healthy (measured: 29,804 bytes / 1 frame headless vs 29,724 / 1 windowed,
+near byte-identical). No assertion can separate the two without driving
+sustained motion, and doing that from a test is itself enough to knock the
+emulator off adb mid-suite. So if Android video capture ever looks empty,
+check how the emulator was booted before suspecting the code.
+
 E2E suites compile always but skip unless `SIM_USE_E2E=1` (iOS) / `SIM_USE_E2E_ANDROID=1` (Android) is set — `make test` never touches a device, which is why CI needs no simulator. The runners set those vars for you.
 
 **Budget the time: a full green `make e2e-ios` run is ~15 minutes.** The iOS suites drive real HID gestures and wait on simulator animations/keyboard settling, so per-suite waits dominate — this is expected, not a hang. `make e2e` (both platforms) is ~20+ min. When you only touched one platform, run just that platform's target. The runners keep going past a failed suite and print a full pass/fail map at the end, so read the summary rather than assuming the first red aborted the rest.

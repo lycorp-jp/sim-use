@@ -4,6 +4,13 @@ import Testing
 
 @Suite("Android Stream Video Tests", .serialized, .enabled(if: isAndroidE2EEnabled))
 struct AndroidStreamVideoTests {
+    // Deliberately asserts framing and liveness rather than a frame count:
+    // `screenrecord` is strictly variable-frame-rate, so a still playground
+    // screen yields exactly its opening SPS/PPS/IDR — ~30 KB, one frame,
+    // over any capture length — and that is correct behaviour, not a stall.
+    // Counting frames here would only measure how much the screen happened
+    // to move. See "Emulator GPU mode" in CLAUDE.md for the failure this
+    // suite cannot see.
     @Test("h264 passthrough emits Annex B bytes and stops cleanly on SIGTERM")
     func h264Smoke() async throws {
         let result = try await streamForDuration(format: "h264", duration: 4.0)

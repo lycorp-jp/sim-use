@@ -167,38 +167,51 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         scale: Double,
         cancellationFlag: CancellationFlag
     ) async throws {
-        let config = FBVideoStreamConfiguration(
-            format: .compressedVideo(withCodec: .h264, transport: .annexB),
-            framesPerSecond: fps,
-            rateControl: .quality(Double(quality) / 100.0),
-            scaleFactor: scale,
-            keyFrameRate: 2.0
-        )
+        let config = FBVideoStreamConfiguration.h264Capture(fps: fps, quality: quality, scale: scale, transport: .annexB)
 
-        let recording: any FBVideoRecording
+        let recorder = try H264PassthroughRecorder(outputURL: outputURL)
+        var recorderFinalized = false
+        defer { if !recorderFinalized { recorder.invalidate() } }
+
+        let fatalBox = FirstErrorBox()
+        let pipeline = H264MuxingPipeline(recorder: recorder, onFatalError: { error in
+            fatalBox.set(error)
+            cancellationFlag.cancel()
+        })
+
+        let stream: any FBVideoStream
         do {
-            recording = try await simulator.startRecording(toFile: outputURL.path, configuration: config)
+            stream = try await simulator.createStream(
+                configuration: config,
+                to: AnnexBPipelineConsumer(pipeline: pipeline)
+            )
         } catch {
             throw RecordingUnavailableError(underlying: error.localizedDescription)
         }
 
-        while !(Task.isCancelled || cancellationFlag.isCancelled()) {
+        while !(Task.isCancelled || cancellationFlag.isCancelled() || fatalBox.first != nil) {
             try? await cancellableSleep(seconds: 0.1, flag: cancellationFlag)
         }
 
+        // Stopping the stream is best-effort: a stream that already died
+        // fails here with a secondary error that would mask the fatal one
+        // the pipeline latched, and the frames it did deliver are already in
+        // the recorder either way.
+        try? await stream.stopStreaming()
+        pipeline.finishIngest()
+
         do {
-            _ = try await recording.stop()
+            try await recorder.finish(stopHostTime: ProcessInfo.processInfo.systemUptime)
+            recorderFinalized = true
         } catch {
-            // Whether a usable file survived a mid-recording failure is not
-            // knowable from here (idb owns finalization internally) — check
-            // the filesystem directly rather than guessing, matching the
-            // Android branch's "partial recording saved" wording so the
-            // caller doesn't discard a usable recording on faith alone.
+            if let fatal = fatalBox.first { throw fatal }
             if FileManager.default.fileExists(atPath: outputURL.path) {
                 throw CLIError(errorDescription: "\(error.localizedDescription); partial recording saved to \(outputURL.path)")
             }
             throw error
         }
+
+        if let fatal = fatalBox.first { throw fatal }
     }
 
     // MARK: - Screenshot fallback
