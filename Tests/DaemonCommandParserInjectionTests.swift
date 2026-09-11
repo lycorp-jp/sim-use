@@ -7,7 +7,7 @@ import Testing
 @testable import SimUseCore
 
 // Coverage for the `DaemonDispatch.commandParser` injection wired
-// inside `Daemon.Start.run()`. The dispatch module deliberately
+// by the host CLI's `Daemon.installPlatformHooks`. The dispatch module deliberately
 // doesn't reach back into the top-level SimUse command tree — the
 // host CLI sets the closure once at daemon startup so the daemon
 // server can route requests through ArgumentParser without owning a
@@ -16,7 +16,7 @@ import Testing
 // Without this wiring, the daemon server is dead on arrival:
 // `DaemonDispatch.handle` falls into a permanent error every time it
 // sees a real subcommand. Worth pinning so a future refactor that
-// touches Daemon.swift can't silently drop the assignment.
+// touches the daemon hooks can't silently drop the assignment.
 @Suite("DaemonDispatch.commandParser injection")
 @MainActor
 struct DaemonCommandParserInjectionTests {
@@ -54,7 +54,7 @@ struct DaemonCommandParserInjectionTests {
         }
     }
 
-    /// `Daemon.Start.run()` configures the parser as
+    /// The macOS entry point's daemon hooks configure the parser as
     /// `SimUse.parseAsRoot`. A canary command (`--version`) round-trips
     /// through that closure to assert it actually parses the SimUse
     /// command tree, not just any closure.

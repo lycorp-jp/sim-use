@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import Foundation
 
 /// Client-side transport for the per-UDID daemon. Encapsulates:

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import ArgumentParser
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import Foundation
 
 /// Routes a `DaemonRequest` to the right handler and returns the
@@ -25,8 +29,9 @@ public enum DaemonDispatch {
     /// client establishes a fresh `adb forward` on every request
     /// already. The shutdown side of `staleSimulatorOutcome` is the
     /// part Android cares about (clears the zombie daemon so the next
-    /// call re-spawns clean). Set this once during daemon boot in
-    /// `Daemon.Start.run()` before the server starts accepting requests.
+    /// call re-spawns clean). Set this once during daemon boot, from the host
+    /// executable's `Daemon.installPlatformHooks`, before the server starts
+    /// accepting requests.
     public static var platformStaleCleanup: ((String) -> Void)?
 
     public struct Snapshot {

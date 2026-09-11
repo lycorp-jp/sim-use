@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
+#if canImport(os)
 import os
+#endif
 
 /// Synchronous cancellation flag used by the streaming/recording commands.
 ///

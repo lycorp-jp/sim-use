@@ -103,6 +103,9 @@ Five SwiftPM targets; dependency graph flows in one direction.
 | `iOSSimBackend` | `Sources/iOSSimBackend/` | SimUseCore + SimUseVideo + FB* XCFrameworks + AVFoundation |
 | `AndroidBackend` | `Sources/AndroidBackend/` | SimUseCore + SimUseVideo + ArgumentParser |
 | `SimUse` (executable) | `Sources/SimUse/` | SimUseCore + SimUseVideo + iOSSimBackend + AndroidBackend + FB* |
+| `SimUseLinux` (executable, Linux only) | `Sources/SimUseLinux/` | SimUseCore + AndroidBackend |
+
+On Linux, `Package.swift` declares only `SimUseCore`, `AndroidBackend` (without its three video-capture files) and `SimUseLinux` — see `docs/linux.md`. Linux-only shims live in `Sources/SimUseCore/LinuxCompat.swift`; `swift build` / `swift test` run there directly.
 
 `SimUseVideo` holds the platform-neutral host-side video plumbing (H.264 Annex B parsing, passthrough muxing, `AVAssetWriter` encoding, frame utilities) shared by the iOS and Android recording/streaming paths. It must stay FB*-free — anything that needs FBSimulatorControl belongs in `iOSSimBackend` (e.g. the `VideoFrameUtilities.captureScreenshotData` extension), anything adb-shaped in `AndroidBackend`.
 
@@ -124,7 +127,7 @@ Four verbs are iOS-only (`key`, `key-combo`, `key-sequence`, `batch`) — no top
 
 ### Daemon
 
-`SimUseExecutableCommand.run()` forwards UDID-scoped verbs to a per-UDID auto-spawned daemon (`Sources/SimUseCore/Daemon/`). Platform-agnostic — both iOS and Android verbs route through it. Key regression test: `Tests/DaemonCommandParserInjectionTests.swift`.
+`SimUseExecutableCommand.run()` forwards UDID-scoped verbs to a per-UDID auto-spawned daemon (`Sources/SimUseCore/Daemon/`). Platform-agnostic — both iOS and Android verbs route through it. The `daemon` command itself lives in SimUseCore; each executable installs `Daemon.installPlatformHooks` (its root parser plus backend probes) at launch. Key regression test: `Tests/DaemonCommandParserInjectionTests.swift`.
 
 ## Android development
 

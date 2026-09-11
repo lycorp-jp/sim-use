@@ -193,12 +193,14 @@ public struct Adb: Sendable {
         } catch {
             // Common failure: binary missing or not executable.
             // macOS reports this as NSCocoaErrorDomain code 4
-            // (NSFileNoSuchFileError); other POSIX hosts surface it
-            // as ENOENT in NSPOSIXErrorDomain. Map both so CI on
-            // Linux behaves the same as a developer's Mac.
+            // (NSFileNoSuchFileError); swift-corelibs-foundation on
+            // Linux as code 260 (NSFileReadNoSuchFileError); other
+            // POSIX hosts may surface ENOENT in NSPOSIXErrorDomain.
+            // Map all three so Linux behaves the same as a developer's Mac.
             let nsErr = error as NSError
             let isMissing =
-                (nsErr.domain == NSCocoaErrorDomain && nsErr.code == 4) ||
+                (nsErr.domain == NSCocoaErrorDomain && nsErr.code == CocoaError.fileNoSuchFile.rawValue) ||
+                (nsErr.domain == NSCocoaErrorDomain && nsErr.code == CocoaError.fileReadNoSuchFile.rawValue) ||
                 (nsErr.domain == NSPOSIXErrorDomain && nsErr.code == Int(ENOENT))
             if isMissing {
                 throw BridgeError.adbMissing
