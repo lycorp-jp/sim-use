@@ -354,6 +354,39 @@ public final class BridgeClient: @unchecked Sendable {
         BridgeSessionStore.write(session, udid: serial)
     }
 
+    /// Host the `adb forward` listener lives on, resolved once per process.
+    static let bridgeHost = resolveBridgeHost(environment: ProcessInfo.processInfo.environment)
+
+    /// `adb forward tcp:0 tcp:8080` opens its local socket on the machine
+    /// running the **adb server**, which is only this machine when the
+    /// server is local. When `ADB_SERVER_SOCKET` points at a remote server
+    /// (`tcp:<host>:<port>` — e.g. WSL using the Windows host's adb so USB
+    /// devices stay visible), the forward listens over there and loopback
+    /// has nothing behind it, so the bridge host follows that server.
+    /// `SIM_USE_BRIDGE_HOST` overrides both. The result is ready to
+    /// interpolate into a URL authority: IPv6 hosts come back bracketed,
+    /// with any zone id's `%` escaped.
+    static func resolveBridgeHost(environment: [String: String]) -> String {
+        let loopback = "127.0.0.1"
+        let host: String
+        if let explicit = environment["SIM_USE_BRIDGE_HOST"], !explicit.isEmpty {
+            host = explicit
+        } else if let socket = environment["ADB_SERVER_SOCKET"], socket.hasPrefix("tcp:") {
+            // "tcp:<port>" is a local server; only "tcp:<host>:<port>" is remote.
+            let rest = socket.dropFirst("tcp:".count)
+            guard let separator = rest.lastIndex(of: ":") else { return loopback }
+            host = String(rest[..<separator])
+        } else {
+            return loopback
+        }
+        let bare = host.hasPrefix("[") && host.hasSuffix("]") ? String(host.dropFirst().dropLast()) : host
+        if bare.isEmpty || bare == "localhost" || bare == "127.0.0.1" || bare == "::1" {
+            return loopback
+        }
+        guard bare.contains(":") else { return bare }
+        return "[\(bare.replacingOccurrences(of: "%", with: "%25"))]"
+    }
+
     private func buildRequest(
         method: String,
         path: String,
@@ -362,7 +395,7 @@ public final class BridgeClient: @unchecked Sendable {
         contentType: String?
     ) throws -> URLRequest {
         let port = try currentLocalPort()
-        guard let url = URL(string: "http://127.0.0.1:\(port)\(path)") else {
+        guard let url = URL(string: "http://\(Self.bridgeHost):\(port)\(path)") else {
             throw BridgeError.transport(underlying: "Could not build URL for \(path)", serial: nil)
         }
         var req = URLRequest(url: url)
