@@ -1,21 +1,38 @@
 // SPDX-License-Identifier: Apache-2.0
 import ArgumentParser
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import Foundation
-import AndroidBackend
-import iOSSimBackend
-import SimUseCore
 
 /// Management CLI for the per-UDID auto-start daemon. The daemon itself
 /// is hosted in-process by `sim-use daemon start`; `stop` and `status` are
 /// client-side commands that talk to already-running daemons via the
 /// shared wire protocol (`_stop` / `_ping`).
-struct Daemon: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
+///
+/// Lives in SimUseCore so every `sim-use` executable (macOS and the
+/// Android-only Linux build) registers the same command. What differs per
+/// executable — its root command parser and the backend-specific probes —
+/// is injected through `installPlatformHooks`.
+public struct Daemon: AsyncParsableCommand {
+    public static let configuration = CommandConfiguration(
         commandName: "daemon",
         abstract: "Manage the sim-use background daemon that amortises per-call init cost.",
         subcommands: [Start.self, Stop.self, Status.self]
     )
+
+    /// Wires the host executable into the daemon, called by `daemon start`
+    /// with the resolved device id before the server accepts connections.
+    /// It must set `DaemonDispatch.commandParser` to the executable's root
+    /// parser, and may set `DaemonDispatch.platformStaleCleanup` and
+    /// `DaemonDispatch.livenessProbe` — those live in backend modules
+    /// SimUseCore cannot import. Each entry point installs this once at
+    /// launch.
+    nonisolated(unsafe) public static var installPlatformHooks: (@MainActor (_ deviceId: String) -> Void)?
+
+    public init() {}
 
     // MARK: - start
 
@@ -42,35 +59,13 @@ struct Daemon: AsyncParsableCommand {
 
         @MainActor
         func run() async throws {
-            // Wire SimUse's ArgumentParser as the daemon's command parser
-            // so DaemonDispatch can route requests without owning a
-            // back-reference to the top-level command tree. Must happen
-            // before the server starts accepting connections.
-            DaemonDispatch.commandParser = { args in
-                try SimUse.parseAsRoot(args)
+            // The host executable's root parser and backend probes must be
+            // wired before the server starts accepting connections — a
+            // daemon without a parser answers every request with an error.
+            guard let installPlatformHooks = Daemon.installPlatformHooks else {
+                throw CLIError(errorDescription: "This sim-use build did not install its daemon platform hooks.")
             }
-            // Register the iOS-specific cleanup that fires when an iOS
-            // verb raises `staleSimulator`. The daemon module lives in
-            // SimUseCore and stays platform-neutral; the actual HID
-            // teardown lives here in iOSSimBackend. Android-only daemons
-            // never raise `staleSimulator` so this hook is a no-op for
-            // them — it's still installed to keep the code path uniform.
-            DaemonDispatch.platformStaleCleanup = { udid in
-                HIDInteractor.clearHIDConnection(for: udid)
-            }
-            // Wire the platform-appropriate live-app probe so the daemon
-            // can detect a target process disappearing between commands
-            // (issue #81). The daemon serves a single device, so the
-            // probe is bound to this UDID/serial for its lifetime.
-            let deviceId = device.resolved
-            if PlatformRouter.looksLikeAndroid(deviceId) {
-                // `livenessSnapshot` caches the rarely-changing third-party
-                // package allowlist, so each command costs one `adb shell`
-                // (the fresh `ps`), not two (issue #81 perf follow-up).
-                DaemonDispatch.livenessProbe = { AndroidProcessLister.livenessSnapshot(serial: deviceId) }
-            } else {
-                DaemonDispatch.livenessProbe = { BundleIdentifierResolver.appSnapshot(udid: deviceId) }
-            }
+            installPlatformHooks(device.resolved)
             let effectiveTimeout: TimeInterval = idleTimeout == 0 ? .infinity : idleTimeout
             let server = DaemonServer(udid: device.resolved, idleTimeout: effectiveTimeout)
             try await server.run()

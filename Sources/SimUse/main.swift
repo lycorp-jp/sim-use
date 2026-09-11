@@ -18,9 +18,10 @@ import iOSDeviceBackend
 //
 // The daemon-side command parser (used by `DaemonDispatch.handle` when
 // the daemon server routes requests through ArgumentParser) is wired
-// inside `Daemon.Start.run()`. The daemon SERVER process is always the
-// one that needs it; client-side `daemon stop` / `daemon status` and
-// non-daemon commands never touch DaemonDispatch.
+// by `Daemon.installPlatformHooks`, which `Daemon.Start.run()` calls.
+// The daemon SERVER process is always the one that needs it;
+// client-side `daemon stop` / `daemon status` and non-daemon commands
+// never touch DaemonDispatch.
 
 /// iOS-only verb names that 0.5.x (pre-Path-B) exposed at the top
 /// level. Typing `sim-use <verb>` for any of these today produces a
@@ -44,6 +45,7 @@ enum EntryPoint {
         // value; dev / dirty builds leave it nil so the check is a
         // no-op locally.
         BridgeClient.expectedBridgeVersion = ReleaseVersion.normalize(VERSION)
+        Daemon.installPlatformHooks = installDaemonPlatformHooks
 
         if let typed = CommandLine.arguments.dropFirst().first,
            let canonical = iOSOnlyVerbRedirects[typed] {
@@ -63,6 +65,37 @@ enum EntryPoint {
             Darwin.exit(64) // EX_USAGE
         }
         await SimUse.main()
+    }
+
+    @MainActor
+    private static func installDaemonPlatformHooks(deviceId: String) {
+        // Wire SimUse's ArgumentParser as the daemon's command parser
+        // so DaemonDispatch can route requests without owning a
+        // back-reference to the top-level command tree.
+        DaemonDispatch.commandParser = { args in
+            try SimUse.parseAsRoot(args)
+        }
+        // Register the iOS-specific cleanup that fires when an iOS
+        // verb raises `staleSimulator`. The daemon module lives in
+        // SimUseCore and stays platform-neutral; the actual HID
+        // teardown lives in iOSSimBackend. Android-only daemons
+        // never raise `staleSimulator` so this hook is a no-op for
+        // them — it's still installed to keep the code path uniform.
+        DaemonDispatch.platformStaleCleanup = { udid in
+            HIDInteractor.clearHIDConnection(for: udid)
+        }
+        // Wire the platform-appropriate live-app probe so the daemon
+        // can detect a target process disappearing between commands
+        // (issue #81). The daemon serves a single device, so the
+        // probe is bound to this UDID/serial for its lifetime.
+        if PlatformRouter.looksLikeAndroid(deviceId) {
+            // `livenessSnapshot` caches the rarely-changing third-party
+            // package allowlist, so each command costs one `adb shell`
+            // (the fresh `ps`), not two (issue #81 perf follow-up).
+            DaemonDispatch.livenessProbe = { AndroidProcessLister.livenessSnapshot(serial: deviceId) }
+        } else {
+            DaemonDispatch.livenessProbe = { BundleIdentifierResolver.appSnapshot(udid: deviceId) }
+        }
     }
 }
 
