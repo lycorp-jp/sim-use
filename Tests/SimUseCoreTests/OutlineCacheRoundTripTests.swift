@@ -41,6 +41,40 @@ final class OutlineCacheRoundTripTests: XCTestCase {
         XCTAssertEqual(payload.screen.width, 1080)
     }
 
+    /// Every `ui` after the first overwrites an existing cache file, so the
+    /// replace path must hold alongside the first-write path above.
+    func testSecondWriteReplacesFirst() throws {
+        func outline(label: String) -> Outline {
+            Outline(
+                text: "@1  Button  \"\(label)\"\n",
+                entries: [
+                    Outline.Entry(
+                        aliases: .init(at: 1),
+                        role: "Button",
+                        label: label,
+                        frame: .init(x: 0, y: 0, width: 10, height: 10),
+                        region: .init(kind: "Content"),
+                        states: [],
+                        uniqueId: nil
+                    )
+                ],
+                lists: [],
+                screen: .init(x: 0, y: 0, width: 1080, height: 1920),
+                appLabel: "App"
+            )
+        }
+        let tmp = FileManager.default.temporaryDirectory
+            .appendingPathComponent("sim-use-core-test-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
+
+        try OutlineCache.write(outline: outline(label: "First"), udid: "emulator-5554", home: tmp)
+        try OutlineCache.write(outline: outline(label: "Second"), udid: "emulator-5554", home: tmp)
+        let payload = try OutlineCache.read(udid: "emulator-5554", home: tmp)
+
+        XCTAssertEqual(payload.entries.map(\.label), ["Second"])
+    }
+
     func testReadMissingThrowsMissingError() {
         let tmp = FileManager.default.temporaryDirectory
             .appendingPathComponent("sim-use-core-test-\(UUID().uuidString)", isDirectory: true)

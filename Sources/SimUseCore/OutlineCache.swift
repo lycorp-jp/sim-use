@@ -159,7 +159,19 @@ public enum OutlineCache {
         // successful replace, and the cleanup itself is best-effort.
         defer { try? FileManager.default.removeItem(at: tempURL) }
         try data.write(to: tempURL, options: [.atomic])
+        #if canImport(Darwin)
         _ = try FileManager.default.replaceItemAt(target, withItemAt: tempURL)
+        #else
+        // swift-corelibs-foundation's `replaceItemAt` fails with "file
+        // doesn't exist" whether or not the target exists, so replace it
+        // with rename(2) — the same atomic swap, created or overwritten.
+        guard rename(tempURL.path, target.path) == 0 else {
+            throw CocoaError(.fileWriteUnknown, userInfo: [
+                NSFilePathErrorKey: target.path,
+                NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(errno)),
+            ])
+        }
+        #endif
     }
 
     // MARK: - Read
