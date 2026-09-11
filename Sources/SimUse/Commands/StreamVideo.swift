@@ -10,10 +10,10 @@ import iOSSimBackend
 /// surface and resolves the target platform, then delegates to:
 ///
 ///   * `IOSSimStreamVideoCommand.execute()` for iOS Simulator UDIDs
-///     (native `FBVideoStream` h264 passthrough and raw `bgra`, plus the
+///     (native `FBVideoStream` h264 in MPEG-TS and raw `bgra`, plus the
 ///     deprecated screenshot-capture formats).
-///   * `AndroidStreamVideoCommand.stream()` for adb serials (native
-///     `screenrecord` h264 passthrough + screencap JPEG formats).
+///   * `AndroidStreamVideoCommand.stream()` for adb serials (`screenrecord`
+///     h264 re-containered into MPEG-TS + screencap JPEG formats).
 struct StreamVideo: SimUseExecutableCommand {
     /// Union of both backends' formats. `h264` and the deprecated
     /// `mjpeg` / `raw` / `ffmpeg` are shared; `bgra` is iOS-only (raw
@@ -31,7 +31,6 @@ struct StreamVideo: SimUseExecutableCommand {
         let framesStreamed: UInt64
         let bytesStreamed: UInt64?
         let durationSeconds: Double
-        let format: String
     }
 
     static let configuration = CommandConfiguration(
@@ -41,10 +40,10 @@ struct StreamVideo: SimUseExecutableCommand {
 
     @OptionGroup var device: DeviceOptions
 
-    @Option(help: "Output format: h264 (native passthrough on both platforms — fastest, recommended); mjpeg, raw, ffmpeg (screenshot-backed, deprecated); bgra (iOS-only raw pixels). Default: mjpeg")
+    @Option(help: "Output format: h264 (native H.264 in MPEG-TS on both platforms — fastest, recommended); mjpeg, raw, ffmpeg (screenshot loop; DEPRECATED on iOS, retained on Android for devices where screenrecord is unavailable); bgra (iOS-only raw pixels). Default: mjpeg")
     var format: OutputFormat = .mjpeg
 
-    @Option(help: "Frames per second (1-30, default: 10). On iOS --format h264 records at this constant rate; Android's h264 ignores it (native variable frame rate).")
+    @Option(help: "Frames per second (1-30). iOS --format h264 streams at this constant rate (default 30); the screenshot formats default to 10; Android's h264 ignores it (native variable frame rate).")
     var fps: Int?
 
     @Option(help: "JPEG quality (1-100, default: 80)")
@@ -144,7 +143,6 @@ struct StreamVideo: SimUseExecutableCommand {
             framesStreamed: result.framesStreamed,
             bytesStreamed: nil,
             durationSeconds: result.durationSeconds,
-            format: result.format.rawValue
         )
     }
 
@@ -157,7 +155,7 @@ struct StreamVideo: SimUseExecutableCommand {
         // Every top-level format maps to iOS; the fallback only keeps this
         // constructor total.
         sub.format = Self.iosFormat(for: format) ?? .mjpeg
-        sub.fps = fps ?? 10
+        sub.fps = fps
         sub.quality = quality
         sub.scale = scale
         sub.device = device
@@ -180,7 +178,6 @@ struct StreamVideo: SimUseExecutableCommand {
             framesStreamed: result.framesStreamed,
             bytesStreamed: result.bytesStreamed,
             durationSeconds: result.durationSeconds,
-            format: result.format.rawValue
         )
     }
 }

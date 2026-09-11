@@ -26,6 +26,47 @@ struct StreamVideoTests {
         )
     }
 
+    @Test("h264 stays cancellable when the consumer stops reading")
+    func streamVideoH264StalledConsumerIsInterruptible() async throws {
+        // A consumer that holds the pipe open but never reads: no EPIPE ever
+        // arrives, the pipe just fills. idb's blocking file writer then sat
+        // in write(2) on the encoder thread and stopStreaming() waited behind
+        // it, so Ctrl-C could not end the command.
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUsePath = try TestHelpers.getSimUsePath()
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: simUsePath)
+        process.arguments = ["ios", "stream-video", "--format", "h264", "--fps", "30", "--udid", udid]
+        let stdoutPipe = Pipe()      // deliberately never drained
+        let stderrPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = stderrPipe
+        try process.run()
+
+        // At ~200 KB/s a 64 KB pipe is full well inside this window.
+        try await Task.sleep(nanoseconds: 4_000_000_000)
+        #expect(process.isRunning, "stream ended on its own before the check")
+        process.interrupt()
+
+        let deadline = Date().addingTimeInterval(8)
+        while process.isRunning && Date() < deadline {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        let exitedOnItsOwn = !process.isRunning
+        if !exitedOnItsOwn {
+            kill(process.processIdentifier, SIGKILL)
+        }
+        process.waitUntilExit()
+        // Release the reader end only now: draining earlier would end the stall.
+        try? stdoutPipe.fileHandleForReading.close()
+        let stderrText = String(decoding: stderrPipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+
+        #expect(exitedOnItsOwn, "SIGINT did not end the stream within 8 s; stderr: \(stderrText)")
+        #expect(isAcceptableStreamExitCode(process.terminationStatus), "Unexpected exit code: \(process.terminationStatus)")
+        #expect(stderrText.contains("h264 stream stopped"), "expected an orderly stop; stderr: \(stderrText)")
+    }
+
     @Test("Stream video outputs MJPEG data with HTTP headers")
     func streamVideoMJPEG() async throws {
         let result = try await streamVideoForDuration(format: "mjpeg", duration: 3.0)

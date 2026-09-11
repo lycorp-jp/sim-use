@@ -3,7 +3,15 @@ import Foundation
 import os
 import SimUseCore
 
-/// Thread-safe bridge from a raw H.264 Annex-B byte stream to an MP4 file,
+/// Anything that accepts parsed H.264 access units: `H264PassthroughRecorder`
+/// muxes them into an MP4 file, `MPEGTSStreamWriter` into a transport stream
+/// on stdout. Both need identical framing and timing work upstream, which is
+/// what `H264MuxingPipeline` does.
+public protocol H264AccessUnitSink: Sendable {
+    func append(accessUnit: H264AccessUnit, sps: Data, pps: Data, hostTime: TimeInterval) throws
+}
+
+/// Thread-safe bridge from a raw H.264 Annex-B byte stream to a muxing sink,
 /// shared by the iOS (`FBSimulatorVideoStream`) and Android
 /// (`adb screenrecord`) capture paths. Byte chunks arrive on a capture
 /// thread; `ingest(_:)` parses and appends them synchronously so the
@@ -21,17 +29,17 @@ public final class H264MuxingPipeline: Sendable {
         var lastIngestHostTime: TimeInterval = 0
     }
 
-    private let recorder: H264PassthroughRecorder
+    private let sink: any H264AccessUnitSink
     private let clock: @Sendable () -> TimeInterval
     private let onFatalError: @Sendable (Error) -> Void
     private let state = OSAllocatedUnfairLock(initialState: State())
 
     public init(
-        recorder: H264PassthroughRecorder,
+        sink: any H264AccessUnitSink,
         clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         onFatalError: @escaping @Sendable (Error) -> Void
     ) {
-        self.recorder = recorder
+        self.sink = sink
         self.clock = clock
         self.onFatalError = onFatalError
     }
@@ -79,7 +87,7 @@ public final class H264MuxingPipeline: Sendable {
         guard !accessUnits.isEmpty, let sps = state.parser.currentSPS, let pps = state.parser.currentPPS else { return }
         do {
             for accessUnit in accessUnits {
-                try recorder.append(accessUnit: accessUnit, sps: sps, pps: pps, hostTime: hostTime)
+                try sink.append(accessUnit: accessUnit, sps: sps, pps: pps, hostTime: hostTime)
                 state.framesWritten += 1
                 state.firstFrameReceived = true
             }

@@ -225,7 +225,7 @@ public struct AndroidRecordVideoCommand: SimUseExecutableCommand {
         defer { if !recorderFinalized { recorder.invalidate() } }
 
         let fatalBox = FirstErrorBox()
-        let pipeline = H264MuxingPipeline(recorder: recorder, onFatalError: { error in
+        let pipeline = H264MuxingPipeline(sink: recorder, onFatalError: { error in
             fatalBox.set(error)
             cancellationFlag.cancel()
         })

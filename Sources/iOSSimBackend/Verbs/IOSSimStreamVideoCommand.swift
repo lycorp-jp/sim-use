@@ -28,6 +28,28 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             case .mjpeg, .raw, .ffmpeg: false
             }
         }
+
+        /// The screenshot-per-frame formats, superseded on this platform by
+        /// `h264`. Measured on a booted iPhone 17 Pro over 6 s: `h264`
+        /// delivers 144 frames in 1.33 MB where `mjpeg` manages 24 in
+        /// 11.2 MB and the PNG-carrying formats 26 in 92.8 MB. `h264` works
+        /// on every booted simulator, so no state remains in which these are
+        /// the better choice.
+        ///
+        /// Android keeps its equivalents: `adb screenrecord` is unavailable
+        /// on some devices, and there the screencap loop is the only way to
+        /// stream at all.
+        var isDeprecated: Bool {
+            switch self {
+            case .mjpeg, .raw, .ffmpeg: true
+            case .h264, .bgra: false
+            }
+        }
+
+        /// One-line reason shown once when a deprecated format is used.
+        var deprecationNotice: String {
+            "warning: --format \(rawValue) is deprecated on iOS and will be removed. Use --format h264 — a native H.264 stream in MPEG-TS, roughly 6x the frame rate at an eighth of the bytes, with no host-side codec pass. Preview it with `| ffplay -f mpegts -probesize 32768 -i -`.\n"
+        }
     }
 
     /// Summary of a completed stream run. The actual video bytes are
@@ -50,16 +72,20 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
     public static let configuration = CommandConfiguration(
         commandName: "stream-video",
-        abstract: "Stream simulator frames to stdout using screenshot capture"
+        abstract: "Stream simulator video to stdout"
     )
 
     @OptionGroup public var device: DeviceOptions
 
-    @Option(help: "Output format: h264 (native H.264 Annex B passthrough — fastest, recommended), mjpeg, raw, ffmpeg (screenshot-backed, deprecated), bgra (experimental raw pixels). Default: mjpeg. No frame count is reported for h264/bgra.")
+    @Option(help: "Output format: h264 (native H.264 in MPEG-TS — fastest, recommended), mjpeg, raw, ffmpeg (DEPRECATED screenshot loop, ~6x slower and ~8x larger; will be removed), bgra (experimental raw pixels). Default: mjpeg. The native formats (h264, bgra) report no frame count.")
     public var format: OutputFormat = .mjpeg
 
-    @Option(help: "Frames per second (1-30, default: 10)")
-    public var fps: Int = 10
+    @Option(help: "Frames per second (1-30). Default: 30 for h264, 10 for the screenshot formats.")
+    public var fps: Int?
+
+    /// `h264` runs at the constant rate `record-video` defaults to; the
+    /// screenshot loop cannot sustain that and keeps its lower default.
+    var effectiveFPS: Int { fps ?? (format == .h264 ? 30 : 10) }
 
     @Option(help: "Encode quality (1-100, default: 80): H.264 rate control for h264, JPEG quality for the screenshot formats.")
     public var quality: Int = 80
@@ -111,6 +137,10 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     }
 
     public func execute() async throws -> ExecutionResult {
+        if format.isDeprecated {
+            FileHandle.standardError.write(Data(format.deprecationNotice.utf8))
+        }
+
         let logger = SimUseLogger()
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
@@ -154,10 +184,10 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         cancellationFlag: CancellationFlag
     ) async throws -> ExecutionResult {
         FileHandle.standardError.write(Data("Starting screenshot-based video stream from simulator \(simulator.udid)...\n".utf8))
-        FileHandle.standardError.write(Data("Format: \(format.rawValue), FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
+        FileHandle.standardError.write(Data("Format: \(format.rawValue), FPS: \(effectiveFPS), Quality: \(quality), Scale: \(scale)\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop streaming\n".utf8))
 
-        let frameInterval = 1.0 / Double(fps)
+        let frameInterval = 1.0 / Double(effectiveFPS)
         let mjpegBoundary = "--mjpegstream"
         let destination = FileHandle.standardOutput
 
@@ -201,7 +231,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
                 frameCount += 1
 
-                if frameCount % UInt64(max(1, fps)) == 0 {
+                if frameCount % UInt64(max(1, effectiveFPS)) == 0 {
                     let elapsed = Date().timeIntervalSince(startTime)
                     if elapsed > 0 {
                         let actualFPS = Double(frameCount) / elapsed
@@ -232,10 +262,15 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     /// Copies a native `FBVideoStream` straight to stdout, with no
     /// host-side codec pass.
     ///
-    /// `h264` runs the very configuration `record-video` muxes into an MP4:
-    /// the two verbs drive the same framebuffer encode and differ only in
-    /// their sink. `bgra` carries raw pixels for callers that want them
-    /// unencoded.
+    /// `h264` runs the encoder settings `record-video` muxes into an MP4:
+    /// the two verbs drive the same framebuffer encode and differ in
+    /// transport (MPEG-TS here, Annex B into the muxer there) and sink.
+    /// `bgra` carries raw pixels for callers that want them unencoded.
+    ///
+    /// Bytes reach stdout through `StdoutStreamSink` rather than idb's
+    /// blocking file writer, so a consumer that stops reading cannot pin the
+    /// encoder thread past Ctrl-C, and one that closes the pipe ends the
+    /// stream in an orderly way instead of killing the process with SIGPIPE.
     private func streamNative(
         from simulator: FBSimulator,
         format: OutputFormat,
@@ -244,11 +279,11 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         let configuration: FBVideoStreamConfiguration
         switch format {
         case .h264:
-            configuration = .h264Capture(fps: fps, quality: quality, scale: scale, transport: .mpegts)
+            configuration = .h264Capture(fps: effectiveFPS, quality: quality, scale: scale, transport: .mpegts)
             FileHandle.standardError.write(Data("Starting h264 video stream from simulator \(simulator.udid)...\n".utf8))
-            FileHandle.standardError.write(Data("Format: h264, FPS: \(fps), Quality: \(quality), Scale: \(scale)\n".utf8))
+            FileHandle.standardError.write(Data("Format: h264, FPS: \(effectiveFPS), Quality: \(quality), Scale: \(scale)\n".utf8))
             FileHandle.standardError.write(Data("Note: H.264 in MPEG-TS (carries PTS, so players pace correctly). Preview it live:\n".utf8))
-            FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f mpegts -probesize 32 -fflags nobuffer -\n".utf8))
+            FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f mpegts -probesize 32768 -i -\n".utf8))
         default:
             configuration = FBVideoStreamConfiguration(
                 format: .bgra,
@@ -266,7 +301,12 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
         let label = format.rawValue
         do {
-            let stdoutConsumer = FBFileWriter.syncWriter(withFileDescriptor: STDOUT_FILENO, closeOnEndOfFile: false)
+            let sink = StdoutStreamSink(shouldAbort: { Task.isCancelled || cancellationFlag.isCancelled() })
+            let stdoutConsumer = StdoutStreamConsumer(sink: sink) {
+                // Consumer closed its end (ffplay quit, `head` done): stop
+                // producing rather than erroring out.
+                cancellationFlag.cancel()
+            }
             // The stream comes back already running — attach failures throw
             // here instead of surfacing asynchronously.
             let videoStream = try await simulator.createStream(configuration: configuration, to: stdoutConsumer)

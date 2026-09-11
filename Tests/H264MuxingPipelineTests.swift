@@ -33,7 +33,7 @@ struct H264MuxingPipelineTests {
         let recorder = try H264PassthroughRecorder(outputURL: outputURL)
         let clock = FakeClock()
         let pipeline = H264MuxingPipeline(
-            recorder: recorder,
+            sink: recorder,
             clock: { clock.tick() },
             onFatalError: { Issue.record("unexpected fatal error: \($0)") }
         )
@@ -67,7 +67,7 @@ struct H264MuxingPipelineTests {
         let recorder = try H264PassthroughRecorder(outputURL: outputURL)
         let clock = FakeClock()
         let pipeline = H264MuxingPipeline(
-            recorder: recorder,
+            sink: recorder,
             clock: { clock.tick() },
             onFatalError: { Issue.record("unexpected fatal error: \($0)") }
         )

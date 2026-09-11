@@ -307,22 +307,21 @@ The output path goes to stdout; progress messages go to stderr.
 ### Video streaming & recording
 
 ```bash
-# Native H.264 live stream — the fastest path and the one to reach for.
-# Neither platform pays a host-side codec pass.
-
-# iOS: H.264 in MPEG-TS at a constant --fps. TS carries PTS, so players pace
-# correctly and stay in sync indefinitely.
+# Native H.264 live stream (cross-platform) — the fastest path and the one to
+# reach for. H.264 in MPEG-TS on both platforms, with no host-side codec pass.
+# TS carries PTS, so players pace off the stream and stay in sync indefinitely.
 sim-use stream-video --device $UDID --format h264 | \
-  ffplay -f mpegts -probesize 32 -fflags nobuffer -
+  ffplay -f mpegts -probesize 32768 -i -
 
-# Android: adb screenrecord passthrough — bare Annex B at the device's native
-# variable frame rate. Good for archiving; see the note below before using it
-# for live preview.
-sim-use stream-video --device emulator-5554 --format h264 | \
-  ffmpeg -f h264 -i - -c copy out.mp4
+# Muxing the preview to a file works, but it is a live capture, not an
+# archive: idle stretches are compressed (see below). For a faithful
+# recording use `record-video`.
+sim-use stream-video --device $UDID --format h264 | ffmpeg -f mpegts -i - -c copy out.mp4
 
-# Screenshot-backed formats (deprecated — an order of magnitude slower and
-# larger than h264; use h264 unless you specifically need per-frame images)
+# Screenshot-backed formats. DEPRECATED on iOS (h264 is ~6x the frame rate at
+# an eighth of the bytes) and slated for removal there. Retained on Android:
+# `screenrecord` is unavailable on some devices, and this loop is the only way
+# to stream from those.
 sim-use stream-video --device $UDID --fps 10 --format mjpeg > stream.mjpeg
 sim-use stream-video --device $UDID --fps 30 --format ffmpeg | \
   ffmpeg -f image2pipe -framerate 30 -i - -c:v libx264 -preset ultrafast out.mp4
@@ -338,19 +337,49 @@ sim-use record-video --device $UDID --format gif                      # sim-use-
 sim-use record-video --device $UDID --format gif --fps 15 --scale 0.4 --output demo.gif
 ```
 
-`record-video` and `stream-video --format h264` drive the *same* capture on
-iOS — one H.264 configuration, differing only in whether the encoded bytes are
-muxed into an MP4 or copied to stdout. Measured on a booted iPhone 17 Pro,
-`h264` streams ~24 fps at ~220 KB/s where `mjpeg` manages ~4 fps at ~1.9 MB/s.
+On iOS, `record-video` and `stream-video --format h264` share one set of
+H.264 encoder settings (`--fps`, `--quality`, `--scale`, keyframe interval)
+through a single factory, so the two verbs cannot drift apart on how the
+picture is encoded. They do differ downstream: recording takes Annex B through
+the host-side muxer into an MP4, while streaming takes MPEG-TS straight to
+stdout. `h264` streams at a constant `--fps` (default 30, which is also the
+streaming cap); measured on a booted iPhone 17 Pro it runs ~220 KB/s at
+30 fps where `mjpeg` manages ~4 fps at ~1.9 MB/s.
 
-The two platforms' `h264` differ in container, and it matters for live
-viewing. iOS emits MPEG-TS, which carries PTS on a 90 kHz clock. Android
-passes `screenrecord`'s bare Annex B through untouched, and Annex B has no
-timestamps at all — a player has to guess the frame rate (ffprobe reads such a
-stream as 25 fps whatever it really is), so if the guess is low the picture
-falls further behind the device every second, without bound. Prefer Android's
-`h264` for archiving to a file, and re-container it if you need to watch it
-live: `… --format h264 | ffmpeg -f h264 -i - -c copy -f mpegts - | ffplay -f mpegts -`.
+`stream-video` is a *preview*: its timeline advances by the real gap between
+pictures but never by more than 0.2 s, so an idle screen does not leave a hole
+a player has to sit through before it reaches the next picture. That is the
+right trade when the question is "what is on screen now", and it means the
+stream is not a faithful record of elapsed time — piping it to a file turns a
+60-second pause into 0.2 seconds of output. `record-video` keeps real arrival
+times and is what to use for an archive. Ctrl-C ends a stream, and so does
+quitting the player: a closed pipe is an orderly stop on both platforms.
+
+`-probesize 32768` is not decoration. ffplay identifies the stream by reading
+a bounded amount of it, and the default budget is measured in seconds of
+*media*. Android's capture is variable-frame-rate: while the screen is still,
+`screenrecord` emits no pictures at all and the stream thins to just its
+program tables (a few KB/s), so a media-time budget can take arbitrarily long
+in wall-clock terms to fill. Bounding the probe by bytes instead lets it
+return after a picture or two. Two things do not help: `-analyzeduration 0`
+(zero selects ffmpeg's default window rather than disabling it, and the open
+measured identically with and without it) and `-fflags nobuffer` (it starves
+the probe of the data it needs and ffplay never opens the stream). One
+consequence to know about: a still Android screen sends no pictures, so the
+window appears only once something on the device moves. iOS streams at a
+constant rate and opens at once.
+
+Both platforms carry `h264` in MPEG-TS, and the reason is worth knowing: a
+bare H.264 elementary stream has no timestamps at all, so a player has to
+guess the frame rate — ffprobe reads such a stream as 25 fps whatever it
+really is — and when the guess is under the real rate the picture falls
+further behind the device every second, without bound. MPEG-TS carries a PTS
+per picture on a 90 kHz clock, so the player paces off the stream instead.
+iOS gets TS straight from the simulator's encoder; on Android, `screenrecord`
+only emits Annex B, so sim-use re-containers it host-side (no re-encoding —
+the frames pass through untouched, only the wrapper is added). Frame rate
+differs by platform: iOS honours `--fps` as a constant rate, Android runs at
+the device's native variable rate.
 
 `record-video` captures a real H.264 stream and muxes it straight into the
 MP4 (passthrough — no per-frame screenshot re-encoding). iOS records at a

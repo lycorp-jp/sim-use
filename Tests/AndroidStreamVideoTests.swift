@@ -11,15 +11,24 @@ struct AndroidStreamVideoTests {
     // Counting frames here would only measure how much the screen happened
     // to move. See "Emulator GPU mode" in CLAUDE.md for the failure this
     // suite cannot see.
-    @Test("h264 passthrough emits Annex B bytes and stops cleanly on SIGTERM")
+    @Test("h264 emits MPEG-TS carrying timestamps, and stops cleanly on SIGTERM")
     func h264Smoke() async throws {
         let result = try await streamForDuration(format: "h264", duration: 4.0)
 
         #expect(isAcceptableStreamExitCode(result.exitCode), "Unexpected exit code: \(result.exitCode)")
-        #expect(result.stderr.contains("h264 Annex B passthrough"))
+        #expect(result.stderr.contains("h264 in MPEG-TS"))
         #expect(result.stdout.count > 1_000, "expected a real byte stream, got \(result.stdout.count) bytes")
-        // screenrecord's stream opens with an Annex B start code (SPS).
-        #expect(result.stdout.starts(with: [0x00, 0x00, 0x00, 0x01]))
+
+        // MPEG-TS, not the bare Annex B screenrecord hands us: the transport
+        // has to carry PTS or a player paces on a guessed frame rate and
+        // drifts ever further behind the device. Packets are a fixed 188
+        // bytes, each opening with sync byte 0x47.
+        #expect(result.stdout.count % 188 == 0, "stream is not a whole number of TS packets")
+        let packetStarts = stride(from: 0, to: min(result.stdout.count, 188 * 40), by: 188)
+        #expect(
+            packetStarts.allSatisfy { result.stdout[result.stdout.startIndex + $0] == 0x47 },
+            "stream is not aligned to 188-byte MPEG-TS packets"
+        )
     }
 
     @Test("mjpeg stream carries iOS-parity multipart framing")
