@@ -124,6 +124,17 @@ Device Hub is open — the HID transport is selected automatically per
 boot. Note that Xcode 27 no longer bundles Simulator.app; the one from an
 Xcode 26.x install still works, as does Device Hub itself.
 
+### Linux (Android only)
+
+The Android backend also builds on Linux with a Swift 6 toolchain — iOS
+verbs, video capture, `long-press`, `app-state`, the Viewer and `init` are
+macOS-only. See [docs/linux.md](docs/linux.md) for what is available, how to
+build and install, and reaching devices from WSL.
+
+```bash
+scripts/install-linux.sh
+```
+
 ### Agent skill
 
 To install the bundled agent skill into your AI client's skill directory:
@@ -145,7 +156,7 @@ sim-use drives both **iOS Simulators** and **Android devices / emulators** throu
   * `emulator-5554` / `R5CT1ABCD12` / `192.168.1.5:5555` → Android device
   * `00008130-...` (8-16 hex) / 40-hex → physical iPhone/iPad (restricted verb set)
 
-For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup.
+For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup. When `ADB_SERVER_SOCKET` points at an adb server on another machine (`tcp:<host>:<port>`), sim-use reaches the bridge on that host, since that is where `adb forward` listens; `SIM_USE_BRIDGE_HOST` overrides the host.
 
 **Physical iPhones and iPads** (experimental) route through the same top-level verbs — `sim-use ui`, `sim-use tap '#<id>' / --label` and `sim-use screenshot` work against a plugged-in device's UDID. The channel exposes no element geometry, so it trades coordinate taps, swipes and gestures for accessibility actions, and the remaining verbs reject with the reason and the nearest alternative — never assume capability parity; see the [capability matrix](#physical-ios-devices). sim-use installs and signs no runner and needs no Developer Disk Image; `ui`/`tap` need the foreground app to be development-signed (`get-task-allow=true`), `screenshot` captures any screen.
 
