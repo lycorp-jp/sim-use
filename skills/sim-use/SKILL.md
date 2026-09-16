@@ -44,7 +44,7 @@ Pick a selector, in order of preference:
 | `tap --label 'X'` | Scripted flows. Combine with `--wait-timeout` for transitions. |
 | `tap --label-regex '...'` | Dynamic labels with counters/timestamps. Anchor with `^...$`. |
 | `tap --label-contains 'X'` | Substring match when exact label is unknown. |
-| `tap -x N -y N` / `tap --point x,y` | Last resort for elements with no AX data. |
+| `tap -x N -y N` / `tap --point x,y` | Last resort for elements with no AX data. Device-native portrait space by default; add `--coordinate-space ui` when the numbers come from the outline and the device may be rotated. |
 
 Disambiguate collisions with `--element-type` or `--frame minY=0.7r` (see `references/cheatsheet.md`).
 
@@ -134,7 +134,7 @@ Quick symptom index — see `references/pitfalls.md` for detailed recipes.
 | Android: `paste` denied | Background clipboard access blocked | Use `type` instead |
 | Outline shows `U+FFFC` in label | iOS icon placeholder character | Match with `--label-regex` excluding the prefix |
 | `[i] … covers ~N% of the screen` warning (text output, or `--json` top-level `advisory` key) | The selector resolved to a near-full-screen wrapper (common on Flutter/canvas UIs) and the tap hit its center, likely missing the intended control | Re-run `ui` and target the control via `@N`/`#<id>`, or pass explicit `-x/-y`/`--point` |
-| `[i] Screen orientation could not be confirmed…` / `…coordinates may be stale…` advisory | Device/app is rotated (the `App:` header shows a tag like `(landscape-right)`) and orientation self-calibration couldn't verify the mapping, or the `@N` snapshot predates a rotation | Re-run `ui` and tap again; selectors handle rotation automatically once calibration succeeds. Explicit `-x/-y`/`--point` is device-native portrait space by default — on `swipe`/`touch`, pass `--coordinate-space ui` to use outline (visual-space) coordinates on a rotated device |
+| `[i] Screen orientation could not be confirmed…` / `…coordinates may be stale…` advisory | Device/app is rotated (the `App:` header shows a tag like `(landscape-right)`) and orientation self-calibration couldn't verify the mapping, or the `@N` snapshot predates a rotation | Re-run `ui` and tap again; selectors handle rotation automatically once calibration succeeds. Explicit `-x/-y`/`--point` is device-native portrait space by default — on `tap`/`swipe`/`touch`, pass `--coordinate-space ui` to use outline (visual-space) coordinates on a rotated device |
 
 ## 3. Crash awareness
 

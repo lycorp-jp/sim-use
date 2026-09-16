@@ -36,11 +36,21 @@ private func buildDelayedEvent(
 extension IOSSimTapCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
         // Dispatch coordinates: framebuffer space for AX-resolved
-        // selectors (issue #34), raw for explicit --point/-x/-y.
+        // selectors (issue #34), raw for explicit --point/-x/-y unless
+        // `--coordinate-space ui` opts them into the batch-wide
+        // calibration (issue #142).
         let resolvedPoint: (x: Double, y: Double)
 
         if let explicit = try TapCoordinateResolver.resolve(x: targeting.pointX, y: targeting.pointY, point: targeting.point) {
-            resolvedPoint = (explicit.x, explicit.y)
+            if targeting.coordinateSpace == .ui {
+                let calibration = await context.uiSpaceCalibration(
+                    fallbackMessage: "Screen orientation could not be determined; --coordinate-space ui coordinates were dispatched as device-native portrait and may be wrong if the device is rotated.",
+                    logger: logger
+                )
+                resolvedPoint = calibration.hidPoint(x: explicit.x, y: explicit.y)
+            } else {
+                resolvedPoint = (explicit.x, explicit.y)
+            }
         } else {
             let query: AccessibilityQuery
             if let elementID = targeting.elementID {

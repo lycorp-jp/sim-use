@@ -53,6 +53,9 @@ public struct TapTargetingOptions: ParsableArguments {
     )
     public var frameSpecs: [String] = []
 
+    @Option(name: .customLong("coordinate-space"), help: "iOS only, explicit -x/-y/--point coordinates only: 'native' (device-native portrait, the default and historical contract) or 'ui' (visual space as printed by describe-ui; orientation-calibrated so outline coordinates stay correct on a rotated device). Aliases and selectors are always resolved in ui space and reject this flag. Android coordinates are always display space, which already rotates with the UI — the flag is accepted and ignored there.")
+    public var coordinateSpace: CoordinateSpace = .native
+
     public init() {}
 
     /// Shared targeting rules for every tap-family surface. Not the
@@ -108,6 +111,14 @@ public struct TapTargetingOptions: ParsableArguments {
                     throw ValidationError("--label-regex '\(labelRegex)' is not a valid regular expression: \(error.localizedDescription)")
                 }
             }
+        }
+
+        // Aliases and selectors resolve to ui-space coordinates and are
+        // calibrated on their own; the opt-in only has a meaning for raw
+        // -x/-y/--point input, so reject the combination rather than
+        // silently ignoring it.
+        if coordinateSpace == .ui, !hasExplicitCoordinates {
+            throw ValidationError("--coordinate-space ui applies to explicit -x/-y/--point coordinates only; aliases and selectors are already resolved in ui space.")
         }
 
         if !frameSpecs.isEmpty {

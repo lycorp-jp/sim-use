@@ -36,6 +36,8 @@ struct TapValidationParityTests {
         (["--label", "a", "--frame", "banana=1"], "is unknown"),
         (["-x", "1", "-y", "2", "--frame", "minY=1"], "--frame cannot be combined with explicit"),
         (["@1", "--frame", "minY=1"], "cannot be combined with the @N / #N / #N@M alias forms"),
+        (["--label", "a", "--coordinate-space", "ui"], "--coordinate-space ui applies to explicit"),
+        (["@1", "--coordinate-space", "ui"], "--coordinate-space ui applies to explicit"),
     ]
 
     /// nil when the argv parses; the rendered parser message otherwise.
@@ -80,6 +82,7 @@ struct TapValidationParityTests {
             "--pre-delay", "0.1", "--post-delay", "0.1",
             "--duration", "0.5",
             "--wait-timeout", "1.0", "--poll-interval", "0.5",
+            "--coordinate-space", "native",
         ] + Self.udid
         #expect(failureMessage(Tap.self, argv) == nil)
         #expect(failureMessage(LongPress.self, argv) == nil)

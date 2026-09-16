@@ -27,6 +27,7 @@ sim-use tap --label-contains "Order"    # substring match
 sim-use tap --label-regex '^Chat.*\d+$' # ICU regex
 sim-use tap -x 100 -y 200              # absolute coordinates (last resort)
 sim-use tap --point 100,200             # same, pair form
+sim-use tap -x 100 -y 200 --coordinate-space ui   # outline (visual-space) coords on a rotated device
 ```
 
 ## Disambiguating with --frame

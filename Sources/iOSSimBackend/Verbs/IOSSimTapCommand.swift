@@ -180,7 +180,9 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         let resolvedAdvisory: CommandAdvisory?
         // Non-nil for AX-derived targets: their coordinates are UI space
         // and must be transformed into framebuffer space before HID
-        // dispatch (issue #34). Explicit -x/-y stays raw by contract.
+        // dispatch (issue #34). Explicit -x/-y stays raw by default
+        // (native space); `--coordinate-space ui` opts it into the same
+        // calibration (issue #142).
         let calibration: OrientationCalibration?
 
         if let alias {
@@ -238,8 +240,18 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         } else if let explicit = try TapCoordinateResolver.resolve(x: targeting.pointX, y: targeting.pointY, point: targeting.point) {
             resolvedPoint = (x: explicit.x, y: explicit.y)
             resolvedDescription = "(\(explicit.x), \(explicit.y))"
-            resolvedAdvisory = nil
-            calibration = nil
+            if targeting.coordinateSpace == .ui {
+                let uiCalibration = await UISpaceCalibrationLoader.load(
+                    udid: device.resolved,
+                    fallbackMessage: "Screen orientation could not be determined; --coordinate-space ui coordinates were dispatched as device-native portrait and may be wrong if the device is rotated.",
+                    logger: logger
+                )
+                resolvedAdvisory = uiCalibration.advisory
+                calibration = uiCalibration
+            } else {
+                resolvedAdvisory = nil
+                calibration = nil
+            }
         } else {
             let query: AccessibilityQuery
             if let elementID = targeting.elementID {

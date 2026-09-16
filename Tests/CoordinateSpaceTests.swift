@@ -88,6 +88,49 @@ struct TouchCoordinateSpaceValidationTests {
     }
 }
 
+// Issue #142: `tap` gains the same opt-in for explicit -x/-y/--point.
+// Aliases and selectors are already resolved in ui space, so combining
+// them with `--coordinate-space ui` is a contradiction and rejects.
+
+@Suite("Tap — coordinate-space validation")
+struct TapCoordinateSpaceValidationTests {
+    private static let udid = ["--udid", "FAKE-UDID"]
+
+    @Test("ui space with explicit -x/-y validates")
+    func explicitXYUIValidates() throws {
+        _ = try IOSSimTapCommand.parseAsRoot(
+            ["-x", "10", "-y", "10", "--coordinate-space", "ui"] + Self.udid)
+    }
+
+    @Test("ui space with --point validates")
+    func explicitPointUIValidates() throws {
+        _ = try IOSSimTapCommand.parseAsRoot(
+            ["--point", "10,10", "--coordinate-space", "ui"] + Self.udid)
+    }
+
+    @Test("ui space with a selector rejects")
+    func selectorUIRejects() {
+        #expect(throws: (any Error).self) {
+            _ = try IOSSimTapCommand.parseAsRoot(
+                ["--label", "Foo", "--coordinate-space", "ui"] + Self.udid)
+        }
+    }
+
+    @Test("ui space with an alias rejects")
+    func aliasUIRejects() {
+        #expect(throws: (any Error).self) {
+            _ = try IOSSimTapCommand.parseAsRoot(
+                ["@1", "--coordinate-space", "ui"] + Self.udid)
+        }
+    }
+
+    @Test("native space (the default) keeps selectors working")
+    func selectorNativeValidates() throws {
+        _ = try IOSSimTapCommand.parseAsRoot(
+            ["--label", "Foo", "--coordinate-space", "native"] + Self.udid)
+    }
+}
+
 @Suite("Batch — swipe/touch coordinate space")
 @MainActor
 struct BatchCoordinateSpaceTests {
@@ -170,6 +213,41 @@ struct BatchCoordinateSpaceTests {
         #expect(context.commandAdvisories.first?.kind == .orientationCalibrationFallback)
     }
 
+    @Test("Native tap -x/-y steps stay zero-cost — no calibration")
+    func nativeTapSkipsCalibration() async throws {
+        let spy = CalibratorSpy(result: landscape)
+        let context = makeContext(spy: spy, tree: try makeSmallTree())
+
+        let primitives = try await parseStep(
+            ["tap", "-x", "100", "-y", "200"], context: context)
+
+        #expect(primitives.count == 1)
+        #expect(spy.calls == 0)
+    }
+
+    @Test("ui tap -x/-y steps ride the batch-wide calibration")
+    func uiTapCalibrates() async throws {
+        let spy = CalibratorSpy(result: landscape)
+        let context = makeContext(spy: spy, tree: try makeSmallTree())
+
+        let primitives = try await parseStep(
+            ["tap", "-x", "100", "-y", "200", "--coordinate-space", "ui"], context: context)
+
+        #expect(primitives.count == 1)
+        #expect(spy.calls == 1)
+    }
+
+    @Test("ui tap with a selector is rejected at parse time")
+    func selectorTapUIRejectsInBatch() async throws {
+        let spy = CalibratorSpy(result: landscape)
+        let context = makeContext(spy: spy, tree: try makeSmallTree())
+
+        await #expect(throws: (any Error).self) {
+            _ = try await parseStep(
+                ["tap", "--label", "Corner", "--coordinate-space", "ui"], context: context)
+        }
+    }
+
     @Test("Split touch steps in ui space are rejected at parse time")
     func splitTouchUIRejectsInBatch() async throws {
         let spy = CalibratorSpy(result: landscape)
@@ -200,6 +278,15 @@ struct AndroidCoordinateSpaceParityTests {
         #expect(command.coordinateSpace.rawValue == value)
         let coords = try command.coordinates.resolve()
         #expect(coords.startX == 1 && coords.endY == 2)
+    }
+
+    @Test("android tap parses --coordinate-space", arguments: ["native", "ui"])
+    func androidTapParsesFlag(value: String) throws {
+        let parsed = try AndroidTapCommand.parseAsRoot(
+            ["-x", "1", "-y", "1", "--coordinate-space", value]
+        ) as? AndroidTapCommand
+        let command = try #require(parsed)
+        #expect(command.coordinateSpace.rawValue == value)
     }
 
     @Test("android touch parses --coordinate-space", arguments: ["native", "ui"])

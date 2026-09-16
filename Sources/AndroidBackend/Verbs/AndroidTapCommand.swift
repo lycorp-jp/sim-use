@@ -48,6 +48,9 @@ public struct AndroidTapCommand: SimUseExecutableCommand {
     @Option(name: .customLong("element-type"), help: "Restrict to a canonical element type (Button, TextField, …).")
     public var elementType: String?
 
+    @Option(name: .customLong("coordinate-space"), help: "Accepted for parity with the iOS surface and ignored: Android coordinates are always display space, which already rotates with the UI.")
+    public var coordinateSpace: CoordinateSpace = .native
+
     @Option(
         name: .customLong("duration"),
         help: ArgumentHelp(

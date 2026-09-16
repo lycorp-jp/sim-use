@@ -61,6 +61,7 @@ struct Tap: SimUseExecutableCommand {
           sim-use tap --label-regex '^Reply [0-9]+$'                   # anchored ICU regex over AXLabel
           sim-use tap -x 540 -y 1268                                   # raw coordinates (last resort)
           sim-use tap --point 540,1268                                 # same, coordinate-pair form
+          sim-use tap -x 540 -y 200 --coordinate-space ui              # outline (visual-space) coordinates on a rotated device
           sim-use tap @11 --duration 0.05                              # hold briefly — needed for some UISwitch toggles
         """
     )
