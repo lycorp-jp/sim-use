@@ -334,12 +334,17 @@ public final class BridgeClient: @unchecked Sendable {
         lock.unlock()
         if let port = cached {
             guard unconfirmed else { return port }
-            if restoredForwardIsLive(localPort: port) {
+            // A failed `adb forward --list` throws rather than counting
+            // as "gone": the forward may well still be registered, and
+            // opening another one here would strand it on the adb server.
+            // The session stays cached for the next call to confirm.
+            if try restoredForwardIsLive(localPort: port) {
                 lock.lock(); restoredPortUnconfirmed = false; lock.unlock()
                 return port
             }
-            // Not our forward any more (removed, adb server restarted, or
-            // the port now belongs to something else). Drop the token with
+            // Confirmed not our forward any more (removed, adb server
+            // restarted, or the port now belongs to something else), so
+            // there is nothing of ours left to remove. Drop the token with
             // it so it is only ever sent through a forward we created.
             lock.lock()
             cachedLocalPort = nil
@@ -356,9 +361,8 @@ public final class BridgeClient: @unchecked Sendable {
         return port
     }
 
-    private func restoredForwardIsLive(localPort: Int) -> Bool {
-        guard let forwards = try? adb.forwards() else { return false }
-        return forwards.contains(Adb.Forward(serial: serial, localPort: localPort, remote: "tcp:\(Self.defaultRemotePort)"))
+    private func restoredForwardIsLive(localPort: Int) throws -> Bool {
+        try adb.forwards().contains(Adb.Forward(serial: serial, localPort: localPort, remote: "tcp:\(Self.defaultRemotePort)"))
     }
 
     private func currentAuthToken() throws -> String {

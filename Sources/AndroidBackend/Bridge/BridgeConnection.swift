@@ -41,13 +41,20 @@ public struct BridgeConnection: Equatable, Sendable {
     }
 
     /// The connection identity a per-device daemon for `udid` depends on:
-    /// the adb connection for Android targets, none for other platforms.
-    /// Entry points install this as `DaemonClient.connectionIdentityProvider`.
+    /// none for iOS simulator and device UDIDs, the adb connection for
+    /// everything else. Scoping is decided by excluding iOS shapes rather
+    /// than by `PlatformRouter.looksLikeAndroid`, whose heuristic rejects
+    /// real adb serials (wireless-debugging mDNS serials exceed its
+    /// 32-character cap) that still reach a daemon. Entry points install
+    /// this as `DaemonClient.connectionIdentityProvider`.
     public static func daemonConnectionIdentity(
         udid: String,
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> String? {
-        guard PlatformRouter.looksLikeAndroid(udid) else { return nil }
+        let trimmed = udid.trimmingCharacters(in: .whitespacesAndNewlines)
+        if PlatformRouter.looksLikeIOSSim(trimmed) || PlatformRouter.looksLikePhysicalIOSDevice(trimmed) {
+            return nil
+        }
         return BridgeConnection(environment: environment).identity
     }
 }

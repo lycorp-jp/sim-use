@@ -77,7 +77,9 @@ to the adb server that created them, so they are scoped to that connection
 (`ADB_SERVER_SOCKET`, `ANDROID_ADB_SERVER_ADDRESS` / `ANDROID_ADB_SERVER_PORT`
 and `SIM_USE_BRIDGE_HOST`). Pointing a device at another server restarts that
 device's daemon and creates a fresh forward and token, and a cached forward is
-reused only while `adb forward --list` still shows it for the device.
+reused only while `adb forward --list` still shows it for the device. If
+`adb forward --list` itself fails, the command fails with that adb error and
+the cached session is kept, rather than opening a second forward.
 
 The common case is WSL, which has no USB access: WSL's `adb` points at the
 Windows host's adb server so physical devices stay visible.

@@ -25,6 +25,7 @@ final class BridgeConnectionScopingTests: XCTestCase {
     private var home: URL { root.appendingPathComponent("home", isDirectory: true) }
     private var adbLog: URL { root.appendingPathComponent("adb.log") }
     private var forwardList: URL { root.appendingPathComponent("forwards.txt") }
+    private var failForwardList = false
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
@@ -131,6 +132,57 @@ final class BridgeConnectionScopingTests: XCTestCase {
             BridgeConnection.daemonConnectionIdentity(udid: "1A2B3C4D-1A2B-1A2B-1A2B-1A2B3C4D5E6F", environment: serverA),
             "iOS simulator daemons do not depend on the adb connection"
         )
+        XCTAssertNil(
+            BridgeConnection.daemonConnectionIdentity(udid: "00008130-00066D2A10EB8D3A", environment: serverA),
+            "physical iOS devices do not depend on the adb connection"
+        )
+    }
+
+    /// Any serial adb can hand out reaches the per-device daemon, not just
+    /// the shapes `PlatformRouter.looksLikeAndroid` recognises — wireless
+    /// debugging (mDNS) serials run past its 32-character cap. Those
+    /// daemons talk to adb all the same, so they must be scoped too.
+    func testDaemonIdentityCoversSerialsOutsideTheAndroidHeuristic() {
+        for udid in [
+            "adb-R58M123ABC-AbCdEf._adb-tls-connect._tcp",
+            "adb-R58M123ABC-AbCdEf._adb-tls-connect._tcp.",
+            "192.0.2.5:5555",
+        ] {
+            let a = BridgeConnection.daemonConnectionIdentity(udid: udid, environment: serverA)
+            let b = BridgeConnection.daemonConnectionIdentity(udid: udid, environment: serverB)
+            XCTAssertNotNil(a, "\(udid) must carry a connection identity")
+            XCTAssertNotEqual(a, b, "\(udid) must follow the adb server")
+        }
+    }
+
+    /// `adb forward --list` failing says nothing about whether the cached
+    /// forward is gone. Treating it as gone would open another forward on
+    /// every such failure and strand the old one on the adb server, so
+    /// the failure surfaces instead and the session is kept for the next
+    /// call to confirm.
+    func testForwardListFailureDoesNotOpenAnotherForward() throws {
+        persistSession(token: "token-A", localPort: 18080, environment: serverA)
+        failForwardList = true
+
+        XCTAssertThrowsError(try makeClient(environment: serverA).pressKey(3))
+
+        XCTAssertFalse(adbCalls().contains { $0.contains("forward tcp:0") }, "no new forward expected: \(adbCalls())")
+        XCTAssertTrue(RecordingBridgeProtocol.requests().isEmpty, "unconfirmed forward must not be used")
+        let stored = try XCTUnwrap(BridgeSessionStore.read(udid: serial, home: home))
+        XCTAssertEqual(stored.localPort, 18080)
+        XCTAssertEqual(stored.token, "token-A")
+    }
+
+    /// A forward that is confirmed gone is not ours to reuse, and there
+    /// is nothing left on the server to clean up: the replacement is the
+    /// only forward opened.
+    func testConfirmedMissingForwardOpensExactlyOneReplacement() throws {
+        persistSession(token: "token-A", localPort: 18080, environment: serverA)
+
+        try makeClient(environment: serverA).pressKey(3)
+
+        XCTAssertEqual(adbCalls().filter { $0.contains("forward tcp:0") }.count, 1, "\(adbCalls())")
+        assertAllRequests(host: "192.0.2.10", port: 18081, authorizedWith: "token-B")
     }
 
     // MARK: - Fixtures
@@ -151,7 +203,7 @@ final class BridgeConnectionScopingTests: XCTestCase {
             #!/bin/sh
             echo "$*" >> '\(adbLog.path)'
             case "$*" in
-              *"forward --list"*) cat '\(forwardList.path)' 2>/dev/null ;;
+              *"forward --list"*) \(failForwardList ? "echo 'error: cannot connect to daemon' >&2; exit 1" : "cat '\(forwardList.path)' 2>/dev/null") ;;
               *"forward tcp:0 tcp:8080"*) echo 18081 ;;
               *"content query"*) echo "Row: 0 result=token-B" ;;
             esac
