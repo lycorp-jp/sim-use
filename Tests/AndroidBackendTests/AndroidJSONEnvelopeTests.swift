@@ -98,14 +98,30 @@ final class AndroidJSONEnvelopeTests: XCTestCase {
             bridgeVersion: "0.6.0",
             protocolVersion: 3,
             authTokenInstalled: true,
-            portForward: 8765
+            portForward: 8765,
+            bridgeHost: "192.0.2.10"
         )
         let bytes = try JSONEnvelopeWriter.encodeSuccess(payload)
         let json = try XCTUnwrap(String(data: bytes, encoding: .utf8))
         XCTAssertEqual(
             json,
-            #"{"data":{"authTokenInstalled":true,"bridgeVersion":"0.6.0","portForward":8765,"protocolVersion":3,"serial":"emulator-5554"},"ok":true}"#
+            #"{"data":{"authTokenInstalled":true,"bridgeHost":"192.0.2.10","bridgeVersion":"0.6.0","portForward":8765,"protocolVersion":3,"serial":"emulator-5554"},"ok":true}"#
         )
+    }
+
+    /// The text output names the host the bridge is actually reached on,
+    /// which is not localhost when the adb server is remote.
+    func testInitTextOutputNamesTheBridgeHost() {
+        let result = AndroidInitCommand.ExecutionResult(
+            serial: "emulator-5554",
+            bridgeVersion: "0.6.0",
+            protocolVersion: 3,
+            authTokenInstalled: true,
+            portForward: 8080,
+            bridgeHost: "192.0.2.10"
+        )
+        let stdout = AndroidInitCommand().format(result).stdout
+        XCTAssertTrue(stdout.contains("  http_endpoint     192.0.2.10 (forward → device tcp:8080)\n"), stdout)
     }
 
     func testDevicesPayloadEnvelopeShape() throws {

@@ -142,6 +142,7 @@ public final class AndroidDeviceController {
         public let protocolVersion: Int
         public let authTokenInstalled: Bool
         public let portForward: Int
+        public let bridgeHost: String
     }
 
     /// Runs the 6-step bridge bootstrap: install APK → register the
@@ -188,7 +189,8 @@ public final class AndroidDeviceController {
             bridgeVersion: ping.bridgeVersion,
             protocolVersion: ping.protocolVersion,
             authTokenInstalled: tokenOK,
-            portForward: BridgeClient.defaultRemotePort
+            portForward: BridgeClient.defaultRemotePort,
+            bridgeHost: client.connection.bridgeHost
         )
     }
 

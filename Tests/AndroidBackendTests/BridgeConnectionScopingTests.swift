@@ -185,6 +185,21 @@ final class BridgeConnectionScopingTests: XCTestCase {
         assertAllRequests(host: "192.0.2.10", port: 18081, authorizedWith: "token-B")
     }
 
+    /// With more than one device on the adb server, `adb forward --remove`
+    /// without `-s` fails ("more than one device/emulator"), so dropping a
+    /// forward has to name the serial or the forward is left behind.
+    func testInvalidateRemovesTheForwardForThisSerial() throws {
+        let client = try makeClient(environment: serverA)
+        try client.pressKey(3)
+
+        client.invalidate()
+
+        XCTAssertTrue(
+            adbCalls().contains("-s \(serial) forward --remove tcp:18081"),
+            "forward must be removed for this serial: \(adbCalls())"
+        )
+    }
+
     // MARK: - Fixtures
 
     private func persistSession(token: String, localPort: Int, environment: [String: String]) {
@@ -203,6 +218,9 @@ final class BridgeConnectionScopingTests: XCTestCase {
             #!/bin/sh
             echo "$*" >> '\(adbLog.path)'
             case "$*" in
+              *"forward --remove"*)
+                # Real adb with several devices refuses this without -s.
+                [ "$1" = "-s" ] || { echo "adb: error: more than one device/emulator" >&2; exit 1; } ;;
               *"forward --list"*) \(failForwardList ? "echo 'error: cannot connect to daemon' >&2; exit 1" : "cat '\(forwardList.path)' 2>/dev/null") ;;
               *"forward tcp:0 tcp:8080"*) echo 18081 ;;
               *"content query"*) echo "Row: 0 result=token-B" ;;

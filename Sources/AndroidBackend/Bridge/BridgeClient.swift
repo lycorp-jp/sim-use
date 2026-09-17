@@ -316,7 +316,7 @@ public final class BridgeClient: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         if let port = cachedLocalPort {
-            _ = try? adb.forwardRemove(localPort: port)
+            _ = try? adb.forwardRemove(serial: serial, localPort: port)
         }
         cachedLocalPort = nil
         cachedAuthToken = nil

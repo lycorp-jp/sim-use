@@ -138,8 +138,11 @@ public struct Adb: Sendable {
         }
     }
 
-    public func forwardRemove(localPort: Int) throws {
-        _ = try run(args: ["forward", "--remove", "tcp:\(localPort)"])
+    /// `adb -s <serial> forward --remove tcp:<local>`. The serial is
+    /// required in practice: with more than one device on the adb server,
+    /// adb rejects the command without it ("more than one device/emulator").
+    public func forwardRemove(serial: String, localPort: Int) throws {
+        _ = try run(args: ["-s", serial, "forward", "--remove", "tcp:\(localPort)"])
     }
 
     @discardableResult
