@@ -16,6 +16,12 @@ enum EntryPoint {
         // release build pins the APK it expects, dev builds skip it.
         BridgeClient.expectedBridgeVersion = ReleaseVersion.normalize(VERSION)
         Daemon.installPlatformHooks = installDaemonPlatformHooks
+        // A per-device daemon only serves clients configured for the same
+        // connection (for Android: the adb server and bridge host), so both
+        // sides of the daemon protocol need to compute it.
+        DaemonClient.connectionIdentityProvider = { udid in
+            BridgeConnection.daemonConnectionIdentity(udid: udid)
+        }
         await SimUseLinux.main()
     }
 

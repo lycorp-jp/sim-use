@@ -39,12 +39,14 @@ public enum DaemonDispatch {
         public let startTime: Date
         public let udid: String
         public let simUseVersion: String
+        public let connectionIdentity: String?
 
-        public init(pid: pid_t, startTime: Date, udid: String, simUseVersion: String) {
+        public init(pid: pid_t, startTime: Date, udid: String, simUseVersion: String, connectionIdentity: String? = nil) {
             self.pid = pid
             self.startTime = startTime
             self.udid = udid
             self.simUseVersion = simUseVersion
+            self.connectionIdentity = connectionIdentity
         }
     }
 
@@ -259,7 +261,8 @@ public enum DaemonDispatch {
                 uptimeSeconds: Date().timeIntervalSince(snapshot.startTime),
                 protocolVersion: DaemonProtocol.version,
                 simUseVersion: snapshot.simUseVersion,
-                udid: snapshot.udid
+                udid: snapshot.udid,
+                connectionIdentity: snapshot.connectionIdentity
             )
             let envelope = DaemonSuccessResponse(id: request.id, data: ping)
             return Outcome(responseData: encode(envelope), shouldStopDaemon: false)

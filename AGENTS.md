@@ -127,7 +127,7 @@ Four verbs are iOS-only (`key`, `key-combo`, `key-sequence`, `batch`) — no top
 
 ### Daemon
 
-`SimUseExecutableCommand.run()` forwards UDID-scoped verbs to a per-UDID auto-spawned daemon (`Sources/SimUseCore/Daemon/`). Platform-agnostic — both iOS and Android verbs route through it. The `daemon` command itself lives in SimUseCore; each executable installs `Daemon.installPlatformHooks` (its root parser plus backend probes) at launch. Key regression test: `Tests/DaemonCommandParserInjectionTests.swift`.
+`SimUseExecutableCommand.run()` forwards UDID-scoped verbs to a per-UDID auto-spawned daemon (`Sources/SimUseCore/Daemon/`). Platform-agnostic — both iOS and Android verbs route through it. The `daemon` command itself lives in SimUseCore; each executable installs `Daemon.installPlatformHooks` (its root parser plus backend probes) at launch. A daemon is keyed by UDID alone, so each executable also installs `DaemonClient.connectionIdentityProvider`: the daemon reports the identity it started under in `_ping`, and the client's version gate restarts it when its own differs (Android: adb server + bridge host, via `BridgeConnection`). Key regression test: `Tests/DaemonCommandParserInjectionTests.swift`.
 
 ## Android development
 

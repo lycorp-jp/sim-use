@@ -72,6 +72,13 @@ server**. When `ADB_SERVER_SOCKET` points at a remote server
 instead of `127.0.0.1`. Set `SIM_USE_BRIDGE_HOST` to override the host
 explicitly. This applies on macOS too.
 
+The forwarded port and bridge token that sim-use caches for a device belong
+to the adb server that created them, so they are scoped to that connection
+(`ADB_SERVER_SOCKET`, `ANDROID_ADB_SERVER_ADDRESS` / `ANDROID_ADB_SERVER_PORT`
+and `SIM_USE_BRIDGE_HOST`). Pointing a device at another server restarts that
+device's daemon and creates a fresh forward and token, and a cached forward is
+reused only while `adb forward --list` still shows it for the device.
+
 The common case is WSL, which has no USB access: WSL's `adb` points at the
 Windows host's adb server so physical devices stay visible.
 

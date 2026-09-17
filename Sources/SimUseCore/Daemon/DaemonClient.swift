@@ -45,14 +45,19 @@ public enum DaemonClient {
 
         // Version gate: if a daemon is live but was spawned from a
         // different binary (git checkout + rebuild mid-session, stale
-        // dev iteration, etc.), restart it now so the client never
-        // dispatches real work to a server that no longer reflects
-        // the CLI's code. Returns early when the daemon is either
+        // dev iteration, etc.), or under a different connection (e.g. an
+        // Android daemon started against another adb server), restart it
+        // now so the client never dispatches real work to a server that
+        // no longer reflects the CLI's code or configuration. Returns early when the daemon is either
         // absent, already compatible, or the probe itself was
         // inconclusive — in all those cases the existing fast/slow
         // paths handle the rest.
         if case .probablyAlive = liveness,
-           await ensureCompatibleDaemon(paths: paths, currentVersion: VERSION) {
+           await ensureCompatibleDaemon(
+               paths: paths,
+               currentVersion: VERSION,
+               currentConnectionIdentity: connectionIdentity(for: udid)
+           ) {
             liveness = paths.filesystemLiveness()
             trace("post-gate liveness=\(liveness)")
         }
@@ -226,17 +231,27 @@ public enum DaemonClient {
     /// hard enough that the existing transport-error handling should
     /// take over.
     ///
+    /// The same probe compares the daemon's connection identity with
+    /// `currentConnectionIdentity` (see `connectionIdentityProvider`): a
+    /// daemon started under another connection is restarted too.
+    ///
     /// Opt-out: `SIM_USE_DAEMON_VERSION_CHECK=0` in the environment
-    /// disables the gate entirely, falling back to pre-gate behaviour
-    /// for emergency use.
+    /// disables the version comparison, falling back to pre-gate
+    /// behaviour for emergency use. It does not disable the connection
+    /// comparison, which guards against sending commands to the wrong
+    /// device server.
     public static func ensureCompatibleDaemon(
         paths: DaemonPaths,
-        currentVersion: String
+        currentVersion: String,
+        currentConnectionIdentity: String? = nil,
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) async -> Bool {
-        if ProcessInfo.processInfo.environment["SIM_USE_DAEMON_VERSION_CHECK"] == "0" {
+        let checkVersion = environment["SIM_USE_DAEMON_VERSION_CHECK"] != "0"
+        guard checkVersion || currentConnectionIdentity != nil else {
             return false
         }
         let daemonVersion: String
+        let daemonConnectionIdentity: String?
         do {
             let responseData = try sendToExistingDaemon(
                 socketPath: paths.socketURL.path,
@@ -247,16 +262,21 @@ public enum DaemonClient {
                 .decode(DaemonClientSuccessPayload<DaemonPingData>.self, from: responseData)
                 .data
             daemonVersion = ping.simUseVersion
+            daemonConnectionIdentity = ping.connectionIdentity
         } catch {
             trace("version probe failed: \(error); letting fast-path take over")
             return false
         }
 
-        guard shouldRestartForVersion(daemon: daemonVersion, current: currentVersion) else {
+        if checkVersion, shouldRestartForVersion(daemon: daemonVersion, current: currentVersion) {
+            trace("version mismatch daemon=\(daemonVersion) cli=\(currentVersion); restarting")
+        } else if shouldRestartForConnection(daemon: daemonConnectionIdentity, current: currentConnectionIdentity) {
+            // Deliberately not tracing the identities: they can carry
+            // host addresses, and trace output ends up in shared logs.
+            trace("connection identity differs from the daemon's; restarting")
+        } else {
             return false
         }
-
-        trace("version mismatch daemon=\(daemonVersion) cli=\(currentVersion); restarting")
         await stopDaemon(paths: paths, timeout: 2.0)
         return true
     }
@@ -266,6 +286,26 @@ public enum DaemonClient {
     /// now; empty or whitespace-only strings on either side are
     /// treated as "unknown" and do NOT trigger a restart so we don't
     /// crash-loop on broken `VersionPlugin` output.
+    /// Decides whether a live daemon's connection identity disqualifies it
+    /// for a client whose own identity is `current`. A nil `current` means
+    /// the target has no connection-dependent state (never restarts); a
+    /// daemon reporting nil predates the field and cannot prove a match.
+    public static func shouldRestartForConnection(daemon: String?, current: String?) -> Bool {
+        guard let current else { return false }
+        return daemon != current
+    }
+
+    /// What a per-device daemon depends on beyond its UDID — for Android,
+    /// the adb server and bridge host its environment selects. Installed
+    /// by each executable's entry point (backends live above SimUseCore);
+    /// nil means the target has no such dependency. Read on both sides:
+    /// the daemon reports its value in `_ping`, the client compares.
+    nonisolated(unsafe) public static var connectionIdentityProvider: ((_ udid: String) -> String?)?
+
+    public static func connectionIdentity(for udid: String) -> String? {
+        connectionIdentityProvider?(udid)
+    }
+
     public static func shouldRestartForVersion(daemon: String, current: String) -> Bool {
         let lhs = daemon.trimmingCharacters(in: .whitespacesAndNewlines)
         let rhs = current.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -30,6 +30,7 @@ public final class DaemonServer {
     private let paths: DaemonPaths
     private let idleTimeout: TimeInterval
     private let simUseVersion: String
+    private let connectionIdentity: String?
     private let startTime = Date()
 
     private var listenFd: Int32 = -1
@@ -52,9 +53,14 @@ public final class DaemonServer {
         udid: String,
         idleTimeout: TimeInterval = 600,
         paths: DaemonPaths? = nil,
-        simUseVersion: String? = nil
+        simUseVersion: String? = nil,
+        connectionIdentity: String? = nil
     ) {
         self.udid = udid
+        // Captured at start from this process's environment (inherited
+        // from the client that spawned the daemon) and reported in `_ping`
+        // so clients configured for another connection restart it.
+        self.connectionIdentity = connectionIdentity ?? DaemonClient.connectionIdentity(for: udid)
         self.paths = paths ?? DaemonPaths(udid: udid)
         self.idleTimeout = idleTimeout
         // VERSION is generated per-target by VersionPlugin and is
@@ -199,7 +205,8 @@ public final class DaemonServer {
             pid: getpid(),
             startTime: startTime,
             udid: udid,
-            simUseVersion: simUseVersion
+            simUseVersion: simUseVersion,
+            connectionIdentity: connectionIdentity
         )
         logInfo("sim-use-daemon: dispatching cmd=\(request.cmd) (conn=\(connectionId))")
         let outcome = await DaemonDispatch.handle(request, snapshot: snapshot)

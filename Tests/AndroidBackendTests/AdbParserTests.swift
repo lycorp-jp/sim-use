@@ -72,4 +72,24 @@ final class AdbParserTests: XCTestCase {
         XCTAssertNil(Adb.parseForwardPort("0"))           // 0 is not a valid port
         XCTAssertNil(Adb.parseForwardPort("-1234"))
     }
+
+    func testParseForwardListKeepsOnlyTcpForwards() {
+        let output = """
+        emulator-5554 tcp:18080 tcp:8080
+        192.0.2.5:5555 tcp:41000 tcp:8080
+        emulator-5556 tcp:6100 localabstract:chrome_devtools_remote
+        garbage line
+
+        """
+        let entries = Adb.parseForwardList(output)
+        XCTAssertEqual(entries, [
+            Adb.Forward(serial: "emulator-5554", localPort: 18080, remote: "tcp:8080"),
+            Adb.Forward(serial: "192.0.2.5:5555", localPort: 41000, remote: "tcp:8080"),
+            Adb.Forward(serial: "emulator-5556", localPort: 6100, remote: "localabstract:chrome_devtools_remote"),
+        ])
+    }
+
+    func testParseForwardListEmpty() {
+        XCTAssertEqual(Adb.parseForwardList(""), [])
+    }
 }

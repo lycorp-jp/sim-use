@@ -113,6 +113,31 @@ public struct Adb: Sendable {
         return nil
     }
 
+    /// One `adb forward --list` row: `<serial> tcp:<local> <remote>`.
+    public struct Forward: Equatable, Sendable {
+        public let serial: String
+        public let localPort: Int
+        public let remote: String
+    }
+
+    /// Forwards registered on the adb server this process talks to.
+    public func forwards() throws -> [Forward] {
+        Self.parseForwardList(try run(args: ["forward", "--list"]).stdout)
+    }
+
+    /// Parses `adb forward --list`, keeping rows whose local side is a TCP
+    /// port and skipping anything that does not have that shape.
+    static func parseForwardList(_ output: String) -> [Forward] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard fields.count == 3, fields[1].hasPrefix("tcp:"),
+                  let port = Int(fields[1].dropFirst("tcp:".count)), port > 0 else {
+                return nil
+            }
+            return Forward(serial: String(fields[0]), localPort: port, remote: String(fields[2]))
+        }
+    }
+
     public func forwardRemove(localPort: Int) throws {
         _ = try run(args: ["forward", "--remove", "tcp:\(localPort)"])
     }
