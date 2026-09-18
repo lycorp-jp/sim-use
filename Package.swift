@@ -61,6 +61,90 @@ let fbLinkerFlags: [String] = [
     ["-Xlinker", "-weak_library", "-Xlinker", "\(privateHeadersDir)/\($0)/\($0).tbd"]
 }
 
+#if os(Linux)
+// Linux builds the Android half only. The Android backend drives the
+// device through `adb` plus the bridge APK's HTTP server and needs none
+// of the Apple frameworks below: no iOS backends, no FB* XCFrameworks,
+// and no SimUseVideo (AVFoundation), so `record-video` / `stream-video`
+// are left out. `sim-use` is built from `SimUseLinux`, which exposes the
+// Android verbs at the top level plus the `android` namespace.
+let package = Package(
+    name: "SimUse",
+    products: [
+        .executable(
+            name: "sim-use",
+            targets: ["SimUseLinux"]
+        ),
+        .library(
+            name: "SimUseCore",
+            targets: ["SimUseCore"]
+        ),
+        .library(
+            name: "AndroidBackend",
+            targets: ["AndroidBackend"]
+        ),
+    ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
+    ],
+    targets: [
+        .target(
+            name: "SimUseCore",
+            dependencies: [
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/SimUseCore",
+            plugins: ["VersionPlugin"]
+        ),
+        .target(
+            name: "AndroidBackend",
+            dependencies: [
+                "SimUseCore",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/AndroidBackend",
+            // Host-side video capture: the two verbs and the streaming
+            // process only they use.
+            exclude: [
+                "Adb/AdbStreamingProcess.swift",
+                "Verbs/AndroidRecordVideoCommand.swift",
+                "Verbs/AndroidStreamVideoCommand.swift",
+            ],
+            resources: [
+                .copy("Resources"),
+            ]
+        ),
+        .executableTarget(
+            name: "SimUseLinux",
+            dependencies: [
+                "SimUseCore",
+                "AndroidBackend",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ],
+            path: "Sources/SimUseLinux",
+            plugins: ["VersionPlugin"]
+        ),
+        .testTarget(
+            name: "SimUseCoreTests",
+            dependencies: ["SimUseCore"],
+            path: "Tests/SimUseCoreTests"
+        ),
+        .testTarget(
+            name: "AndroidBackendTests",
+            dependencies: ["AndroidBackend", "SimUseCore"],
+            path: "Tests/AndroidBackendTests",
+            exclude: [
+                "AndroidRecordVideoArgumentTests.swift",
+            ]
+        ),
+        .plugin(
+            name: "VersionPlugin",
+            capability: .buildTool(),
+            path: "Plugins/VersionPlugin"
+        ),
+    ]
+)
+#else
 let package = Package(
     name: "SimUse",
     platforms: [
@@ -273,3 +357,4 @@ let package = Package(
         ),
     ]
 )
+#endif

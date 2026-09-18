@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
+#if canImport(FoundationNetworking)
+// URLSession / URLRequest / HTTPURLResponse live in a separate module in
+// swift-corelibs-foundation; on Apple platforms this import does not exist.
+import FoundationNetworking
+#endif
 
 /// Process-global `BridgeClient` registry, keyed by adb serial.
 ///

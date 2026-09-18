@@ -28,11 +28,21 @@ public struct AndroidCommand: ParsableCommand {
             AndroidScrollCommand.self,
             AndroidButtonCommand.self,
             AndroidScreenshotCommand.self,
-            AndroidRecordVideoCommand.self,
-            AndroidStreamVideoCommand.self,
+        ] + videoSubcommands + [
             AndroidTypeCommand.self,
         ]
     )
+
+    // Video capture muxes/encodes on the host through SimUseVideo
+    // (AVFoundation), which the Linux build does not have.
+    #if canImport(SimUseVideo)
+    private static let videoSubcommands: [ParsableCommand.Type] = [
+        AndroidRecordVideoCommand.self,
+        AndroidStreamVideoCommand.self,
+    ]
+    #else
+    private static let videoSubcommands: [ParsableCommand.Type] = []
+    #endif
 
     public init() {}
 }

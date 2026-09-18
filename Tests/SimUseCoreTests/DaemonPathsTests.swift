@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 @testable import SimUseCore
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import Foundation
 import Testing
 

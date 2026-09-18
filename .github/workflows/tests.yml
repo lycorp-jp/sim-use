@@ -67,6 +67,36 @@ jobs:
         working-directory: bridge
         run: ./gradlew --no-daemon testDebugUnitTest
 
+  # The Android-only Linux build (the `#if os(Linux)` graph in
+  # Package.swift): SimUseCore, AndroidBackend and the SimUseLinux
+  # executable, plus the two test targets that build there. Nothing
+  # Apple-shaped is involved, so it needs no XCFrameworks and stays off
+  # the macOS critical path. `make` is macOS-only; call swift directly.
+  linux:
+    name: Build and unit tests (Linux, Android only)
+    runs-on: ubuntu-latest
+    container: swift:6.3
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      # The workspace belongs to the runner user, not the container's
+      # root, so git refuses it and VersionPlugin's `git describe`
+      # would fall back to no version.
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+
+      - name: Build
+        run: swift build
+
+      - name: Run unit tests
+        timeout-minutes: 10
+        run: swift test
+
+      - name: Smoke-check built binary
+        run: .build/debug/sim-use --help
+
   unit-tests:
     name: Unit tests (macOS)
     runs-on: macos-26

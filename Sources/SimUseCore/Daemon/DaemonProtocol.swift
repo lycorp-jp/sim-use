@@ -160,12 +160,17 @@ public struct DaemonPingData: Codable {
     public let protocolVersion: Int
     public let simUseVersion: String
     public let udid: String
+    /// Connection identity the daemon was started under (see
+    /// `DaemonClient.connectionIdentityProvider`). Nil for targets
+    /// without one and for daemons that predate the field.
+    public let connectionIdentity: String?
 
-    public init(pid: Int32, uptimeSeconds: Double, protocolVersion: Int, simUseVersion: String, udid: String) {
+    public init(pid: Int32, uptimeSeconds: Double, protocolVersion: Int, simUseVersion: String, udid: String, connectionIdentity: String? = nil) {
         self.pid = pid
         self.uptimeSeconds = uptimeSeconds
         self.protocolVersion = protocolVersion
         self.simUseVersion = simUseVersion
         self.udid = udid
+        self.connectionIdentity = connectionIdentity
     }
 }

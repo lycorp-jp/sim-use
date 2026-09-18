@@ -113,8 +113,36 @@ public struct Adb: Sendable {
         return nil
     }
 
-    public func forwardRemove(localPort: Int) throws {
-        _ = try run(args: ["forward", "--remove", "tcp:\(localPort)"])
+    /// One `adb forward --list` row: `<serial> tcp:<local> <remote>`.
+    public struct Forward: Equatable, Sendable {
+        public let serial: String
+        public let localPort: Int
+        public let remote: String
+    }
+
+    /// Forwards registered on the adb server this process talks to.
+    public func forwards() throws -> [Forward] {
+        Self.parseForwardList(try run(args: ["forward", "--list"]).stdout)
+    }
+
+    /// Parses `adb forward --list`, keeping rows whose local side is a TCP
+    /// port and skipping anything that does not have that shape.
+    static func parseForwardList(_ output: String) -> [Forward] {
+        output.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard fields.count == 3, fields[1].hasPrefix("tcp:"),
+                  let port = Int(fields[1].dropFirst("tcp:".count)), port > 0 else {
+                return nil
+            }
+            return Forward(serial: String(fields[0]), localPort: port, remote: String(fields[2]))
+        }
+    }
+
+    /// `adb -s <serial> forward --remove tcp:<local>`. The serial is
+    /// required in practice: with more than one device on the adb server,
+    /// adb rejects the command without it ("more than one device/emulator").
+    public func forwardRemove(serial: String, localPort: Int) throws {
+        _ = try run(args: ["-s", serial, "forward", "--remove", "tcp:\(localPort)"])
     }
 
     @discardableResult
@@ -193,12 +221,14 @@ public struct Adb: Sendable {
         } catch {
             // Common failure: binary missing or not executable.
             // macOS reports this as NSCocoaErrorDomain code 4
-            // (NSFileNoSuchFileError); other POSIX hosts surface it
-            // as ENOENT in NSPOSIXErrorDomain. Map both so CI on
-            // Linux behaves the same as a developer's Mac.
+            // (NSFileNoSuchFileError); swift-corelibs-foundation on
+            // Linux as code 260 (NSFileReadNoSuchFileError); other
+            // POSIX hosts may surface ENOENT in NSPOSIXErrorDomain.
+            // Map all three so Linux behaves the same as a developer's Mac.
             let nsErr = error as NSError
             let isMissing =
-                (nsErr.domain == NSCocoaErrorDomain && nsErr.code == 4) ||
+                (nsErr.domain == NSCocoaErrorDomain && nsErr.code == CocoaError.fileNoSuchFile.rawValue) ||
+                (nsErr.domain == NSCocoaErrorDomain && nsErr.code == CocoaError.fileReadNoSuchFile.rawValue) ||
                 (nsErr.domain == NSPOSIXErrorDomain && nsErr.code == Int(ENOENT))
             if isMissing {
                 throw BridgeError.adbMissing

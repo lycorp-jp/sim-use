@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
+#if canImport(FoundationNetworking)
+// URLSession / URLRequest / HTTPURLResponse live in a separate module in
+// swift-corelibs-foundation; on Apple platforms this import does not exist.
+import FoundationNetworking
+#endif
 import SimUseCore
 
 /// High-level Android backend operations: describe-ui, devices listing,
@@ -137,6 +142,7 @@ public final class AndroidDeviceController {
         public let protocolVersion: Int
         public let authTokenInstalled: Bool
         public let portForward: Int
+        public let bridgeHost: String
     }
 
     /// Runs the 6-step bridge bootstrap: install APK → register the
@@ -183,7 +189,8 @@ public final class AndroidDeviceController {
             bridgeVersion: ping.bridgeVersion,
             protocolVersion: ping.protocolVersion,
             authTokenInstalled: tokenOK,
-            portForward: BridgeClient.defaultRemotePort
+            portForward: BridgeClient.defaultRemotePort,
+            bridgeHost: client.connection.bridgeHost
         )
     }
 

@@ -8,7 +8,8 @@ import SimUseCore
 public struct AndroidDescribeUICommand: SimUseExecutableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "describe-ui",
-        abstract: "Describe the Android device's current UI via the bridge."
+        abstract: "Describe the Android device's current UI via the bridge.",
+        aliases: ["ui"]
     )
 
     @OptionGroup public var device: AndroidDeviceOptions

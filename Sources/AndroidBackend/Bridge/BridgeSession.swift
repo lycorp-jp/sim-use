@@ -7,9 +7,11 @@ import Foundation
 /// `adb forward` (~50ms) every call.
 ///
 /// File layout: `~/.sim-use/<udid>/bridge.json`. Best-effort — if the
-/// file is unreadable or the cached forward is dead, the BridgeClient
-/// falls back to a cold bootstrap (`AuthTokenFetcher.fetch` + `adb
-/// forward`) and rewrites the cache on success.
+/// file is unreadable, was written under another `BridgeConnection`
+/// (or before sessions recorded one), or its forward is no longer
+/// listed by `adb forward --list`, the BridgeClient falls back to a cold
+/// bootstrap (`AuthTokenFetcher.fetch` + `adb forward`) and rewrites the
+/// cache on success.
 ///
 /// This is a stopgap for V1 while a proper Android daemon (C11) is
 /// pending. The daemon will subsume this when it lands.
@@ -17,12 +19,16 @@ public struct BridgeSession: Codable, Equatable, Sendable {
     public let token: String
     public let localPort: Int
     public let remotePort: Int
+    /// `BridgeConnection.identity` the forward and token were created
+    /// under. Nil in caches written before sessions recorded it.
+    public let connection: String?
     public let writtenAt: Date
 
-    public init(token: String, localPort: Int, remotePort: Int, writtenAt: Date = Date()) {
+    public init(token: String, localPort: Int, remotePort: Int, connection: String? = nil, writtenAt: Date = Date()) {
         self.token = token
         self.localPort = localPort
         self.remotePort = remotePort
+        self.connection = connection
         self.writtenAt = writtenAt
     }
 }

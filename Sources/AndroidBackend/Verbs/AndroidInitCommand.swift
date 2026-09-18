@@ -16,7 +16,7 @@ public struct AndroidInitCommand: SimUseExecutableCommand {
     @Option(name: .customLong("apk-path"), help: "Override the bundled APK location (advanced).")
     public var apkPathOverride: String?
 
-    @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data: {serial, bridgeVersion, protocolVersion, authTokenInstalled, portForward}}` envelope.")
+    @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data: {serial, bridgeVersion, protocolVersion, authTokenInstalled, portForward, bridgeHost}}` envelope.")
     public var jsonOutput: Bool = false
 
     public init() {}
@@ -27,6 +27,9 @@ public struct AndroidInitCommand: SimUseExecutableCommand {
         public let protocolVersion: Int
         public let authTokenInstalled: Bool
         public let portForward: Int
+        /// Host the bridge's forwarded port is reached on: localhost, or the
+        /// adb server's host when `ADB_SERVER_SOCKET` points elsewhere.
+        public let bridgeHost: String
     }
 
     /// `init` is a one-time bootstrap that runs before any daemon
@@ -50,7 +53,8 @@ public struct AndroidInitCommand: SimUseExecutableCommand {
             bridgeVersion: report.bridgeVersion,
             protocolVersion: report.protocolVersion,
             authTokenInstalled: report.authTokenInstalled,
-            portForward: report.portForward
+            portForward: report.portForward,
+            bridgeHost: report.bridgeHost
         )
     }
 
@@ -60,7 +64,7 @@ public struct AndroidInitCommand: SimUseExecutableCommand {
             "  bridge_version    \(result.bridgeVersion)",
             "  protocol_version  \(result.protocolVersion)",
             "  auth_token        \(result.authTokenInstalled ? "ok" : "missing")",
-            "  http_endpoint     localhost (forward → device tcp:\(result.portForward))",
+            "  http_endpoint     \(result.bridgeHost) (forward → device tcp:\(result.portForward))",
         ])
     }
 }

@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import ArgumentParser
+#if canImport(Darwin)
 import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 import Foundation
 
 /// Commands implementing this protocol split their side-effecting work

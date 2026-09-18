@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 import XCTest
+#if canImport(os)
 import os
+#endif
 @testable import AndroidBackend
 
 /// Integration-level tests for `Adb.run(args:)`. These spawn real
@@ -48,6 +50,7 @@ final class AdbRunnerTests: XCTestCase {
         XCTAssertEqual(result.exitCode, 0)
     }
 
+    #if canImport(os)
     /// `waitForExit` must not finalize the consumer while a readability
     /// callback has already taken bytes out of the pipe but not yet delivered
     /// them. The blocked first callback reproduces the shutdown race that
@@ -93,6 +96,7 @@ final class AdbRunnerTests: XCTestCase {
         XCTAssertEqual(waitReturned.wait(timeout: .now() + 2), .success)
         XCTAssertEqual(String(data: received.withLock { $0 }, encoding: .utf8), "firstsecond")
     }
+    #endif
 
     /// Sanity check that a process exceeding the timeout still
     /// surfaces a timeout error (not a deadlock, not a 0-exit
