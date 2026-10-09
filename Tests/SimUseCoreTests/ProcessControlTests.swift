@@ -24,22 +24,47 @@ struct ProcessControlTests {
         #expect(flag.trySet() == false)
     }
 
-    @Test("cancellableSleep wakes early when the flag is cancelled")
+    // The sleep tests run on `ManualClock`, so they assert on the order of
+    // events, not on wall-clock bounds that a loaded CI runner can miss.
+    // The time limit only stops a broken loop that sleeps forever: the
+    // sleeper runs as a child task, so the limit's cancellation unwinds it.
+
+    @Test("cancellableSleep wakes at the next chunk once the flag is cancelled", .timeLimit(.minutes(1)))
     func cancellableSleepEarlyWake() async throws {
+        let clock = ManualClock()
         let flag = CancellationFlag()
-        let start = ContinuousClock.now
-
-        let sleeper = Task {
-            try await cancellableSleep(seconds: 30, flag: flag)
-        }
-        try await Task.sleep(nanoseconds: 100_000_000) // 100 ms
+        async let sleeper: Void = cancellableSleep(for: .seconds(30), flag: flag, clock: clock)
+        try await clock.waitForSleeper()
         flag.cancel()
-        try await sleeper.value
+        // One 5 ms chunk of a 30 s sleep: the sleeper must return here
+        // instead of sleeping again.
+        clock.advance(by: .milliseconds(5))
+        try await sleeper
+        #expect(clock.sleepCount == 1)
+    }
 
-        // A full 30 s sleep would dwarf this bound; the 5 ms polling
-        // chunks mean cancellation lands within tens of milliseconds.
-        let elapsed = ContinuousClock.now - start
-        #expect(elapsed < .seconds(5), "cancelled sleep took \(elapsed)")
+    @Test("cancellableSleep returns without sleeping when the flag is already cancelled", .timeLimit(.minutes(1)))
+    func cancellableSleepPreCancelled() async throws {
+        let clock = ManualClock()
+        let flag = CancellationFlag()
+        flag.cancel()
+        try await cancellableSleep(for: .seconds(30), flag: flag, clock: clock)
+        #expect(clock.sleepCount == 0)
+    }
+
+    @Test("cancellableSleep ends at the clock deadline, not after a count of chunks", .timeLimit(.minutes(1)))
+    func cancellableSleepHonoursDeadline() async throws {
+        let clock = ManualClock()
+        let flag = CancellationFlag()
+        async let sleeper: Void = cancellableSleep(for: .seconds(30), flag: flag, clock: clock)
+        // A chunk that wakes 29 s late must not count as 5 ms, and must
+        // not end the sleep before the deadline either.
+        try await clock.waitForSleeper()
+        clock.advance(by: .seconds(29))
+        try await clock.waitForSleeper()
+        clock.advance(by: .seconds(1))
+        try await sleeper
+        #expect(clock.sleepCount == 2)
     }
 
     @Test("cancellableSleep returns immediately for non-positive durations")
@@ -58,3 +83,4 @@ struct ProcessControlTests {
         #expect(flag.isCancelled())
     }
 }
+

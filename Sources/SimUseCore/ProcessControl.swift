@@ -75,14 +75,24 @@ public final class FirstErrorBox: Sendable {
 /// signal-to-finish path. Polling in short chunks bounds that latency.
 public func cancellableSleep(seconds: TimeInterval, flag: CancellationFlag) async throws {
     guard seconds > 0 else { return }
-    let chunkNanos: UInt64 = 5_000_000 // 5 ms
-    let totalNanos = UInt64(seconds * 1_000_000_000)
-    var elapsed: UInt64 = 0
-    while elapsed < totalNanos {
+    try await cancellableSleep(for: .seconds(seconds), flag: flag, clock: ContinuousClock())
+}
+
+/// `cancellableSleep(seconds:flag:)` against an explicit clock.
+///
+/// The loop measures against a deadline on `clock` instead of summing the
+/// requested chunks: each chunk can wake late under load, and a sum of
+/// requests would let those overshoots add up past the requested duration.
+public func cancellableSleep<C: Clock>(
+    for duration: Duration,
+    flag: CancellationFlag,
+    clock: C
+) async throws where C.Duration == Duration {
+    let chunk: Duration = .milliseconds(5)
+    let deadline = clock.now.advanced(by: duration)
+    while clock.now < deadline {
         if flag.isCancelled() { return }
-        let step = min(chunkNanos, totalNanos - elapsed)
-        try await Task.sleep(nanoseconds: step)
-        elapsed += step
+        try await clock.sleep(until: min(clock.now.advanced(by: chunk), deadline), tolerance: nil)
     }
 }
 
