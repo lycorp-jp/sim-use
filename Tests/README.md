@@ -19,6 +19,7 @@ Each sim-use command has its own dedicated test file:
 - `OrientationTests.swift` - AX→HID orientation self-calibration (tap-by-id after rotation)
 - `PermissionAlertTests.swift` - system permission alert dismissal (describe-ui sees the SpringBoard layer, `tap` allows/denies)
 - `BatchTests.swift` - E2E coverage for `batch` command variants
+- `ResizeModeTests.swift` - Xcode 27 Resize Mode (resizable app session): `ui` advisory, touch refusal, `type` passthrough, screenshot redirection (skips itself where `devicectl` cannot host a session; unit counterpart: `ResizableAppSessionTests.swift`)
 
 Android device E2E suites live alongside them (`AndroidTestSupport.swift` +
 `AndroidTapTests`, `AndroidSwipeScrollTests`, `AndroidTypeTests`,

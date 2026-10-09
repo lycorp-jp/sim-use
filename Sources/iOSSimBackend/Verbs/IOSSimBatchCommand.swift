@@ -187,6 +187,14 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
             throw CLIError(errorDescription: "No executable steps found.")
         }
 
+        // Resizable app session (issue #143): touch HID cannot reach the
+        // app. Keyboard steps still work, so only a batch that contains a
+        // touch step is refused — before any step runs, so a session
+        // never half-executes a plan.
+        if Self.containsTouchStep(stepLines) {
+            try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "batch", logger: logger)
+        }
+
         let context = await MainActor.run {
             BatchContext(
                 simulatorUDID: device.resolved,
@@ -241,6 +249,19 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
         .line("✓ Batch completed successfully (\(result.stepsExecuted) steps)")
+    }
+
+    /// The step kinds that dispatch touch HID. A line that fails to
+    /// tokenize is not counted here; the step loop reports it properly.
+    static let touchStepKinds: Set<BatchStepKind> = [.tap, .swipe, .gesture, .touch]
+
+    static func containsTouchStep(_ stepLines: [String]) -> Bool {
+        stepLines.contains { line in
+            guard let first = (try? ShellTokenizer.tokenize(line))?.first,
+                  let kind = BatchStepKind(rawValue: first)
+            else { return false }
+            return touchStepKinds.contains(kind)
+        }
     }
 
     private func loadStepLines() throws -> [String] {

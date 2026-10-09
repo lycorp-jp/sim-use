@@ -13,10 +13,22 @@ import SimUseVideo
 /// target platform via `PlatformRouter` and forwards iOS UDIDs
 /// through here.
 public struct IOSSimScreenshotCommand: SimUseExecutableCommand {
-    public struct ExecutionResult: Codable {
+    public struct ExecutionResult: Codable, CommandAdvisoryProviding {
         public let path: String
-        public init(path: String) {
+        /// Set when the capture was redirected to the "Resizable" display
+        /// of an active resizable app session (issue #143). Excluded from
+        /// the encoded `data` payload via `CodingKeys` — the envelope
+        /// hoists it to the top-level `advisory` key; see
+        /// `CommandAdvisoryProviding` for the contract.
+        public var commandAdvisory: CommandAdvisory? = nil
+
+        public init(path: String, commandAdvisory: CommandAdvisory? = nil) {
             self.path = path
+            self.commandAdvisory = commandAdvisory
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case path
         }
     }
 
@@ -71,6 +83,21 @@ public struct IOSSimScreenshotCommand: SimUseExecutableCommand {
         }
 
         let outputURL = try Self.prepareOutputURL(output: output, simulatorName: targetSimulator.name)
+
+        // During a resizable app session (Xcode 27 Resize Mode) the app
+        // lives on the virtual "Resizable" display and the main
+        // framebuffer — the only one the pinned idb exposes — holds just
+        // the wallpaper (issue #143). Capture the Resizable display
+        // through simctl instead and say so in the advisory.
+        if case .active(let session) = await ResizableAppSessionMonitor.shared.state(for: trimmedUDID) {
+            logger.info().log("Resizable app session active; capturing display \(session.displayUniqueID) via simctl")
+            let pixelSize = try ResizableDisplayScreenshot.capture(udid: trimmedUDID, session: session, to: outputURL)
+            return ExecutionResult(
+                path: outputURL.path,
+                commandAdvisory: ResizableAppSessionAdvisory.screenshot(session: session, pixelSize: pixelSize)
+            )
+        }
+
         let screenshotData = try await VideoFrameUtilities.captureScreenshotData(from: targetSimulator)
         try screenshotData.write(to: outputURL)
 

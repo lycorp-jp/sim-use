@@ -35,6 +35,19 @@ struct CommandAdvisoryContractTests {
         #expect(decoded.y == 20)
     }
 
+    @Test("screenshot result encodes without the advisory and decodes it as nil")
+    func screenshotResult() throws {
+        let result = IOSSimScreenshotCommand.ExecutionResult(path: "/tmp/shot.png", commandAdvisory: contractAdvisory)
+        #expect(result.commandAdvisory == contractAdvisory)
+
+        let json = try encodedJSON(result)
+        #expect(json == #"{"path":"/tmp/shot.png"}"#)
+
+        let decoded = try JSONDecoder().decode(IOSSimScreenshotCommand.ExecutionResult.self, from: Data(json.utf8))
+        #expect(decoded.commandAdvisory == nil)
+        #expect(decoded.path == "/tmp/shot.png")
+    }
+
     @Test("swipe result encodes without the advisory and decodes it as nil")
     func swipeResult() throws {
         let coords = SwipeCoordinates(startX: 1, startY: 2, endX: 3, endY: 4)

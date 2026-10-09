@@ -134,6 +134,8 @@ public struct IOSSimTouchCommand: SimUseExecutableCommand {
         let logger = SimUseLogger()
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
+        // Resizable app session (issue #143): touch HID cannot reach the app.
+        try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "touch", logger: logger)
 
         logger.info().log("Performing touch events at (\(pointX), \(pointY))")
 
