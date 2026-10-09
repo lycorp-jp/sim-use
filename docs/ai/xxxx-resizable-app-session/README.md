@@ -174,25 +174,32 @@ reverted (`git -C idb_checkout checkout -- .` + `build.sh frameworks && install
   inactive, anything else → `unavailable(reason)`, which every caller treats
   as "no session" and only logs.
 - `ResizableAppSessionMonitor` — actor with a per-UDID 5 s TTL cache (lives in
-  the per-UDID daemon), sticky "no such subcommand", skipped on Xcode < 27
-  (`XcodeCompatibility.selectedXcodeMajorVersion()`) and under
+  the per-UDID daemon), sticky "no such subcommand", and skipped only under
   `SIM_USE_RESIZE_SESSION_CHECK=0` (read by the daemon at spawn — a later
-  client's environment does not reach a running daemon). The cache is the
-  whole cost model: one ~0.3 s spawn per device per 5 s instead of one per
-  command. `state(for:evidence:)` lets a caller with in-band evidence bypass
-  a cached *non-active* answer: the fetcher passes
-  `resizedSceneEvidence` (the AX root size when it is ≠ the device portrait
-  size, ≠ its landscape swap, and not a uniform panel downscale per
-  `OrientationCalibrator.uiPointScale`), and the monitor re-probes only when
-  that evidence *differs* from what the cached answer was probed with — so a
-  session that started inside the window is seen by the first `ui` or
-  selector tap, while a display whose AX size never matches pixels/scale
-  (iPhone mini) still pays one probe per TTL (review finding R150-03). The
-  first E2E run caught the original gap: the launch helper's `describe-ui`
-  cached "no session" seconds before the session started, and `ui`/`tap`
-  inside the window read the stale answer. What still waits out the window:
-  a session that just *ended*, standalone raw `-x/-y` taps right after a
-  start, and a scene at exactly the device's own size.
+  client's environment does not reach a running daemon). There is no
+  "selected Xcode < 27" shortcut: a session may belong to another Xcode or
+  to Device Hub, and Xcode 26.6's devicectl answers the query correctly
+  (R150-08). The cache is the whole cost model: one ~0.3 s spawn per device
+  per 5 s instead of one per command. `state(for:evidence:)` lets a caller
+  with in-band evidence bypass a cached *non-active* answer: the fetcher
+  passes `resizedSceneEvidence` (the AX root size when it is ≠ the device
+  portrait size and ≠ its landscape swap — nothing cleverer, see R150-05),
+  and the monitor re-probes only when that evidence *differs* from what the
+  cached answer was probed with — so a session that started inside the
+  window is seen by the first `ui` or selector tap, while a display whose
+  AX size never matches pixels/scale (iPhone mini) still pays one probe per
+  TTL (R150-03). The first E2E run caught the original gap: the launch
+  helper's `describe-ui` cached "no session" seconds before the session
+  started, and `ui`/`tap` inside the window read the stale answer. What
+  still waits out the window: a session that just *ended*, standalone raw
+  `-x/-y` taps right after a start, and a scene at exactly the device's own
+  size.
+- `ResizableAppSessionGuard.assertCaptureReachesApp` — `record-video` and
+  `stream-video` refuse with `ResizableAppSessionCaptureError` before any
+  file or byte is produced; both read the main framebuffer and are not
+  redirected the way `screenshot` is, because their pipelines sit on it.
+  The hint names `xcrun simctl io <udid> recordVideo --display=<uuid>`
+  (R150-06).
 - `ResizableAppSessionGuard.assertTouchInputReachesApp` — called after
   `performGlobalSetup` in `tap` (`long-press` shares the path), `swipe`,
   `touch`, `gesture`, `multi-touch`, and `batch` when any step kind is tap /
@@ -274,15 +281,27 @@ findings live; all four were fixed in the second commit.
 |---|---|---|
 | R150-01 | `paste --via-menu` (long-press + edit-menu taps) bypassed the guard; the pasteboard was written and touch HID sent before the menu timeout failed with no session hint. Docs called `paste` keyboard-safe without qualification. | Fixed: guard before the pasteboard write when `viaMenu`, and again after `--target-id` resolution (tree fetch may refresh the cache). Cmd+V stays ungated. Error/advisory/README/skill/pitfalls now say "Cmd+V `paste`" and name `--via-menu` as a touch path. E2E covers the coordinate and id targets refused and Cmd+V not refused. |
 | R150-02 | `batch` checked only before the loop. A batch started inside the stale "no session" window ran to `ok: true` — its selector step's fetch even refreshed the cache to active, but nothing re-read it; a long batch also outlives the TTL. | Fixed: per-touch-step gate after `parseStepTokens` and before `runner.run` (cache hit normally); a `ResizableAppSessionError` propagates unchanged (hint preserved) unless `--continue-on-error`. E2E `batchInsideStaleCacheWindowIsRefused` reproduces the reviewer's shape (warm cache → start session → batch) and asserts refusal with nothing landing. |
-| R150-03 | `sceneSizeIsNotADeviceSize` compared the AX root against pixels/scale, so a display-downscaled device (iPhone mini: 375x812 over 360x780) counted as resized on *every* fetch and bypassed the cache each time — one devicectl spawn per `ui`. | Fixed twice over: the monitor takes `SceneEvidence` (the size) instead of a flag and bypasses only when the evidence *differs* from what the cached answer was probed with; and `resizedSceneEvidence` returns nil when `OrientationCalibrator.uiPointScale` recognises the size as a uniform panel downscale. Unit tests cover mini/Plus sizes, repeated evidence (1 probe), changed evidence (re-probe), and a resized scene on a mini (still evidence). |
+| R150-03 | `sceneSizeIsNotADeviceSize` compared the AX root against pixels/scale, so a display-downscaled device (iPhone mini: 375x812 over 360x780) counted as resized on *every* fetch and bypassed the cache each time — one devicectl spawn per `ui`. | Fixed: the monitor takes `SceneEvidence` (the size) instead of a flag and bypasses only when the evidence *differs* from what the cached answer was probed with. A second layer — treating a uniform "panel downscale" ratio as a device size via `uiPointScale` — shipped in round 1 and was **reverted in round 2** (R150-05). Unit tests cover repeated evidence (1 probe), changed evidence (re-probe), and a mini's constant evidence (1 probe over 5 fetches). |
 | R150-04 | The skill's new recipe relies on behaviour a 0.14.0 CLI does not have, yet `preflight.py` still accepted 0.14.0 (verified by the reviewer with a mocked `--version`). | Fixed per the repo rule: `MINIMUM_SIM_USE_VERSION = (0, 15, 0)`; `PreflightScriptTests` now expects 0.14.0 / v0.14.0 / 0.14.9 to fail and 0.15.0 / 0.16.0 / dev stamps to pass; fixtures moved to 0.15.0. Recipe text states the requirement. |
+
+## Review round 2 (PR #150) — findings and dispositions
+
+| ID | Finding | Disposition |
+|---|---|---|
+| R150-07 (P1) | `(width: display.width, height: display.height)` — a `CGFloat` tuple — passed to a `(width: Double, height: Double)?` parameter does not compile on Xcode 26 (Swift 6.3.3), which is what the macOS CI job selects; Xcode 27 accepts it, so local builds passed. | Fixed: element types spelled out (`Double(...)`) everywhere the new code builds such tuples; the offending call disappeared with R150-05's revert anyway. Reproduced and re-verified with `swiftc -typecheck` under Xcode 26.6 on a minimal program (the `.map { (width: $0.width, …) }` form the file already used compiles; the direct tuple literal does not). Full confirmation is the CI job. |
+| R150-05 (P2) | The `uiPointScale` "panel downscale" exclusion also matched arbitrary proportional scenes: a 480x1044 session on an iPhone 17 produced no evidence, so a selector tap inside the cache window dispatched (live: `ok:true`, `Tap Count` unchanged, advisory only after 5.5 s). | Fixed by removing the classifier: any size other than the device's own or its swap is evidence; the monitor's dedup bounds the cost for downscaled displays. Unit test for 480x1044; E2E `selectorTapInsideStaleWindowProportionalScene` reproduces the reviewer's shape. Comment states the limits. |
+| R150-06 (P2) | `record-video` and `stream-video` (every format, including native h264) captured the main display during a session with no advisory — a 1206x2622 wallpaper video reported as success. | Fixed: both refuse with `ResizableAppSessionCaptureError` before creating a file or emitting a byte; hint gives `simctl io … recordVideo --display=<uuid>`. E2E `videoCaptureRefused` asserts no file, no bytes, JSON error + hint. Not redirected like `screenshot` on purpose — their pipelines sit on the framebuffer; redirecting is tier-2 work. |
+| R150-08 (P2) | The "selected Xcode < 27 → unavailable" shortcut disabled detection indefinitely for a host running Xcode 26 against a simulator another Xcode or Device Hub had resized (live: `DEVELOPER_DIR=Xcode-26.6` tap dispatched into an active session). | Fixed by deleting the gate and `XcodeCompatibility.selectedXcodeMajorVersion()`; the sticky "no such subcommand" answer still protects genuinely old toolchains. Cost on an Xcode 26.6 host: one probe per device per 5 s, same as everywhere. |
 
 ## Follow-ups (not in this PR)
 
 1. **Tier 2 — observation polish.** `ui` could tag the `App:` header (e.g.
    `(resizable 560x874)`) so text-mode readers see it without the banner; the
    outline cache could carry the session flag so `tap @N` refuses without a
-   devicectl round-trip.
+   devicectl round-trip; `record-video` could follow `screenshot` onto the
+   Resizable display via `simctl io recordVideo --display=` (the GIF
+   transcode and markers would need to run on that file instead of the
+   in-process encoder).
 2. **Tier 3 — real routing.** Bump idb to the `DisplaySelection` series,
    teach "active display" about a hosted virtual display (CoreDevice's
    `appResize` state is the signal), route HID to digitizer target

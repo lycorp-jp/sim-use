@@ -194,15 +194,13 @@ struct ResizableAppSessionMonitorTests {
         clock: Clock,
         counter: Counter,
         ttl: TimeInterval = 5,
-        environment: [String: String] = [:],
-        xcodeMajor: Int? = 27
+        environment: [String: String] = [:]
     ) -> ResizableAppSessionMonitor {
         ResizableAppSessionMonitor(
             ttl: ttl,
             clock: { clock.read() },
             probe: { counter.record($0) },
-            environment: environment,
-            xcodeMajorVersion: { xcodeMajor }
+            environment: environment
         )
     }
 
@@ -350,26 +348,15 @@ struct ResizableAppSessionMonitorTests {
         #expect(counter.count == 0)
     }
 
-    @Test("an Xcode older than 27 cannot host a session, so nothing is probed")
-    func oldXcodeSkipsProbe() async {
+    @Test("the probe runs regardless of the selected Xcode: another Xcode or Device Hub may own the session (R150-08)")
+    func probesWithoutAnXcodeGate() async {
+        // There is no version shortcut to inject or bypass: a capable
+        // devicectl answering "active" must be believed on any toolchain.
         let clock = Clock()
         let counter = Counter()
-        let monitor = makeMonitor(clock: clock, counter: counter, xcodeMajor: 26)
-
-        guard case .unavailable(let reason) = await monitor.state(for: "A") else {
-            Issue.record("expected .unavailable")
-            return
-        }
-        #expect(reason.contains("26"))
-        #expect(counter.count == 0)
-    }
-
-    @Test("an unknown Xcode version still probes (command-line tools, odd layouts)")
-    func unknownXcodeProbes() async {
-        let clock = Clock()
-        let counter = Counter()
-        let monitor = makeMonitor(clock: clock, counter: counter, xcodeMajor: nil)
-        _ = await monitor.state(for: "A")
+        counter.states = [.active(sampleSession)]
+        let monitor = makeMonitor(clock: clock, counter: counter)
+        #expect(await monitor.state(for: "A") == .active(sampleSession))
         #expect(counter.count == 1)
     }
 }
@@ -381,7 +368,7 @@ struct ResizableAppSessionGuardTests {
     private let quietLogger = SimUseLogger(writeToStdErr: false)
 
     private func monitor(returning state: ResizableAppSessionState) -> ResizableAppSessionMonitor {
-        ResizableAppSessionMonitor(probe: { _ in state }, environment: [:], xcodeMajorVersion: { 27 })
+        ResizableAppSessionMonitor(probe: { _ in state }, environment: [:])
     }
 
     @Test("an active session refuses the verb with the session attached")
@@ -407,6 +394,35 @@ struct ResizableAppSessionGuardTests {
         )
         try await ResizableAppSessionGuard.assertTouchInputReachesApp(
             udid: "U", verb: "swipe", logger: quietLogger, monitor: monitor(returning: .unavailable(reason: "n/a"))
+        )
+    }
+
+    @Test("an active session refuses main-display video capture with the capture error (R150-06)")
+    func activeSessionRefusesCapture() async {
+        do {
+            try await ResizableAppSessionGuard.assertCaptureReachesApp(
+                udid: "UDID-1", verb: "record-video", logger: quietLogger, monitor: monitor(returning: .active(sampleSession))
+            )
+            Issue.record("expected ResizableAppSessionCaptureError")
+        } catch let error as ResizableAppSessionCaptureError {
+            #expect(error.verb == "record-video")
+            #expect(error.session == sampleSession)
+            let message = error.localizedDescription
+            #expect(message.contains("`record-video` captures only the main display"))
+            #expect(message.contains("Nothing was captured."))
+            #expect(message.contains("#143"))
+            let hint = error.hint ?? ""
+            #expect(hint.contains("xcrun simctl io UDID-1 recordVideo --display=0933D2CA-38DF-4B17-9934-7CDC624B355C"))
+            #expect(hint.contains("`screenshot`, which is redirected"))
+        } catch {
+            Issue.record("unexpected error \(error)")
+        }
+        // No session / unavailable: capture proceeds.
+        try? await ResizableAppSessionGuard.assertCaptureReachesApp(
+            udid: "U", verb: "stream-video", logger: quietLogger, monitor: monitor(returning: .inactive)
+        )
+        try? await ResizableAppSessionGuard.assertCaptureReachesApp(
+            udid: "U", verb: "stream-video", logger: quietLogger, monitor: monitor(returning: .unavailable(reason: "n/a"))
         )
     }
 
@@ -442,7 +458,7 @@ struct ResizableAppSessionGuardTests {
         #expect(advisory.message.contains("437x874 points (requested 560x874 points)"))
         #expect(advisory.message.contains("main display is 402x874"))
         #expect(advisory.message.contains("recovery and orientation calibration were skipped"))
-        #expect(advisory.message.contains("Touch paths (tap, long-press, swipe, touch, gesture, multi-touch, touch-bearing batch steps, paste --via-menu) are refused"))
+        #expect(advisory.message.contains("Touch paths (tap, long-press, swipe, touch, gesture, multi-touch, touch-bearing batch steps, paste --via-menu) and main-display video capture (record-video, stream-video) are refused"))
         #expect(advisory.message.contains("Cmd+V `paste` and `screenshot` work"))
     }
 
@@ -553,21 +569,34 @@ struct SceneSizeEvidenceTests {
         #expect(evidence(874, 402, native: iPhone17) == nil)
     }
 
-    @Test("display-downscaled panels are device sizes, not evidence (R150-03)")
-    func downscaledPanelsAreNotEvidence() {
+    @Test("a scene proportional to the device is still evidence (R150-05) — only the device's own sizes are exempt")
+    func proportionalScenesAreEvidence() {
+        // 480x1044 is 402x874 scaled by ~1.194 on both axes — the shape
+        // the reviewer used to slip a selector tap past a proportional
+        // "panel downscale" classifier. It is a resized scene.
+        #expect(evidence(480, 1044, native: iPhone17) == .init(width: 480, height: 1044))
+        #expect(evidence(201, 437, native: iPhone17) == .init(width: 201, height: 437))
+    }
+
+    @Test("display-downscaled panels count as evidence too; the monitor's dedup, not the classifier, bounds their cost (R150-03)")
+    func downscaledPanelsAreEvidenceDedupedByMonitor() async {
         // iPhone 12/13 mini: AX 375x812 over 1080x2340 px @3 = 360x780.
         let mini = NativePortraitSize(width: 360, height: 780)
-        #expect(evidence(375, 812, native: mini) == nil)
-        #expect(evidence(812, 375, native: mini) == nil)
-        // iPhone 6/7/8 Plus: AX 414x736 over 1080x1920 px @3 = 360x640.
-        let plus = NativePortraitSize(width: 360, height: 640)
-        #expect(evidence(414, 736, native: plus) == nil)
-        // A resized scene on a mini is still evidence: the axes do not
-        // share one factor.
-        #expect(evidence(560, 812, native: mini) == .init(width: 560, height: 812))
-        // Same aspect as the device but outside the shipping downscale
-        // band is a resized scene too, not a panel.
-        #expect(evidence(201, 437, native: iPhone17) == .init(width: 201, height: 437))
+        let miniEvidence = evidence(375, 812, native: mini)
+        #expect(miniEvidence == .init(width: 375, height: 812))
+
+        // Repeated fetches with that constant evidence probe once per TTL.
+        let counter = ProbeCounter()
+        let monitor = ResizableAppSessionMonitor(probe: { counter.record($0) }, environment: [:])
+        for _ in 0..<5 { _ = await monitor.state(for: "mini", evidence: miniEvidence) }
+        #expect(counter.count == 1)
+    }
+
+    private final class ProbeCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var calls = 0
+        func record(_ udid: String) -> ResizableAppSessionState { lock.lock(); calls += 1; lock.unlock(); return .inactive }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return calls }
     }
 
     @Test("rounding slack of one point is tolerated")

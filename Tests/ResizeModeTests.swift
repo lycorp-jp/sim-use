@@ -215,6 +215,65 @@ struct ResizeModeTests {
         await session.end()
     }
 
+    @Test("a selector tap inside the stale cache window is refused for a scene proportional to the device (R150-05)")
+    func selectorTapInsideStaleWindowProportionalScene() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+        // Warm "no session", then start a session whose scene is the
+        // device's 402x874 scaled uniformly (~1.194x). The reviewer slipped
+        // a tap past a proportional-size exclusion with exactly this; the
+        // selector fetch must now count 480x1044 as evidence and refuse.
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+        guard let session = try await Self.startSession(udid: udid, size: "480x1044") else { return }
+        defer { Task { await session.end() } }
+
+        let tap = try await CommandRunner.run("\(simUse) tap --udid \(udid) --label 'Tap Count: 0' --json", allowFailure: true)
+        #expect(tap.exitCode != 0, "selector tap must be refused inside the window: \(tap.output.prefix(400))")
+        let envelope = try Self.json(tap.output)
+        #expect(envelope["ok"] as? Bool == false)
+        #expect((envelope["error"] as? String ?? "").contains("resizable app session"))
+
+        let (outline, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        #expect(outline.contains("[i] A resizable app session"))
+        #expect(outline.contains("Tap Count: 0"))
+
+        await session.end()
+    }
+
+    @Test("record-video and stream-video are refused during a session, before producing output (R150-06)")
+    func videoCaptureRefused() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("resize-record-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: output) }
+        let record = try await CommandRunner.run(
+            "\(simUse) record-video --udid \(udid) --fps 5 --output \(output.path) --json", allowFailure: true, timeout: 20
+        )
+        #expect(record.exitCode != 0)
+        let recordEnvelope = try Self.json(record.output)
+        #expect((recordEnvelope["error"] as? String ?? "").contains("`record-video` captures only the main display"))
+        #expect((recordEnvelope["hint"] as? String ?? "").contains("recordVideo --display="))
+        #expect(!FileManager.default.fileExists(atPath: output.path), "no output file may be created")
+
+        // stream-video rejects --json by design (stdout carries the video
+        // bytes), so the refusal is the plain stderr form; it exits before
+        // the stream starts, so no pipe or timeout dance is needed.
+        let stream = try await CommandRunner.run(
+            "\(simUse) stream-video --udid \(udid) --format h264 --fps 5", allowFailure: true, timeout: 20
+        )
+        #expect(stream.exitCode != 0)
+        #expect(stream.output.contains("`stream-video` captures only the main display"), "stream must refuse before emitting video: \(stream.output.prefix(300))")
+        #expect(stream.output.contains("recordVideo --display="))
+
+        await session.end()
+    }
+
     @Test("screenshot captures the Resizable display and says so; the main display afterwards")
     func screenshotRedirect() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()

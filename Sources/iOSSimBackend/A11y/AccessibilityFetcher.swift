@@ -137,12 +137,12 @@ public struct AccessibilityFetcher {
         // calibration probes, collapsed-children recovery — would
         // therefore describe SpringBoard, not the app. The monitor caches
         // the ~0.3 s devicectl query; a root frame that is neither the
-        // device's portrait size, its landscape swap, nor a panel
-        // downscale is in-band evidence of a session. New evidence
-        // bypasses a cached "no session", so a session started moments
-        // ago is seen now rather than after the TTL; the same evidence
-        // seen again does not (R150-03). A scene at exactly the device's
-        // size has no evidence and waits for the TTL — the documented gap.
+        // device's portrait size nor its landscape swap is in-band
+        // evidence of a session. New evidence bypasses a cached "no
+        // session", so a session started moments ago is seen now rather
+        // than after the TTL; the same evidence seen again does not
+        // (R150-03). A scene at exactly the device's size has no evidence
+        // and waits for the TTL — the documented gap.
         let sceneEvidence = Self.resizedSceneEvidence(info: info, native: native)
         let resizableSession = await ResizableAppSessionMonitor.shared
             .state(for: simulatorUDID, evidence: sceneEvidence)
@@ -193,7 +193,7 @@ public struct AccessibilityFetcher {
             let display = rawDisplayFrame(in: rawRoots(of: info))
             let advisory = ResizableAppSessionAdvisory.describeUI(
                 session: resizableSession,
-                sceneSize: display.map { (width: $0.width, height: $0.height) },
+                sceneSize: display.map { (width: Double($0.width), height: Double($0.height)) },
                 native: native
             )
             let data = try serializeAccessibilityInfo(info)
@@ -529,30 +529,33 @@ public struct AccessibilityFetcher {
     }
 
     /// The raw tree's display frame as evidence of a resized scene, or nil
-    /// when the size is one a device can have: the portrait size, its
-    /// landscape swap (±1 pt, like `OrientationCalibrator.orderedCandidates`),
-    /// or a display-downscaled panel — iPhone mini lays out 375x812 over a
-    /// 360x780 pixels/scale framebuffer, the Plus family 414x736 over
-    /// 360x640. `OrientationCalibrator.uiPointScale` recognises exactly
-    /// that shape (one uniform factor inside the shipping band) and nothing
-    /// else, so a mini never counts as resized while 560x874 or 437x874 on
-    /// an iPhone 17 still do. Nil — no evidence either way — when the tree
+    /// when it is the device's portrait size or its landscape swap (±1 pt,
+    /// like `OrientationCalibrator.orderedCandidates`), or when the tree
     /// has no framed root or the screen info is unknown.
+    ///
+    /// Deliberately nothing cleverer. A display-downscaled panel (iPhone
+    /// mini lays out 375x812 over a 360x780 pixels/scale framebuffer) does
+    /// count as evidence on every fetch — and that is fine, because the
+    /// monitor re-probes only when the evidence *changes*, so such a device
+    /// pays one probe per TTL like any other. Classifying "proportional to
+    /// the device" as a panel instead (via `OrientationCalibrator
+    /// .uiPointScale`) was tried and reverted: a 480x1044 scene on an
+    /// iPhone 17 is proportional too, and the exclusion let a selector tap
+    /// through inside the cache window (review finding R150-05). Element
+    /// types are spelled out because the compiler on Xcode 26 does not
+    /// convert a `CGFloat` tuple to a `Double` tuple (R150-07).
     nonisolated static func resizedSceneEvidence(
         info: AnyObject,
         native: NativePortraitSize?
     ) -> ResizableAppSessionMonitor.SceneEvidence? {
         guard let native, let display = rawDisplayFrame(in: rawRoots(of: info)) else { return nil }
-        func matches(_ width: Double, _ height: Double) -> Bool {
-            abs(display.width - width) <= 1 && abs(display.height - height) <= 1
+        let width = Double(display.width)
+        let height = Double(display.height)
+        func matches(_ w: Double, _ h: Double) -> Bool {
+            abs(width - w) <= 1 && abs(height - h) <= 1
         }
         if matches(native.width, native.height) || matches(native.height, native.width) { return nil }
-        let scale = OrientationCalibrator.uiPointScale(
-            native: native,
-            uiScreenSize: (width: display.width, height: display.height)
-        )
-        if !scale.isIdentity { return nil }
-        return ResizableAppSessionMonitor.SceneEvidence(width: display.width, height: display.height)
+        return ResizableAppSessionMonitor.SceneEvidence(width: width, height: height)
     }
 
     /// Raw-payload mirror of `AXDisplayFrame.frame(in:)`: the largest

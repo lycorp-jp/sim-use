@@ -133,6 +133,8 @@ and the accessibility hit-test all stay bound to the main display, so
 during a session sim-use refuses `tap`, `long-press`, `swipe`, `touch`,
 `gesture`, `multi-touch` and touch-bearing `batch` runs with an
 explanation (a tap would otherwise report success and deliver nothing),
+refuses `record-video` and `stream-video` (they capture only the main
+display; the hint gives the `simctl io … recordVideo --display=` form),
 redirects `screenshot` to the `Resizable` display, and tags `ui` with a
 `resizable_app_session` advisory. `ui` itself, `type`, Cmd+V `paste` and
 the key verbs keep working; `paste --via-menu` is a touch path and is

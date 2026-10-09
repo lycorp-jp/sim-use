@@ -49,29 +49,6 @@ enum XcodeCompatibility {
         throw CLIError(errorDescription: message)
     }
 
-    /// Major version of the selected Xcode (`27` for 27.0 / 27.1), read from
-    /// the bundle's `version.plist` next to `Contents/Developer`. Nil when
-    /// the developer directory cannot be resolved or is not inside an
-    /// Xcode bundle (command-line tools only). Resolved once per process:
-    /// `xcode-select -p` is a spawn, and the toolchain does not change
-    /// under a running command.
-    static func selectedXcodeMajorVersion() -> Int? {
-        cachedXcodeMajorVersion
-    }
-
-    private static let cachedXcodeMajorVersion: Int? = {
-        guard let developerDir = selectedDeveloperDir() else { return nil }
-        let versionPlist = ((developerDir as NSString)
-            .appendingPathComponent("../version.plist") as NSString)
-            .standardizingPath
-        guard let data = FileManager.default.contents(atPath: versionPlist),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
-              let short = plist["CFBundleShortVersionString"] as? String,
-              let major = short.split(separator: ".").first.flatMap({ Int($0) })
-        else { return nil }
-        return major
-    }()
-
     /// The active `xcode-select` developer directory, preferring an explicit
     /// `DEVELOPER_DIR` override. Returns nil if it cannot be determined.
     private static func selectedDeveloperDir() -> String? {

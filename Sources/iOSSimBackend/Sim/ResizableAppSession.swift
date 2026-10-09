@@ -203,10 +203,13 @@ public enum ResizableAppSessionProbe {
 /// reported as delivered that was not) — against a check that otherwise
 /// taxes every touch verb and `ui`.
 ///
-/// Skipped entirely (as `.unavailable`) when the selected Xcode is older
-/// than 27, which cannot host a session, or when
-/// `SIM_USE_RESIZE_SESSION_CHECK=0` is set; a devicectl that lacks the
-/// subcommand is remembered for the life of the process.
+/// Skipped entirely (as `.unavailable`) only under
+/// `SIM_USE_RESIZE_SESSION_CHECK=0`; a devicectl that lacks the subcommand
+/// is remembered for the life of the process. There is deliberately no
+/// "selected Xcode is older than 27" shortcut: the host's `xcode-select`
+/// says nothing about a simulator another Xcode or Device Hub already put
+/// into a session, and Xcode 26.6's devicectl answers the query correctly
+/// (review finding R150-08).
 public actor ResizableAppSessionMonitor {
     public typealias Probe = @Sendable (String) -> ResizableAppSessionState
 
@@ -214,8 +217,6 @@ public actor ResizableAppSessionMonitor {
 
     public static let defaultTTL: TimeInterval = 5
     public static let disableEnvironmentKey = "SIM_USE_RESIZE_SESSION_CHECK"
-    /// Resize Mode shipped with Xcode 27; older toolchains never host a session.
-    public static let minimumXcodeMajor = 27
 
     /// In-band evidence that the frontmost scene is resized: the AX root
     /// frame's size when it is neither the device's portrait size nor its
@@ -243,25 +244,20 @@ public actor ResizableAppSessionMonitor {
     private let clock: @Sendable () -> Date
     private let probe: Probe
     private let environment: [String: String]
-    private let xcodeMajorVersion: @Sendable () -> Int?
     private var cache: [String: CacheEntry] = [:]
     private var toolUnavailableReason: String?
     private(set) var probeCount = 0
 
-    /// `xcodeMajorVersion` defaults to the selected Xcode's major version
-    /// (`XcodeCompatibility`); tests inject a constant.
     public init(
         ttl: TimeInterval = ResizableAppSessionMonitor.defaultTTL,
         clock: @escaping @Sendable () -> Date = { Date() },
         probe: @escaping Probe = { ResizableAppSessionProbe.run(udid: $0) },
-        environment: [String: String] = ProcessInfo.processInfo.environment,
-        xcodeMajorVersion: (@Sendable () -> Int?)? = nil
+        environment: [String: String] = ProcessInfo.processInfo.environment
     ) {
         self.ttl = ttl
         self.clock = clock
         self.probe = probe
         self.environment = environment
-        self.xcodeMajorVersion = xcodeMajorVersion ?? { XcodeCompatibility.selectedXcodeMajorVersion() }
     }
 
     /// The session state for `udid`, from the cache when fresh.
@@ -284,9 +280,6 @@ public actor ResizableAppSessionMonitor {
         }
         if let reason = toolUnavailableReason {
             return .unavailable(reason: reason)
-        }
-        if let major = xcodeMajorVersion(), major < Self.minimumXcodeMajor {
-            return .unavailable(reason: "selected Xcode is \(major).x; resizable app sessions need Xcode \(Self.minimumXcodeMajor)+")
         }
 
         let now = clock()
@@ -343,6 +336,38 @@ public struct ResizableAppSessionError: LocalizedError, HintProviding, Equatable
     }
 }
 
+/// Thrown instead of starting a video capture while a session is active.
+/// `record-video` and `stream-video` read the main framebuffer (the only
+/// one the pinned idb exposes), which shows just the wallpaper during a
+/// session; unlike `screenshot` they are not redirected, because their
+/// pipelines (encoder, GIF transcode, stdout sink) sit on that framebuffer
+/// (review finding R150-06).
+public struct ResizableAppSessionCaptureError: LocalizedError, HintProviding, Equatable {
+    public let verb: String
+    public let udid: String
+    public let session: ResizableAppSession
+
+    public init(verb: String, udid: String, session: ResizableAppSession) {
+        self.verb = verb
+        self.udid = udid
+        self.session = session
+    }
+
+    public var errorDescription: String? {
+        "A resizable app session (Xcode 27 Resize Mode) is active on simulator \(udid): " +
+            "the frontmost app renders on the '\(session.displayName)' display (\(session.preferredSizeDescription) points requested), " +
+            "but `\(verb)` captures only the main display, which shows just the wallpaper during a session, " +
+            "so the output would not contain the app (sim-use issue #143). Nothing was captured."
+    }
+
+    public var hint: String? {
+        "Use `screenshot`, which is redirected to the '\(session.displayName)' display automatically, or record that display with " +
+            "`xcrun simctl io \(udid) recordVideo --display=\(session.displayUniqueID) <file.mov>`. " +
+            "End the session — stop the `xcrun devicectl device appResize start` process, or rotate the device — to use `\(verb)` normally. " +
+            "Set \(ResizableAppSessionMonitor.disableEnvironmentKey)=0 to skip this check."
+    }
+}
+
 public enum ResizableAppSessionGuard {
     /// Call after global setup in every verb that dispatches touch HID.
     /// `verb` names the surface in the error ("tap", "swipe", "batch", ...).
@@ -356,6 +381,26 @@ public enum ResizableAppSessionGuard {
         case .active(let session):
             logger.info().log("Resizable app session active on \(udid) (\(session.displayName) \(session.preferredSizeDescription)); refusing \(verb)")
             throw ResizableAppSessionError(verb: verb, udid: udid, session: session)
+        case .inactive:
+            return
+        case .unavailable(let reason):
+            logger.debug().log("Resizable app session check unavailable (\(reason)); proceeding")
+        }
+    }
+
+    /// Call after global setup in every verb that captures the main
+    /// framebuffer without redirection (`record-video`, `stream-video`),
+    /// before any output file is created or byte is emitted.
+    public static func assertCaptureReachesApp(
+        udid: String,
+        verb: String,
+        logger: SimUseLogger,
+        monitor: ResizableAppSessionMonitor = .shared
+    ) async throws {
+        switch await monitor.state(for: udid) {
+        case .active(let session):
+            logger.info().log("Resizable app session active on \(udid) (\(session.displayName) \(session.preferredSizeDescription)); refusing \(verb) (main-display capture only)")
+            throw ResizableAppSessionCaptureError(verb: verb, udid: udid, session: session)
         case .inactive:
             return
         case .unavailable(let reason):
@@ -385,7 +430,7 @@ public enum ResizableAppSessionAdvisory {
             kind: .resizableAppSession,
             message: "A resizable app session (Xcode 27 Resize Mode) is active: the app renders on the '\(session.displayName)' display at \(sizes). " +
                 "The outline is the app's own tree; hit-test recovery and orientation calibration were skipped because the simulator resolves points on the main display, where SpringBoard is frontmost. " +
-                "Touch paths (tap, long-press, swipe, touch, gesture, multi-touch, touch-bearing batch steps, paste --via-menu) are refused during the session; `type`, the key verbs, Cmd+V `paste` and `screenshot` work."
+                "Touch paths (tap, long-press, swipe, touch, gesture, multi-touch, touch-bearing batch steps, paste --via-menu) and main-display video capture (record-video, stream-video) are refused during the session; `type`, the key verbs, Cmd+V `paste` and `screenshot` work."
         )
     }
 
