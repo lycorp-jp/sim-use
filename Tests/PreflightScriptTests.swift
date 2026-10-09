@@ -6,7 +6,7 @@ import Testing
 struct PreflightScriptTests {
     @Test("device listing does not receive device-scoped options")
     func deviceListingDoesNotReceiveDeviceScopedOptions() async throws {
-        let fixture = try makeFakeSimUse(versionStamp: "0.14.0")
+        let fixture = try makeFakeSimUse(versionStamp: "0.15.0")
         defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
 
         let result = try await runPreflight(fakeSimUse: fixture.executable)
@@ -21,15 +21,23 @@ struct PreflightScriptTests {
         #expect(log.contains("ui --json --device target-device"))
     }
 
+    // The floor is 0.15.0: the skill's Resize Mode guidance (issue #143)
+    // relies on the session detection, touch refusal and screenshot
+    // redirection that release introduces; a 0.14.0 CLI would let an agent
+    // follow the recipe and trust a silent no-op tap.
     @Test("version compatibility follows release normalization", arguments: [
-        (stamp: "0.14.0", versionExitCode: 0, expectedPass: true),
         (stamp: "0.15.0", versionExitCode: 0, expectedPass: true),
-        (stamp: "v0.14.0", versionExitCode: 0, expectedPass: true),
+        (stamp: "0.16.0", versionExitCode: 0, expectedPass: true),
+        (stamp: "v0.15.0", versionExitCode: 0, expectedPass: true),
+        (stamp: "v0.15.0-3-gabc1234-dirty", versionExitCode: 0, expectedPass: true),
         (stamp: "v0.14.0-3-gabc1234-dirty", versionExitCode: 0, expectedPass: true),
         (stamp: "dev", versionExitCode: 0, expectedPass: true),
+        (stamp: "0.14.0", versionExitCode: 0, expectedPass: false),
+        (stamp: "v0.14.0", versionExitCode: 0, expectedPass: false),
+        (stamp: "0.14.9", versionExitCode: 0, expectedPass: false),
         (stamp: "0.13.0", versionExitCode: 0, expectedPass: false),
         (stamp: "v0.13.0-5-gabc1234", versionExitCode: 0, expectedPass: true),
-        (stamp: "0.14.0", versionExitCode: 7, expectedPass: false),
+        (stamp: "0.15.0", versionExitCode: 7, expectedPass: false),
     ])
     func versionCompatibility(
         _ testCase: (stamp: String, versionExitCode: Int, expectedPass: Bool)
@@ -64,7 +72,7 @@ struct PreflightScriptTests {
         #"{"ok":true,"advisory":{"kind":"remote_content_recovery"},"data":{"platform":"ios","entries":[{"role":"Button","label":"Browse"},{"role":"Button","label":"Cancel"}]}}"#,
     ])
     func remoteContentRecoveryWarns(uiResponse: String) async throws {
-        let fixture = try makeFakeSimUse(versionStamp: "0.14.0", uiResponse: uiResponse)
+        let fixture = try makeFakeSimUse(versionStamp: "0.15.0", uiResponse: uiResponse)
         defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
 
         let result = try await runPreflight(fakeSimUse: fixture.executable)
@@ -93,7 +101,7 @@ struct PreflightScriptTests {
         (response: #"{"ok":true,"data":{"platform":"android","kind":"physical","entries":[],"outline":"App: Test"}}"#, expectsAccessibilityHint: false),
     ])
     func emptyOutlineWarns(_ testCase: (response: String, expectsAccessibilityHint: Bool)) async throws {
-        let fixture = try makeFakeSimUse(versionStamp: "0.14.0", uiResponse: testCase.response)
+        let fixture = try makeFakeSimUse(versionStamp: "0.15.0", uiResponse: testCase.response)
         defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
 
         let result = try await runPreflight(fakeSimUse: fixture.executable)
@@ -118,7 +126,7 @@ struct PreflightScriptTests {
         #"{"ok":true,"data":{"platform":"ios","kind":"physical","entries":[],"lists":[],"outline":"Button: Close"}}"#,
     ])
     func successfulReadWithoutContentProblemDoesNotWarn(uiResponse: String) async throws {
-        let fixture = try makeFakeSimUse(versionStamp: "0.14.0", uiResponse: uiResponse)
+        let fixture = try makeFakeSimUse(versionStamp: "0.15.0", uiResponse: uiResponse)
         defer { try? FileManager.default.removeItem(at: fixture.tempRoot) }
 
         let result = try await runPreflight(fakeSimUse: fixture.executable)
@@ -136,7 +144,7 @@ struct PreflightScriptTests {
     ])
     func unsuccessfulReadStillFails(_ testCase: (response: String, exitCode: Int)) async throws {
         let fixture = try makeFakeSimUse(
-            versionStamp: "0.14.0",
+            versionStamp: "0.15.0",
             uiResponse: testCase.response,
             uiExitCode: testCase.exitCode
         )

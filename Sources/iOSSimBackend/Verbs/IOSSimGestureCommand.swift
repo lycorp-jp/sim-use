@@ -155,6 +155,8 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         let logger = SimUseLogger()
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
+        // Resizable app session (issue #143): touch HID cannot reach the app.
+        try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "gesture", logger: logger)
 
         // `recommendedDuration` auto-extends rotate sweeps beyond 90°
         // to keep angular velocity near 180°/sec (recogniser sweet

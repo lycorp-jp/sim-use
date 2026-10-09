@@ -124,6 +124,29 @@ Device Hub is open — the HID transport is selected automatically per
 boot. Note that Xcode 27 no longer bundles Simulator.app; the one from an
 Xcode 26.x install still works, as does Device Hub itself.
 
+**Resize Mode is detected, not driven.** Xcode 27 can put an iOS 27+
+simulator into a *resizable app session* (Device Hub's resize button, or
+`xcrun devicectl device appResize start`), which moves the frontmost app
+onto a virtual `Resizable` display at an arbitrary size while the main
+display keeps only the wallpaper. Simulator touch input, the framebuffer
+and the accessibility hit-test all stay bound to the main display, so
+during a session sim-use refuses `tap`, `long-press`, `swipe`, `touch`,
+`gesture`, `multi-touch` and touch-bearing `batch` runs with an
+explanation (a tap would otherwise report success and deliver nothing),
+refuses `record-video` and `stream-video` (they capture only the main
+display; the hint gives the `simctl io … recordVideo --display=` form),
+redirects `screenshot` to the `Resizable` display, and tags `ui` with a
+`resizable_app_session` advisory. `ui` itself, `type`, Cmd+V `paste` and
+the key verbs keep working; `paste --via-menu` is a touch path and is
+refused like the touch verbs. The detection is one `devicectl device info
+appResize` per device per 5 s, refreshed early the first time `ui` sees a
+scene size that is not a device size (a batch re-checks before every
+touch step); `SIM_USE_RESIZE_SESSION_CHECK=0` turns it off (read by the
+per-device daemon when it starts). The bundled skill's preflight requires
+sim-use 0.15.0 or newer for this reason. Background:
+[issue #143](https://github.com/lycorp-jp/sim-use/issues/143) and
+`docs/ai/xxxx-resizable-app-session/README.md`.
+
 ### Linux (Android only)
 
 The Android backend also builds on Linux with a Swift 6 toolchain — iOS

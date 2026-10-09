@@ -35,6 +35,19 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 4. Explicit `-x/-y`/`--point` (and `--target-x/y`) are never transformed — they are device-native portrait coordinates by contract.
 5. `batch` calibrates once per run. If a step rotates the device (or navigates to a screen that forces a different orientation), later selector steps may mis-target — split the flow into separate batches around the rotation.
 
+## iOS: Resize Mode (resizable app session)
+
+**Symptom:** `tap`, `long-press`, `swipe`, `touch`, `gesture`, `multi-touch`, `paste --via-menu`, a `batch` with a touch step, `record-video` or `stream-video` fails with `A resizable app session (Xcode 27 Resize Mode) is active on simulator …` (`--json`: `ok: false` with a `hint`). `ui` prints `[i] A resizable app session … is active` (`--json`: `advisory.kind: resizable_app_session`) and its `App:` header shows a size that is not a real device size (`560x874`, `375x667`, `874x402` on an upright iPhone 17). `screenshot` prints `[i] Captured the 'Resizable' display …`.
+
+**Why:** Xcode 27 can move the frontmost app of an iOS 27+ simulator onto a virtual display named `Resizable` and give it any size (Device Hub's resize button, or `xcrun devicectl device appResize start`). The main display then shows only the wallpaper, with SpringBoard frontmost. Simulator touch input, the main framebuffer and the accessibility point hit-test are all bound to the main display, so a tap would be reported as delivered and reach nothing — which is why sim-use refuses it. Keyboard input is device-wide and does reach the app. Issue: https://github.com/lycorp-jp/sim-use/issues/143.
+
+**Recipes:**
+1. Observe freely: `ui` is the app's own tree at the resized size (hit-test recovery and orientation calibration are skipped, so collapsed groups stay collapsed), and `screenshot` is redirected to the `Resizable` display. `record-video` and `stream-video` are refused — they can only capture the main display; record the app with `xcrun simctl io <udid> recordVideo --display=<uuid> <file.mov>` (the error's hint fills in the uuid). The `App:` header is the only place the scene's *actual* size shows — `appResize set` reports the size it asked for, which the scene may snap away from.
+2. Drive with the keyboard: `type`, Cmd+V `paste`, `key`, `key-combo`, `key-sequence` and keyboard-only `batch` runs work during a session. `paste --via-menu` is a long-press plus menu taps and is refused like a tap. Focus the field *before* starting the session, since focusing needs a tap.
+3. To tap, end the session: stop the `devicectl device appResize start` process (or rotate the device — rotation ends a session), re-run `ui`, then tap. The app returns to the device's native size.
+4. Never use `--point`/`-x -y` as a workaround — raw coordinates are refused like selectors, and `ui --point` describes SpringBoard, not the app.
+5. The check costs one `devicectl` query per device per 5 s. A session that just *started* is noticed by the next `ui`, selector tap, or touch step of a `batch` (a newly resized root frame bypasses the cache; a `batch` re-checks before every touch step) unless the scene is exactly the device's own size; a session that just *ended*, and standalone raw `-x/-y` taps right after a start, can see the previous answer for up to 5 s. `SIM_USE_RESIZE_SESSION_CHECK=0` disables the check (you are then back to silent no-op taps); the per-device daemon reads it at spawn time, so set it on the first command or pair it with `SIM_USE_NO_DAEMON=1`. This recipe needs sim-use 0.15.0 or newer — the preflight enforces it.
+
 ## System layer detection
 
 **Symptom:** `ui` output shows unexpected content — the `App:` header names a system process like `SpringBoard` (iOS) or `com.android.systemui` (Android).

@@ -10,6 +10,11 @@ public struct CommandAdvisory: Codable, Equatable, Sendable {
         case fullScreenTapTarget = "full_screen_tap_target"
         case orientationCalibrationFallback = "orientation_calibration_fallback"
         case remoteContentRecovery = "remote_content_recovery"
+        /// An Xcode 27 resizable app session (Resize Mode) is active on
+        /// the simulator: the frontmost app renders on a virtual
+        /// "Resizable" display while every simulator primitive sim-use
+        /// drives is bound to the main display (issue #143).
+        case resizableAppSession = "resizable_app_session"
     }
 
     public let kind: Kind

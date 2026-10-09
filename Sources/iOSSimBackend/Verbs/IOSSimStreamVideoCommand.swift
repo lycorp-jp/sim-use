@@ -149,6 +149,11 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         guard !trimmedUDID.isEmpty else {
             throw CLIError(errorDescription: "Simulator UDID cannot be empty. Use --udid to specify a simulator.")
         }
+        // Resizable app session (issue #143): every format below — the
+        // native FBVideoStream paths and the screenshot loop alike — reads
+        // the main framebuffer, which shows only the wallpaper during a
+        // session. Refuse before a single byte reaches stdout.
+        try await ResizableAppSessionGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "stream-video", logger: logger)
 
         let simulatorSet = try await getSimulatorSet(deviceSetPath: nil, logger: logger, reporter: EmptyEventReporter.shared)
         guard let targetSimulator = simulatorSet.allSimulators.first(where: { $0.udid == trimmedUDID }) else {

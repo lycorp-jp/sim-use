@@ -173,6 +173,14 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
 
+        // Resizable app session (issue #143): `--via-menu` is a touch path
+        // (long-press + edit-menu taps) that cannot reach the resized app,
+        // so refuse before the pasteboard is written. Cmd+V is keyboard
+        // HID and does reach it, so the default path is not gated.
+        if viaMenu {
+            try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "paste --via-menu", logger: logger)
+        }
+
         let inputText = try resolveInputText(logger: logger)
         guard !inputText.isEmpty else {
             throw CLIError(errorDescription: "Input text is empty; nothing to paste.")
@@ -183,6 +191,9 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
 
         if viaMenu {
             let (target, calibration) = try await resolveTargetPoint(logger: logger)
+            // `--target-id` just fetched a tree, which may have refreshed
+            // the session cache (see IOSSimTapCommand's second check).
+            try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "paste --via-menu", logger: logger)
             try await pasteViaEditMenu(at: target, calibration: calibration, logger: logger)
         } else {
             if replace {

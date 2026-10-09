@@ -33,11 +33,22 @@ public struct AccessibilityFetcher {
         public let data: Data
         public let calibration: OrientationCalibration?
         public let advisory: CommandAdvisory?
+        /// Non-nil when the fetch ran under an active resizable app
+        /// session (issue #143): the tree is the frontmost app's own, but
+        /// calibration and collapsed-children recovery were skipped
+        /// because the hit-test resolves on the main display.
+        public let resizableSession: ResizableAppSession?
 
-        public init(data: Data, calibration: OrientationCalibration?, advisory: CommandAdvisory? = nil) {
+        public init(
+            data: Data,
+            calibration: OrientationCalibration?,
+            advisory: CommandAdvisory? = nil,
+            resizableSession: ResizableAppSession? = nil
+        ) {
             self.data = data
             self.calibration = calibration
             self.advisory = advisory
+            self.resizableSession = resizableSession
         }
     }
 
@@ -99,10 +110,17 @@ public struct AccessibilityFetcher {
         }
 
         if let point {
+            // Resizable app session (issue #143): the hit-test answers for
+            // the main display (SpringBoard) during a session, whatever the
+            // point. No tree to corroborate with here, so the cached answer
+            // is taken as-is.
+            let resizableSession = await ResizableAppSessionMonitor.shared.state(for: simulatorUDID).session
+            perf.stage("resizable session check")
             return try await pointQuery(
                 target: target,
                 point: point,
                 native: native,
+                resizableSession: resizableSession,
                 probe: probe,
                 logger: logger,
                 perf: perf
@@ -112,14 +130,41 @@ public struct AccessibilityFetcher {
         var info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
         perf.stage("tree fetch XPC")
 
+        // Resizable app session (Xcode 27 Resize Mode, issue #143): the
+        // frontmost app renders on the virtual "Resizable" display while
+        // the point hit-test XPC resolves on the main display, where
+        // SpringBoard is frontmost. Every hit-test driven step below —
+        // calibration probes, collapsed-children recovery — would
+        // therefore describe SpringBoard, not the app. The monitor caches
+        // the ~0.3 s devicectl query; a root frame that is neither the
+        // device's portrait size nor its landscape swap is in-band
+        // evidence of a session. New evidence bypasses a cached "no
+        // session", so a session started moments ago is seen now rather
+        // than after the TTL; the same evidence seen again does not
+        // (R150-03). A scene at exactly the device's size has no evidence
+        // and waits for the TTL — the documented gap.
+        let sceneEvidence = Self.resizedSceneEvidence(info: info, native: native)
+        let resizableSession = await ResizableAppSessionMonitor.shared
+            .state(for: simulatorUDID, evidence: sceneEvidence)
+            .session
+        perf.stage("resizable session check")
+        if let resizableSession {
+            logger.info().log("Resizable app session active (\(resizableSession.displayName) \(resizableSession.preferredSizeDescription)); hit-test driven recovery and calibration are skipped")
+        } else if let sceneEvidence {
+            logger.info().log("AX root frame \(Int(sceneEvidence.width))x\(Int(sceneEvidence.height)) is not a device size but CoreDevice reports no resizable app session; proceeding normally")
+        }
+
         // Empty-shell retry (issue #64): a remote-process presentation
         // (system document picker) leaves the frontmost tree a bare,
         // frameless AXApplication. Refetch once with upstream's
         // remote-content discovery so the visible cross-process elements
         // materialize. The plain first fetch keeps the hot path untouched —
         // healthy and sparse-but-valid trees never pay for the grid probes.
+        // Skipped under a resizable app session: the retry's grid
+        // hit-tests would collect SpringBoard's elements from the main
+        // display, which is the splicing this path exists to avoid.
         var remoteAdvisory: CommandAdvisory? = nil
-        if isEmptyShellTree(info) {
+        if resizableSession == nil, isEmptyShellTree(info) {
             logger.info().log("Frontmost accessibility tree is an empty shell; retrying with remote-content discovery")
             let samplingScale = native.map { uiScaleFromRawTree(info, native: $0) } ?? .identity
             if let retried = try? await target.legacyAccessibilityElements(
@@ -136,6 +181,30 @@ public struct AccessibilityFetcher {
                 logger.info().log("Remote-content retry did not surface any elements; keeping the original tree")
             }
             perf.stage("remote-content retry")
+        }
+
+        if let resizableSession {
+            // The raw tree is the app's own and its frames are scene
+            // space, so it is returned as fetched: identity calibration
+            // (a resized scene's size says nothing about rotation, and
+            // the probes would land on SpringBoard anyway) and no
+            // recovery walk (whose synthesized children would be
+            // SpringBoard's — the splicing the issue reports).
+            let display = rawDisplayFrame(in: rawRoots(of: info))
+            let advisory = ResizableAppSessionAdvisory.describeUI(
+                session: resizableSession,
+                sceneSize: display.map { (width: Double($0.width), height: Double($0.height)) },
+                native: native
+            )
+            let data = try serializeAccessibilityInfo(info)
+            perf.stage("serialize")
+            perf.finish()
+            return FetchResult(
+                data: data,
+                calibration: .identity(native: native),
+                advisory: CommandAdvisory.merged([remoteAdvisory, advisory].compactMap { $0 }),
+                resizableSession: resizableSession
+            )
         }
 
         let calibration = await calibrate(info: info, native: native, probe: probe, logger: logger)
@@ -305,6 +374,7 @@ public struct AccessibilityFetcher {
         target: FBSimulator,
         point: AccessibilityPoint,
         native: NativePortraitSize?,
+        resizableSession: ResizableAppSession? = nil,
         probe: @escaping CollapsedChildrenRecovery.PointProbe,
         logger: SimUseLogger,
         perf: PerfLog
@@ -312,6 +382,10 @@ public struct AccessibilityFetcher {
         func nestedQuery(_ p: CGPoint) async throws -> AnyObject {
             try await target.legacyAccessibilityElement(at: p, nestedFormat: true)
         }
+        // Under a resizable app session the hit-test answers for the main
+        // display (SpringBoard), whatever the point — say so rather than
+        // let the caller mistake it for the app (issue #143).
+        let sessionAdvisory = resizableSession.map(ResizableAppSessionAdvisory.pointQuery)
 
         guard let native else {
             // No screen info — keep the legacy raw-space behavior.
@@ -319,18 +393,26 @@ public struct AccessibilityFetcher {
             perf.stage("point XPC")
             let data = try serializeAccessibilityInfo(info)
             perf.finish()
-            return FetchResult(data: data, calibration: .identity())
+            return FetchResult(data: data, calibration: .identity(), advisory: sessionAdvisory, resizableSession: resizableSession)
         }
 
         var orientation: DisplayOrientation? = nil
         var identityResult: AnyObject? = nil
         var calibration: OrientationCalibration? = nil
 
+        if resizableSession != nil {
+            // Nothing to calibrate against: the probe canvas is the main
+            // display, and a resized scene's size says nothing about
+            // rotation. Query the raw point and skip the tree calibration.
+            orientation = .portrait
+        }
+
         if point.x < native.width, point.y < native.height {
             if let raw = try? await nestedQuery(point.cgPoint) {
                 perf.stage("point XPC")
                 identityResult = raw
-                if let dict = raw as? [String: Any],
+                if resizableSession == nil,
+                   let dict = raw as? [String: Any],
                    let frame = OrientationCalibrator.frameRect(of: dict) {
                     orientation = OrientationCalibrator.soleOrientation(
                         mapping: point.cgPoint, into: frame, native: native
@@ -384,7 +466,14 @@ public struct AccessibilityFetcher {
         let data = try serializeAccessibilityInfo(info)
         perf.stage("serialize")
         perf.finish()
-        return FetchResult(data: data, calibration: finalCalibration)
+        // The calibration advisory reaches callers through
+        // `calibration.advisory`; only the session one rides here.
+        return FetchResult(
+            data: data,
+            calibration: finalCalibration,
+            advisory: sessionAdvisory,
+            resizableSession: resizableSession
+        )
     }
 
     /// Orientation calibration WITHOUT the collapsed-children recovery
@@ -437,6 +526,36 @@ public struct AccessibilityFetcher {
         if let array = info as? [[String: Any]] { return array }
         if let dict = info as? [String: Any] { return [dict] }
         return []
+    }
+
+    /// The raw tree's display frame as evidence of a resized scene, or nil
+    /// when it is the device's portrait size or its landscape swap (±1 pt,
+    /// like `OrientationCalibrator.orderedCandidates`), or when the tree
+    /// has no framed root or the screen info is unknown.
+    ///
+    /// Deliberately nothing cleverer. A display-downscaled panel (iPhone
+    /// mini lays out 375x812 over a 360x780 pixels/scale framebuffer) does
+    /// count as evidence on every fetch — and that is fine, because the
+    /// monitor re-probes only when the evidence *changes*, so such a device
+    /// pays one probe per TTL like any other. Classifying "proportional to
+    /// the device" as a panel instead (via `OrientationCalibrator
+    /// .uiPointScale`) was tried and reverted: a 480x1044 scene on an
+    /// iPhone 17 is proportional too, and the exclusion let a selector tap
+    /// through inside the cache window (review finding R150-05). Element
+    /// types are spelled out because the compiler on Xcode 26 does not
+    /// convert a `CGFloat` tuple to a `Double` tuple (R150-07).
+    nonisolated static func resizedSceneEvidence(
+        info: AnyObject,
+        native: NativePortraitSize?
+    ) -> ResizableAppSessionMonitor.SceneEvidence? {
+        guard let native, let display = rawDisplayFrame(in: rawRoots(of: info)) else { return nil }
+        let width = Double(display.width)
+        let height = Double(display.height)
+        func matches(_ w: Double, _ h: Double) -> Bool {
+            abs(width - w) <= 1 && abs(height - h) <= 1
+        }
+        if matches(native.width, native.height) || matches(native.height, native.width) { return nil }
+        return ResizableAppSessionMonitor.SceneEvidence(width: width, height: height)
     }
 
     /// Raw-payload mirror of `AXDisplayFrame.frame(in:)`: the largest

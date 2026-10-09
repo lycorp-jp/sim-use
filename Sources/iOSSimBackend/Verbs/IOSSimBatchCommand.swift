@@ -187,6 +187,15 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
             throw CLIError(errorDescription: "No executable steps found.")
         }
 
+        // Resizable app session (issue #143): touch HID cannot reach the
+        // app. Keyboard steps still work, so only a batch that contains a
+        // touch step is refused — here, before any step runs, when the
+        // session is already known; and again per touch step inside the
+        // loop below, for a session the cache had not seen yet.
+        if Self.containsTouchStep(stepLines) {
+            try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "batch", logger: logger)
+        }
+
         let context = await MainActor.run {
             BatchContext(
                 simulatorUDID: device.resolved,
@@ -217,7 +226,20 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
                     context: context,
                     logger: logger
                 )
+                // Per-step session gate (review finding R150-02): parsing a
+                // selector step fetched a tree, which may have refreshed a
+                // cached "no session" into an active one, and a long batch
+                // outlives the 5 s TTL. Cache hit otherwise. Checked after
+                // parsing and before dispatch, so a refused step sends
+                // nothing.
+                if let kind = tokens.first.flatMap(BatchStepKind.init(rawValue:)), Self.touchStepKinds.contains(kind) {
+                    try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "batch", logger: logger)
+                }
                 try await runner.run(BatchPlan(primitives: primitives))
+            } catch let refusal as ResizableAppSessionError where !continueOnError {
+                // Unchanged, so the hint reaches the error envelope; the
+                // message already names the batch.
+                throw refusal
             } catch {
                 if continueOnError {
                     failures.append("Step \(index + 1) failed: [\(stepName)] -> \(error.localizedDescription)")
@@ -241,6 +263,19 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
         .line("✓ Batch completed successfully (\(result.stepsExecuted) steps)")
+    }
+
+    /// The step kinds that dispatch touch HID. A line that fails to
+    /// tokenize is not counted here; the step loop reports it properly.
+    static let touchStepKinds: Set<BatchStepKind> = [.tap, .swipe, .gesture, .touch]
+
+    static func stepKind(of line: String) -> BatchStepKind? {
+        guard let first = (try? ShellTokenizer.tokenize(line))?.first else { return nil }
+        return BatchStepKind(rawValue: first)
+    }
+
+    static func containsTouchStep(_ stepLines: [String]) -> Bool {
+        stepLines.contains { stepKind(of: $0).map(touchStepKinds.contains) ?? false }
     }
 
     private func loadStepLines() throws -> [String] {

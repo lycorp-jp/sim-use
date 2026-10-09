@@ -87,6 +87,10 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         guard !trimmedUDID.isEmpty else {
             throw CLIError(errorDescription: "Simulator UDID cannot be empty. Use --udid to specify a simulator.")
         }
+        // Resizable app session (issue #143): both capture paths below read
+        // the main framebuffer, which shows only the wallpaper during a
+        // session. Refuse before any output file is created.
+        try await ResizableAppSessionGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "record-video", logger: logger)
 
         let simulatorSet = try await getSimulatorSet(deviceSetPath: nil, logger: logger, reporter: EmptyEventReporter.shared)
         guard let targetSimulator = simulatorSet.allSimulators.first(where: { $0.udid == trimmedUDID }) else {

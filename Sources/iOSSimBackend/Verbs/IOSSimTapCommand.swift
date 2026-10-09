@@ -174,6 +174,14 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         let frameFilter = Self.frameFilter(from: targeting)
         try await performEssentialSetup(logger: logger)
         try await performGlobalSetup(logger: logger)
+        // Resizable app session (issue #143): touch HID cannot reach the
+        // app, so refuse before resolving a target rather than report a
+        // tap that was never delivered. `long-press` shares this path.
+        try await ResizableAppSessionGuard.assertTouchInputReachesApp(
+            udid: device.resolved,
+            verb: (duration ?? 0) > 0 ? "long-press" : "tap",
+            logger: logger
+        )
 
         let resolvedPoint: (x: Double, y: Double)
         let resolvedDescription: String
@@ -290,6 +298,18 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
 
             resolvedDescription = "center of matched element at (\(resolvedPoint.x), \(resolvedPoint.y))"
         }
+
+        // Second look at the session gate, now that selector resolution
+        // has fetched a tree: a scene-sized root lets the fetcher bypass a
+        // cached "no session" (issue #143), so a session that started
+        // inside the cache window is known by now. Cache hit otherwise —
+        // effectively free. Raw -x/-y fetched nothing and relies on the
+        // first check alone.
+        try await ResizableAppSessionGuard.assertTouchInputReachesApp(
+            udid: device.resolved,
+            verb: (duration ?? 0) > 0 ? "long-press" : "tap",
+            logger: logger
+        )
 
         // UI space → framebuffer space for HID; identity (and -x/-y) pass
         // through untouched. Logging and ExecutionResult keep UI-space

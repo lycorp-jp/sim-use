@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 
-MINIMUM_SIM_USE_VERSION = (0, 14, 0)
+MINIMUM_SIM_USE_VERSION = (0, 15, 0)
 
 
 # ---------------------------------------------------------------------------
