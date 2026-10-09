@@ -83,7 +83,7 @@ public func cancellableSleep(seconds: TimeInterval, flag: CancellationFlag) asyn
 /// The loop measures against a deadline on `clock` instead of summing the
 /// requested chunks: each chunk can wake late under load, and a sum of
 /// requests would let those overshoots add up past the requested duration.
-public func cancellableSleep<C: Clock>(
+func cancellableSleep<C: Clock>(
     for duration: Duration,
     flag: CancellationFlag,
     clock: C
