@@ -179,23 +179,33 @@ reverted (`git -C idb_checkout checkout -- .` + `build.sh frameworks && install
   `SIM_USE_RESIZE_SESSION_CHECK=0` (read by the daemon at spawn — a later
   client's environment does not reach a running daemon). The cache is the
   whole cost model: one ~0.3 s spawn per device per 5 s instead of one per
-  command. `state(for:refreshIfInactive:)` lets a caller with in-band
-  evidence bypass a cached *non-active* answer: the fetcher passes
-  `sceneSizeIsNotADeviceSize` (AX root frame ≠ device portrait size and ≠ its
-  landscape swap), so a session that started inside the window is seen by the
-  first `ui` or selector tap. The first E2E run caught exactly this gap: the
-  launch helper's `describe-ui` cached "no session" seconds before the
-  session started, and `ui`/`tap` inside the window read the stale answer.
-  What still waits out the window: a session that just *ended*, raw `-x/-y`
-  taps right after a start, and a scene at exactly the device's own size.
+  command. `state(for:evidence:)` lets a caller with in-band evidence bypass
+  a cached *non-active* answer: the fetcher passes
+  `resizedSceneEvidence` (the AX root size when it is ≠ the device portrait
+  size, ≠ its landscape swap, and not a uniform panel downscale per
+  `OrientationCalibrator.uiPointScale`), and the monitor re-probes only when
+  that evidence *differs* from what the cached answer was probed with — so a
+  session that started inside the window is seen by the first `ui` or
+  selector tap, while a display whose AX size never matches pixels/scale
+  (iPhone mini) still pays one probe per TTL (review finding R150-03). The
+  first E2E run caught the original gap: the launch helper's `describe-ui`
+  cached "no session" seconds before the session started, and `ui`/`tap`
+  inside the window read the stale answer. What still waits out the window:
+  a session that just *ended*, standalone raw `-x/-y` taps right after a
+  start, and a scene at exactly the device's own size.
 - `ResizableAppSessionGuard.assertTouchInputReachesApp` — called after
   `performGlobalSetup` in `tap` (`long-press` shares the path), `swipe`,
   `touch`, `gesture`, `multi-touch`, and `batch` when any step kind is tap /
-  swipe / gesture / touch (`IOSSimBatchCommand.containsTouchStep`). `tap`
-  checks a second time after selector resolution, because that resolution
-  fetched a tree and may have refreshed the cache (see the monitor). Throws
-  `ResizableAppSessionError` (`LocalizedError + HintProviding`, so `--json`
-  carries `hint`).
+  swipe / gesture / touch (`IOSSimBatchCommand.containsTouchStep`), and
+  `paste --via-menu` (a long-press plus menu taps; Cmd+V paste is keyboard
+  HID and stays open). `tap` and `paste --via-menu --target-id` check a
+  second time after selector resolution, because that resolution fetched a
+  tree and may have refreshed the cache (see the monitor); `batch` checks
+  every touch step after parsing and before dispatch, so a session that the
+  cache had not seen when the batch started still stops it at the first
+  touch step with nothing sent (R150-02). Throws `ResizableAppSessionError`
+  (`LocalizedError + HintProviding`, so `--json` carries `hint`); the batch
+  loop rethrows it unchanged unless `--continue-on-error`.
 - `AccessibilityFetcher.fetchAccessibilityInfo` — asks the monitor once per
   fetch; under a session it returns the raw tree in identity calibration with
   the `resizable_app_session` advisory and **skips** calibration and
@@ -220,6 +230,12 @@ Design choices worth knowing before changing anything:
   An advisory on a `✓` line is exactly what an agent skims past.
 - **Raw `-x/-y` is refused too.** The digitizer target is the problem, not
   coordinate resolution; raw coordinates land on SpringBoard just the same.
+- **The skill floor moved to 0.15.0.** The repo rule (AGENTS.md) is that a
+  skill relying on behaviour newer than its compatibility floor bumps
+  `MINIMUM_SIM_USE_VERSION`; an agent on a 0.14.0 CLI following the Resize
+  Mode recipe would observe wallpaper and trust a silent no-op tap
+  (R150-04). The constant names the next release; the release flow owns the
+  actual version.
 - **Recovery is skipped, not filtered by pid.** Filtering synthesized hits to
   the app's pid would keep the walk's probe cost for no benefit — every hit
   is SpringBoard's during a session.
@@ -248,6 +264,18 @@ and `screenshot` return to their normal output with no advisory.
   not in the running daemon and failed identically to the first. Before live
   verification of a rebuilt binary, `sim-use daemon stop --udid <udid>` (or
   `--all`). `sim-use daemon status` shows the version each daemon runs.
+
+## Review round 1 (PR #150) — findings and dispositions
+
+An independent review of the first commit reproduced two of its four
+findings live; all four were fixed in the second commit.
+
+| ID | Finding | Disposition |
+|---|---|---|
+| R150-01 | `paste --via-menu` (long-press + edit-menu taps) bypassed the guard; the pasteboard was written and touch HID sent before the menu timeout failed with no session hint. Docs called `paste` keyboard-safe without qualification. | Fixed: guard before the pasteboard write when `viaMenu`, and again after `--target-id` resolution (tree fetch may refresh the cache). Cmd+V stays ungated. Error/advisory/README/skill/pitfalls now say "Cmd+V `paste`" and name `--via-menu` as a touch path. E2E covers the coordinate and id targets refused and Cmd+V not refused. |
+| R150-02 | `batch` checked only before the loop. A batch started inside the stale "no session" window ran to `ok: true` — its selector step's fetch even refreshed the cache to active, but nothing re-read it; a long batch also outlives the TTL. | Fixed: per-touch-step gate after `parseStepTokens` and before `runner.run` (cache hit normally); a `ResizableAppSessionError` propagates unchanged (hint preserved) unless `--continue-on-error`. E2E `batchInsideStaleCacheWindowIsRefused` reproduces the reviewer's shape (warm cache → start session → batch) and asserts refusal with nothing landing. |
+| R150-03 | `sceneSizeIsNotADeviceSize` compared the AX root against pixels/scale, so a display-downscaled device (iPhone mini: 375x812 over 360x780) counted as resized on *every* fetch and bypassed the cache each time — one devicectl spawn per `ui`. | Fixed twice over: the monitor takes `SceneEvidence` (the size) instead of a flag and bypasses only when the evidence *differs* from what the cached answer was probed with; and `resizedSceneEvidence` returns nil when `OrientationCalibrator.uiPointScale` recognises the size as a uniform panel downscale. Unit tests cover mini/Plus sizes, repeated evidence (1 probe), changed evidence (re-probe), and a resized scene on a mini (still evidence). |
+| R150-04 | The skill's new recipe relies on behaviour a 0.14.0 CLI does not have, yet `preflight.py` still accepted 0.14.0 (verified by the reviewer with a mocked `--version`). | Fixed per the repo rule: `MINIMUM_SIM_USE_VERSION = (0, 15, 0)`; `PreflightScriptTests` now expects 0.14.0 / v0.14.0 / 0.14.9 to fail and 0.15.0 / 0.16.0 / dev stamps to pass; fixtures moved to 0.15.0. Recipe text states the requirement. |
 
 ## Follow-ups (not in this PR)
 

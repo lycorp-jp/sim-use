@@ -234,8 +234,11 @@ struct ResizableAppSessionMonitorTests {
         #expect(counter.udids == ["A", "B"])
     }
 
-    @Test("refreshIfInactive bypasses a cached inactive answer but never a cached active one")
-    func refreshIfInactive() async {
+    private let resizedScene = ResizableAppSessionMonitor.SceneEvidence(width: 560, height: 874)
+    private let otherScene = ResizableAppSessionMonitor.SceneEvidence(width: 375, height: 667)
+
+    @Test("new scene evidence bypasses a cached inactive answer; a cached active one is never bypassed")
+    func evidenceBypassesInactive() async {
         let clock = Clock()
         let counter = Counter()
         counter.states = [.inactive, .active(sampleSession), .inactive]
@@ -243,22 +246,52 @@ struct ResizableAppSessionMonitorTests {
 
         #expect(await monitor.state(for: "A") == .inactive)
         // In-band evidence of a session: re-probe despite the fresh cache.
-        #expect(await monitor.state(for: "A", refreshIfInactive: true) == .active(sampleSession))
+        #expect(await monitor.state(for: "A", evidence: resizedScene) == .active(sampleSession))
         #expect(counter.count == 2)
-        // Now active and cached: evidence does not force another probe.
-        #expect(await monitor.state(for: "A", refreshIfInactive: true) == .active(sampleSession))
+        // Now active and cached: evidence — even different evidence — does
+        // not force another probe.
+        #expect(await monitor.state(for: "A", evidence: otherScene) == .active(sampleSession))
         #expect(counter.count == 2)
     }
 
-    @Test("refreshIfInactive also re-probes a transient unavailable answer")
-    func refreshIfUnavailable() async {
+    @Test("the same evidence seen again rides the cache (R150-03: a downscaled display is not a resize per fetch)")
+    func repeatedEvidenceDoesNotReprobe() async {
+        let clock = Clock()
+        let counter = Counter()
+        let monitor = makeMonitor(clock: clock, counter: counter)
+
+        #expect(await monitor.state(for: "A", evidence: resizedScene) == .inactive)
+        #expect(await monitor.state(for: "A", evidence: resizedScene) == .inactive)
+        #expect(await monitor.state(for: "A", evidence: resizedScene) == .inactive)
+        #expect(counter.count == 1)
+        // Evidence that *changes* inside the TTL is a different scene: re-probe.
+        counter.states = [.active(sampleSession)]
+        #expect(await monitor.state(for: "A", evidence: otherScene) == .active(sampleSession))
+        #expect(counter.count == 2)
+    }
+
+    @Test("evidence after a probe without evidence re-probes; no evidence after an evidence probe does not")
+    func evidenceVersusNoEvidence() async {
+        let clock = Clock()
+        let counter = Counter()
+        let monitor = makeMonitor(clock: clock, counter: counter)
+
+        _ = await monitor.state(for: "A")
+        _ = await monitor.state(for: "A", evidence: resizedScene)
+        #expect(counter.count == 2)
+        _ = await monitor.state(for: "A")
+        #expect(counter.count == 2)
+    }
+
+    @Test("new evidence also re-probes a transient unavailable answer")
+    func evidenceBypassesUnavailable() async {
         let clock = Clock()
         let counter = Counter()
         counter.states = [.unavailable(reason: "devicectl exited 1: busy"), .active(sampleSession)]
         let monitor = makeMonitor(clock: clock, counter: counter)
 
         _ = await monitor.state(for: "A")
-        #expect(await monitor.state(for: "A", refreshIfInactive: true) == .active(sampleSession))
+        #expect(await monitor.state(for: "A", evidence: resizedScene) == .active(sampleSession))
         #expect(counter.count == 2)
     }
 
@@ -393,7 +426,8 @@ struct ResizableAppSessionGuardTests {
     func errorHint() throws {
         let hint = try #require(ResizableAppSessionError(verb: "tap", udid: "U", session: sampleSession).hint)
         #expect(hint.contains("devicectl device appResize start"))
-        #expect(hint.contains("`type` and the key verbs keep working"))
+        #expect(hint.contains("`type`, the key verbs and Cmd+V `paste` keep working"))
+        #expect(hint.contains("`paste --via-menu` is a touch path and is refused"))
         #expect(hint.contains("\(ResizableAppSessionMonitor.disableEnvironmentKey)=0"))
     }
 
@@ -408,7 +442,8 @@ struct ResizableAppSessionGuardTests {
         #expect(advisory.message.contains("437x874 points (requested 560x874 points)"))
         #expect(advisory.message.contains("main display is 402x874"))
         #expect(advisory.message.contains("recovery and orientation calibration were skipped"))
-        #expect(advisory.message.contains("Touch verbs"))
+        #expect(advisory.message.contains("Touch paths (tap, long-press, swipe, touch, gesture, multi-touch, touch-bearing batch steps, paste --via-menu) are refused"))
+        #expect(advisory.message.contains("Cmd+V `paste` and `screenshot` work"))
     }
 
     @Test("describe-ui advisory degrades without scene or native sizes")
@@ -497,33 +532,55 @@ struct ResizableDisplayScreenshotTests {
 
 // MARK: - In-band evidence (raw tree size vs device size)
 
-@Suite("AccessibilityFetcher.sceneSizeIsNotADeviceSize")
+@Suite("AccessibilityFetcher.resizedSceneEvidence")
 struct SceneSizeEvidenceTests {
-    private let native = NativePortraitSize(width: 402, height: 874)
+    private let iPhone17 = NativePortraitSize(width: 402, height: 874)
 
     private func tree(width: Double, height: Double, type: String = "Application") -> AnyObject {
         [["type": type, "role": "AXApplication", "frame": ["x": 0, "y": 0, "width": width, "height": height]]] as AnyObject
     }
 
-    @Test("a resized scene is evidence; the device's own size and its landscape swap are not")
+    private func evidence(_ width: Double, _ height: Double, native: NativePortraitSize) -> ResizableAppSessionMonitor.SceneEvidence? {
+        AccessibilityFetcher.resizedSceneEvidence(info: tree(width: width, height: height), native: native)
+    }
+
+    @Test("a resized scene is evidence carrying its size; the device's own size and its landscape swap are not")
     func resizedVersusDeviceSizes() {
-        #expect(AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: tree(width: 560, height: 874), native: native))
-        #expect(AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: tree(width: 375, height: 667), native: native))
-        #expect(AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: tree(width: 437, height: 874), native: native))
-        #expect(!AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: tree(width: 402, height: 874), native: native))
-        #expect(!AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: tree(width: 874, height: 402), native: native))
+        #expect(evidence(560, 874, native: iPhone17) == .init(width: 560, height: 874))
+        #expect(evidence(375, 667, native: iPhone17) == .init(width: 375, height: 667))
+        #expect(evidence(437, 874, native: iPhone17) == .init(width: 437, height: 874))
+        #expect(evidence(402, 874, native: iPhone17) == nil)
+        #expect(evidence(874, 402, native: iPhone17) == nil)
+    }
+
+    @Test("display-downscaled panels are device sizes, not evidence (R150-03)")
+    func downscaledPanelsAreNotEvidence() {
+        // iPhone 12/13 mini: AX 375x812 over 1080x2340 px @3 = 360x780.
+        let mini = NativePortraitSize(width: 360, height: 780)
+        #expect(evidence(375, 812, native: mini) == nil)
+        #expect(evidence(812, 375, native: mini) == nil)
+        // iPhone 6/7/8 Plus: AX 414x736 over 1080x1920 px @3 = 360x640.
+        let plus = NativePortraitSize(width: 360, height: 640)
+        #expect(evidence(414, 736, native: plus) == nil)
+        // A resized scene on a mini is still evidence: the axes do not
+        // share one factor.
+        #expect(evidence(560, 812, native: mini) == .init(width: 560, height: 812))
+        // Same aspect as the device but outside the shipping downscale
+        // band is a resized scene too, not a panel.
+        #expect(evidence(201, 437, native: iPhone17) == .init(width: 201, height: 437))
     }
 
     @Test("rounding slack of one point is tolerated")
     func roundingSlack() {
-        #expect(!AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: tree(width: 402.6, height: 873.4), native: native))
+        #expect(evidence(402.6, 873.4, native: iPhone17) == nil)
     }
 
     @Test("no screen info or no framed root means no evidence")
     func noEvidence() {
-        #expect(!AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: tree(width: 560, height: 874), native: nil))
-        #expect(!AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: [["type": "Application", "role": "AXApplication"]] as AnyObject, native: native))
-        #expect(!AccessibilityFetcher.sceneSizeIsNotADeviceSize(info: [] as AnyObject, native: native))
+        #expect(evidence(560, 874, native: iPhone17) != nil)
+        #expect(AccessibilityFetcher.resizedSceneEvidence(info: tree(width: 560, height: 874), native: nil) == nil)
+        #expect(AccessibilityFetcher.resizedSceneEvidence(info: [["type": "Application", "role": "AXApplication"]] as AnyObject, native: iPhone17) == nil)
+        #expect(AccessibilityFetcher.resizedSceneEvidence(info: [] as AnyObject, native: iPhone17) == nil)
     }
 }
 
@@ -544,5 +601,19 @@ struct BatchTouchStepScanTests {
         #expect(!IOSSimBatchCommand.containsTouchStep(["type hello", "key 40", "key-sequence 40 41", "key-combo 55 6", "paste x", "sleep 0.1"]))
         #expect(!IOSSimBatchCommand.containsTouchStep([]))
         #expect(!IOSSimBatchCommand.containsTouchStep(["'unterminated", "not-a-kind foo"]))
+    }
+
+    @Test("stepKind(of:) is the per-step classifier the loop gate uses (R150-02)")
+    func stepKindOfLine() {
+        #expect(IOSSimBatchCommand.stepKind(of: "tap @1") == .tap)
+        #expect(IOSSimBatchCommand.stepKind(of: "  swipe --start-x 1 --start-y 2 --end-x 3 --end-y 4") == .swipe)
+        #expect(IOSSimBatchCommand.stepKind(of: "type 'hello world'") == .type)
+        #expect(IOSSimBatchCommand.stepKind(of: "sleep 0.5") == .sleep)
+        #expect(IOSSimBatchCommand.stepKind(of: "") == nil)
+        #expect(IOSSimBatchCommand.stepKind(of: "'unterminated") == nil)
+        #expect(IOSSimBatchCommand.stepKind(of: "not-a-kind foo") == nil)
+        for kind in IOSSimBatchCommand.touchStepKinds {
+            #expect(IOSSimBatchCommand.stepKind(of: "\(kind.rawValue) --x 1") == kind)
+        }
     }
 }

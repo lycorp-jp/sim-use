@@ -137,20 +137,21 @@ public struct AccessibilityFetcher {
         // calibration probes, collapsed-children recovery — would
         // therefore describe SpringBoard, not the app. The monitor caches
         // the ~0.3 s devicectl query; a root frame that is neither the
-        // device's portrait size nor its landscape swap is in-band
-        // evidence of a session and bypasses a cached "no session", so a
-        // session started moments ago is seen now rather than after the
-        // TTL. (A scene at exactly the device's size has no such evidence
-        // and waits for the TTL — the documented gap.)
-        let sceneLooksResized = Self.sceneSizeIsNotADeviceSize(info: info, native: native)
+        // device's portrait size, its landscape swap, nor a panel
+        // downscale is in-band evidence of a session. New evidence
+        // bypasses a cached "no session", so a session started moments
+        // ago is seen now rather than after the TTL; the same evidence
+        // seen again does not (R150-03). A scene at exactly the device's
+        // size has no evidence and waits for the TTL — the documented gap.
+        let sceneEvidence = Self.resizedSceneEvidence(info: info, native: native)
         let resizableSession = await ResizableAppSessionMonitor.shared
-            .state(for: simulatorUDID, refreshIfInactive: sceneLooksResized)
+            .state(for: simulatorUDID, evidence: sceneEvidence)
             .session
         perf.stage("resizable session check")
         if let resizableSession {
             logger.info().log("Resizable app session active (\(resizableSession.displayName) \(resizableSession.preferredSizeDescription)); hit-test driven recovery and calibration are skipped")
-        } else if sceneLooksResized {
-            logger.info().log("AX root frame is not a device size but CoreDevice reports no resizable app session; proceeding normally")
+        } else if let sceneEvidence {
+            logger.info().log("AX root frame \(Int(sceneEvidence.width))x\(Int(sceneEvidence.height)) is not a device size but CoreDevice reports no resizable app session; proceeding normally")
         }
 
         // Empty-shell retry (issue #64): a remote-process presentation
@@ -527,18 +528,31 @@ public struct AccessibilityFetcher {
         return []
     }
 
-    /// Whether the raw tree's display frame matches neither the device's
-    /// portrait size nor its landscape swap (±1 pt, like
-    /// `OrientationCalibrator.orderedCandidates`). True for a resized
-    /// scene at any size other than the device's own; false — no
-    /// evidence either way — when the tree has no framed root or the
-    /// screen info is unknown.
-    nonisolated static func sceneSizeIsNotADeviceSize(info: AnyObject, native: NativePortraitSize?) -> Bool {
-        guard let native, let display = rawDisplayFrame(in: rawRoots(of: info)) else { return false }
+    /// The raw tree's display frame as evidence of a resized scene, or nil
+    /// when the size is one a device can have: the portrait size, its
+    /// landscape swap (±1 pt, like `OrientationCalibrator.orderedCandidates`),
+    /// or a display-downscaled panel — iPhone mini lays out 375x812 over a
+    /// 360x780 pixels/scale framebuffer, the Plus family 414x736 over
+    /// 360x640. `OrientationCalibrator.uiPointScale` recognises exactly
+    /// that shape (one uniform factor inside the shipping band) and nothing
+    /// else, so a mini never counts as resized while 560x874 or 437x874 on
+    /// an iPhone 17 still do. Nil — no evidence either way — when the tree
+    /// has no framed root or the screen info is unknown.
+    nonisolated static func resizedSceneEvidence(
+        info: AnyObject,
+        native: NativePortraitSize?
+    ) -> ResizableAppSessionMonitor.SceneEvidence? {
+        guard let native, let display = rawDisplayFrame(in: rawRoots(of: info)) else { return nil }
         func matches(_ width: Double, _ height: Double) -> Bool {
             abs(display.width - width) <= 1 && abs(display.height - height) <= 1
         }
-        return !matches(native.width, native.height) && !matches(native.height, native.width)
+        if matches(native.width, native.height) || matches(native.height, native.width) { return nil }
+        let scale = OrientationCalibrator.uiPointScale(
+            native: native,
+            uiScreenSize: (width: display.width, height: display.height)
+        )
+        if !scale.isIdentity { return nil }
+        return ResizableAppSessionMonitor.SceneEvidence(width: display.width, height: display.height)
     }
 
     /// Raw-payload mirror of `AXDisplayFrame.frame(in:)`: the largest

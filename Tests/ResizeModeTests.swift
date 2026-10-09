@@ -157,10 +157,60 @@ struct ResizeModeTests {
         #expect(batch.exitCode != 0)
         #expect(batch.output.contains("this batch would report success"))
 
+        // `paste --via-menu` is a touch path (long-press + menu taps) and
+        // is refused before the pasteboard is written — for a coordinate
+        // target and for an id target alike (R150-01). Cmd+V paste is
+        // keyboard HID and stays available.
+        let pasteXY = try await CommandRunner.run(
+            "\(simUse) paste --udid \(udid) --via-menu --target-x 100 --target-y 300 --menu-timeout 0.5 --json menu-xy", allowFailure: true
+        )
+        #expect(pasteXY.exitCode != 0)
+        let pasteXYEnvelope = try Self.json(pasteXY.output)
+        #expect((pasteXYEnvelope["error"] as? String ?? "").contains("this paste --via-menu would report success"))
+        let pasteID = try await CommandRunner.run(
+            "\(simUse) paste --udid \(udid) --via-menu --target-id text-input-screen --menu-timeout 0.5 menu-id", allowFailure: true
+        )
+        #expect(pasteID.exitCode != 0)
+        #expect(pasteID.output.contains("this paste --via-menu would report success"))
+        let pasteKeyboard = try await CommandRunner.run("\(simUse) paste --udid \(udid) kbd", allowFailure: true)
+        #expect(pasteKeyboard.exitCode == 0, "Cmd+V paste must not be refused: \(pasteKeyboard.output.prefix(300))")
+        #expect(!pasteKeyboard.output.contains("resizable app session"))
+
         _ = try await CommandRunner.run("\(simUse) type --udid \(udid) 'resized'")
         try await Task.sleep(nanoseconds: 1_000_000_000)
         let (outline, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
         #expect(outline.contains("resized"), "typed text should reach the resized app; outline:\n\(outline.prefix(600))")
+
+        await session.end()
+    }
+
+    @Test("a batch started inside the stale no-session cache window is still refused at its first touch step (R150-02)")
+    func batchInsideStaleCacheWindowIsRefused() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+        // Warm the daemon's cache with "no session" right before the
+        // session starts — the shape the reviewer reproduced live. The
+        // pre-scan then sees a stale inactive answer; the selector step's
+        // tree fetch supplies the 560-wide evidence, and the per-step
+        // gate must refuse before the first touch is dispatched.
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+
+        let batchFile = FileManager.default.temporaryDirectory.appendingPathComponent("resize-stale-batch-\(UUID().uuidString).txt")
+        try "tap --label 'Tap Count: 0'\nsleep 1\ntap -x 100 -y 300\n".write(to: batchFile, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: batchFile) }
+        let batch = try await CommandRunner.run("\(simUse) ios batch --udid \(udid) --file \(batchFile.path) --json", allowFailure: true)
+        #expect(batch.exitCode != 0, "batch must not report success inside a session: \(batch.output.prefix(400))")
+        let envelope = try Self.json(batch.output)
+        #expect(envelope["ok"] as? Bool == false)
+        #expect((envelope["error"] as? String ?? "").contains("this batch would report success and deliver nothing"))
+        #expect((envelope["hint"] as? String ?? "").contains("appResize start"))
+
+        // Nothing reached the app.
+        let (outline, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        #expect(outline.contains("Tap Count: 0"), "no touch may have landed; outline:\n\(outline.prefix(600))")
 
         await session.end()
     }

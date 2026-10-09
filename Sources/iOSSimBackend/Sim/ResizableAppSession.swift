@@ -217,9 +217,26 @@ public actor ResizableAppSessionMonitor {
     /// Resize Mode shipped with Xcode 27; older toolchains never host a session.
     public static let minimumXcodeMajor = 27
 
+    /// In-band evidence that the frontmost scene is resized: the AX root
+    /// frame's size when it is neither the device's portrait size nor its
+    /// landscape swap, nor a known panel downscale (see
+    /// `AccessibilityFetcher.resizedSceneEvidence`). Compared by value, so
+    /// the same evidence seen again does not re-probe.
+    public struct SceneEvidence: Equatable, Sendable {
+        public let width: Double
+        public let height: Double
+
+        public init(width: Double, height: Double) {
+            self.width = width
+            self.height = height
+        }
+    }
+
     private struct CacheEntry {
         let state: ResizableAppSessionState
         let checkedAt: Date
+        /// The evidence the probe was made with — nil when none was offered.
+        let evidence: SceneEvidence?
     }
 
     private let ttl: TimeInterval
@@ -249,14 +266,17 @@ public actor ResizableAppSessionMonitor {
 
     /// The session state for `udid`, from the cache when fresh.
     ///
-    /// `refreshIfInactive` bypasses a cached non-active answer: callers that
-    /// hold in-band evidence of a session — an AX root whose size is neither
-    /// the device's portrait size nor its landscape swap — pass `true` so a
+    /// `evidence` is in-band evidence of a resized scene (see
+    /// `SceneEvidence`). Evidence that *differs* from what the cached
+    /// non-active answer was probed with bypasses that answer, so a
     /// session that started inside the TTL window is noticed on the first
-    /// command that can see it, instead of up to `ttl` seconds later. A
-    /// cached *active* answer is never bypassed: nothing in-band proves a
-    /// session ended, and the TTL already bounds that staleness.
-    public func state(for udid: String, refreshIfInactive: Bool = false) -> ResizableAppSessionState {
+    /// command that can see it, instead of up to `ttl` seconds later. The
+    /// same evidence seen again does not re-probe: a display whose AX size
+    /// legitimately never matches the device size (review finding
+    /// R150-03) pays one probe per TTL like everyone else. A cached
+    /// *active* answer is never bypassed: nothing in-band proves a session
+    /// ended, and the TTL already bounds that staleness.
+    public func state(for udid: String, evidence: SceneEvidence? = nil) -> ResizableAppSessionState {
         if let raw = environment[Self.disableEnvironmentKey]?.lowercased(),
            ["0", "false", "no", "off"].contains(raw)
         {
@@ -272,7 +292,7 @@ public actor ResizableAppSessionMonitor {
         let now = clock()
         if let entry = cache[udid], now.timeIntervalSince(entry.checkedAt) < ttl {
             if case .active = entry.state { return entry.state }
-            if !refreshIfInactive { return entry.state }
+            if evidence == nil || evidence == entry.evidence { return entry.state }
         }
 
         probeCount += 1
@@ -280,7 +300,7 @@ public actor ResizableAppSessionMonitor {
         if case .unavailable(let reason) = state, reason.contains("subcommand") {
             toolUnavailableReason = reason
         }
-        cache[udid] = CacheEntry(state: state, checkedAt: now)
+        cache[udid] = CacheEntry(state: state, checkedAt: now, evidence: evidence)
         return state
     }
 
@@ -293,9 +313,10 @@ public actor ResizableAppSessionMonitor {
 // MARK: - Guard (touch verbs)
 
 /// Thrown instead of dispatching a touch while a session is active. Keyboard
-/// HID (`type`, `key`, `key-combo`, `key-sequence`, `paste`) is device-wide
-/// and *does* reach the resized app (verified live), so only touch verbs
-/// take this path.
+/// HID (`type`, `key`, `key-combo`, `key-sequence`, Cmd+V `paste`) is
+/// device-wide and *does* reach the resized app (verified live), so only
+/// touch paths take this: the touch verbs, touch-bearing `batch` steps, and
+/// `paste --via-menu` (a long-press plus menu taps).
 public struct ResizableAppSessionError: LocalizedError, HintProviding, Equatable {
     public let verb: String
     public let udid: String
@@ -316,7 +337,8 @@ public struct ResizableAppSessionError: LocalizedError, HintProviding, Equatable
 
     public var hint: String? {
         "End the session — stop the `xcrun devicectl device appResize start` process, or rotate the device — and retry, " +
-            "or test at the device's native size. `ui`, `screenshot`, `type` and the key verbs keep working during a session. " +
+            "or test at the device's native size. `ui`, `screenshot`, `type`, the key verbs and Cmd+V `paste` keep working during a session; " +
+            "`paste --via-menu` is a touch path and is refused like the touch verbs. " +
             "Set \(ResizableAppSessionMonitor.disableEnvironmentKey)=0 to skip this check."
     }
 }
@@ -363,7 +385,7 @@ public enum ResizableAppSessionAdvisory {
             kind: .resizableAppSession,
             message: "A resizable app session (Xcode 27 Resize Mode) is active: the app renders on the '\(session.displayName)' display at \(sizes). " +
                 "The outline is the app's own tree; hit-test recovery and orientation calibration were skipped because the simulator resolves points on the main display, where SpringBoard is frontmost. " +
-                "Touch verbs (tap, long-press, swipe, touch, gesture, multi-touch) are refused during the session; `type`, the key verbs and `screenshot` work."
+                "Touch paths (tap, long-press, swipe, touch, gesture, multi-touch, touch-bearing batch steps, paste --via-menu) are refused during the session; `type`, the key verbs, Cmd+V `paste` and `screenshot` work."
         )
     }
 
