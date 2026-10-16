@@ -168,6 +168,63 @@ struct FoldTests {
         }
     }
 
+    @Test("typing keeps working after a fold starts dtuhidd (S6, Device Hub closed)")
+    func typingAfterFoldStartsDtuhidd() async throws {
+        guard let udid = try await Self.duoUDID() else { return }
+        let simUse = try TestHelpers.getSimUsePath()
+        try await Self.preservingPosture(udid: udid) {
+            // Fold only when needed: a fold report itself starts dtuhidd,
+            // which would hide the case under test. A cold boot is folded.
+            if await Self.integratedDisplays(udid: udid)?.activeIsPrimary != true {
+                _ = try await Self.fold("closed", udid: udid)
+            }
+            // The text-input screen focuses its field on launch.
+            try await TestHelpers.launchPlaygroundApp(to: "text-input")
+            // A fresh daemon makes its HID connection with this tap: with
+            // Device Hub closed there is no dtuhidd yet, so it is the
+            // Indigo transport.
+            _ = try await CommandRunner.run("\(simUse) daemon stop --udid \(udid)", allowFailure: true)
+            func tapField() async throws {
+                let field = try await CommandRunner.run("\(simUse) ui --udid \(udid)").output
+                    .components(separatedBy: "\n").first { $0.contains("TextField") }
+                let alias = try #require(field?.split(separator: " ").first { $0.hasPrefix("@") }, "no text field: \(String(describing: field))")
+                _ = try await TestHelpers.runSimUseCommand("tap \(alias)", simulatorUDID: udid)
+            }
+            try await tapField()
+            // fold talks to dtuhidd, which launchd starts on demand; an
+            // active dtuhidd suppresses the legacy keyboard service.
+            _ = try await Self.fold("open", udid: udid)
+            _ = try await Self.fold("closed", udid: udid)
+            try await tapField()
+            let text = "hub\(Int.random(in: 100...999))"
+            _ = try await TestHelpers.runSimUseCommand("type \(text)", simulatorUDID: udid)
+            try await Task.sleep(nanoseconds: 800_000_000)
+            let (outline, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+            #expect(outline.contains("TextField  \"\(text)\""), "typed text should reach the field: \(outline.prefix(600))")
+        }
+    }
+
+    @Test("an inner-display tap reaches the app when the connection was made without dtuhidd (S6)")
+    func innerTapAfterIndigoConnection() async throws {
+        guard let udid = try await Self.duoUDID() else { return }
+        let simUse = try TestHelpers.getSimUsePath()
+        try await Self.preservingPosture(udid: udid) {
+            if await Self.integratedDisplays(udid: udid)?.activeIsPrimary != true {
+                _ = try await Self.fold("closed", udid: udid)
+            }
+            try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+            // A fresh daemon's first touch makes the HID connection on the
+            // cover; with Device Hub closed it is the Indigo transport.
+            _ = try await CommandRunner.run("\(simUse) daemon stop --udid \(udid)", allowFailure: true)
+            _ = try await TestHelpers.runSimUseCommand("tap -x 200 -y 300", simulatorUDID: udid)
+            _ = try await Self.fold("open", udid: udid)
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            _ = try await TestHelpers.runSimUseCommand("tap -x 300 -y 330", simulatorUDID: udid)
+            try await Task.sleep(nanoseconds: 700_000_000)
+            #expect(try await Self.tapLocation(udid: udid) == "(300, 330)")
+        }
+    }
+
     @Test("unfolded: taps by AX id land on all four corners in every rotation")
     func innerDisplayAXTapsAllRotations() async throws {
         guard let udid = try await Self.duoUDID() else { return }
