@@ -159,7 +159,10 @@ extension RoutingDisplay {
     /// The inner iPhone Duo panel is captured whole, in its native portrait
     /// orientation like the main display; a Resize Mode scene sits at the
     /// origin of the `Resizable` canvas (E14), so the capture is cut to it.
-    public func captureSource() throws -> CaptureSource? {
+    /// `sceneSize` is the scene the session actually shows, in points: an
+    /// app can snap away from the requested size (S5-001), so the request
+    /// is only the fallback.
+    public func captureSource(sceneSize: CGSize? = nil) throws -> CaptureSource? {
         switch self {
         case .main:
             return nil
@@ -170,9 +173,13 @@ extension RoutingDisplay {
                 throw CLIError(errorDescription: "A resizable app session is active, but CoreDevice did not list its '\(session.displayName)' display (\(session.displayUniqueID)), so it cannot be captured. Re-run the command; if it persists, end the session.")
             }
             let scale = display.pointScale
+            let width = sceneSize.map { Double($0.width) } ?? session.preferredWidth
+            let height = sceneSize.map { Double($0.height) } ?? session.preferredHeight
+            // H.264 needs even sizes; round up so no scene pixel is lost.
+            func even(_ pixels: Double) -> Double { (pixels / 2).rounded(.up) * 2 }
             return CaptureSource(
                 display: display,
-                crop: CGRect(x: 0, y: 0, width: session.preferredWidth * scale, height: session.preferredHeight * scale)
+                crop: CGRect(x: 0, y: 0, width: even(width * scale), height: even(height * scale))
             )
         }
     }
@@ -297,17 +304,26 @@ public enum RoutingDisplayGuard {
     /// What a video capture reads (docs/ai/010-display-routing, S5): nil on
     /// the main display, else the framebuffer of the display that hosts
     /// the app.
+    /// `sceneSize` reads the app's current scene size in points (the
+    /// frontmost application's frame); it runs only for a Resize Mode
+    /// session.
     public static func captureSource(
         udid: String,
         verb: String,
         logger: SimUseLogger,
+        sceneSize: (() async -> CGSize?)? = nil,
         sessionMonitor: ResizableAppSessionMonitor = .shared,
         topologyMonitor: SimulatorDisplayTopologyMonitor = .shared
     ) async throws -> CaptureSource? {
         let routing = await RoutingDisplayResolver.current(udid: udid, sessionMonitor: sessionMonitor, topologyMonitor: topologyMonitor)
-        guard let source = try routing.captureSource() else { return nil }
+        guard let source = try await source(of: routing, sceneSize: sceneSize) else { return nil }
         logger.info().log("\(verb) captures display '\(source.displayName)' (\(source.pixelWidth)x\(source.pixelHeight) px\(source.crop.map { ", cut to \(Int($0.width))x\(Int($0.height))" } ?? ""))")
         return source
+    }
+
+    private static func source(of routing: RoutingDisplay, sceneSize: (() async -> CGSize?)?) async throws -> CaptureSource? {
+        guard case .resizable = routing, let sceneSize else { return try routing.captureSource() }
+        return try routing.captureSource(sceneSize: await sceneSize())
     }
 
     /// A note for the end of a capture whose app moved to another display
@@ -317,10 +333,19 @@ public enum RoutingDisplayGuard {
         udid: String,
         verb: String,
         started: CaptureSource?,
+        sceneSize: (() async -> CGSize?)? = nil,
         sessionMonitor: ResizableAppSessionMonitor = .shared,
         topologyMonitor: SimulatorDisplayTopologyMonitor = .shared
     ) async -> String? {
-        let now = try? await RoutingDisplayResolver.current(udid: udid, sessionMonitor: sessionMonitor, topologyMonitor: topologyMonitor).captureSource()
+        // A short capture ends inside the monitors' cache windows (5 s for
+        // the session, 2 s for a multi-display topology): read both afresh
+        // (S5-003). A single-display topology cannot change while booted.
+        await sessionMonitor.invalidate(udid: udid)
+        if await topologyMonitor.state(for: udid).topology?.isMultiDisplay == true {
+            _ = await topologyMonitor.state(for: udid, fresh: true)
+        }
+        let routing = await RoutingDisplayResolver.current(udid: udid, sessionMonitor: sessionMonitor, topologyMonitor: topologyMonitor)
+        let now = try? await source(of: routing, sceneSize: sceneSize)
         guard now != started else { return nil }
         if let started, let now, now.displayName == started.displayName, let crop = started.crop {
             return "[i] The app's scene on display '\(now.displayName)' was resized while `\(verb)` ran; the video keeps the \(Int(crop.width))x\(Int(crop.height)) it started with.\n"

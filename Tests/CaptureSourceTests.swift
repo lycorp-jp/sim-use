@@ -42,6 +42,16 @@ struct CaptureSourceTests {
         #expect(source.crop == CGRect(x: 0, y: 0, width: 1680, height: 2622))
     }
 
+    @Test("the crop follows the scene the session snapped to, rounded up to even pixels (S5-001)")
+    func snappedScene() throws {
+        let topology = try topology("iphone17")
+        let canvas = try #require(topology.displays.first { $0.name == "Resizable" })
+        // Asked for 402x874; Settings › General snapped to 437x874.
+        let session = ResizableAppSession(displayUniqueID: canvas.uniqueID, displayName: "Resizable", preferredWidth: 402, preferredHeight: 874)
+        let source = try #require(try RoutingDisplay.resizable(session, canvas).captureSource(sceneSize: CGSize(width: 437, height: 874)))
+        #expect(source.crop == CGRect(x: 0, y: 0, width: 1312, height: 2622))
+    }
+
     @Test("a session whose display CoreDevice did not list cannot be captured")
     func resizableWithoutDisplay() {
         let session = ResizableAppSession(displayUniqueID: "X", displayName: "Resizable", preferredWidth: 560, preferredHeight: 874)

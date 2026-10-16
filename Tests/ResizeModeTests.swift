@@ -324,6 +324,59 @@ struct ResizeModeTests {
         await session.end()
     }
 
+    @Test("a recording follows the scene the session snapped to (S5-001)")
+    func recordingFollowsSnappedScene() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        _ = try? await CommandRunner.run("xcrun simctl terminate \(udid) com.apple.Preferences", allowFailure: true)
+        _ = try await CommandRunner.run("xcrun simctl launch \(udid) com.apple.Preferences")
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+        // Settings' root does not keep a session; its General page does.
+        _ = try await CommandRunner.run("\(simUse) tap --id com.apple.settings.general --udid \(udid)", allowFailure: true)
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+        _ = try await CommandRunner.run(
+            "xcrun devicectl device appResize set --device \(udid) --preferred-size 402x874 --quiet --timeout 10", allowFailure: true)
+        try await Task.sleep(nanoseconds: 2_000_000_000)
+
+        // The header shows the scene the app actually took.
+        let (outline, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        let header = outline.components(separatedBy: "\n").first ?? ""
+        let size = try #require(header.firstMatch(of: #/  (\d+)x(\d+)  /#), "header: \(header)")
+        let sceneWidth = Int(size.1)!, sceneHeight = Int(size.2)!
+        func even(_ value: Int) -> Int { (value + 1) / 2 * 2 }
+
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("snap-record-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: output) }
+        try await RoutedVideo.record(simUse: simUse, udid: udid, output: output, seconds: 2.5)
+        let recorded = try await RoutedVideo.videoSize(output)
+        #expect(recorded == CGSize(width: even(sceneWidth * 3), height: even(sceneHeight * 3)),
+                "scene \(sceneWidth)x\(sceneHeight) pt, recorded \(String(describing: recorded))")
+        await session.end()
+    }
+
+    @Test("a short recording whose scene is resized ends with the notice (S5-003)")
+    func shortRecordingResizeNotice() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+
+        let output = FileManager.default.temporaryDirectory.appendingPathComponent("short-record-\(UUID().uuidString).mp4")
+        defer { try? FileManager.default.removeItem(at: output) }
+        // Well inside the session monitor's 5 s cache window.
+        let stderr = try await RoutedVideo.record(simUse: simUse, udid: udid, output: output, seconds: 2.4) {
+            _ = try? await CommandRunner.run(
+                "xcrun devicectl device appResize set --device \(udid) --preferred-size 560x667 --quiet --timeout 10", allowFailure: true)
+        }
+        #expect(stderr.contains("was resized while `record-video` ran"), "stderr: \(stderr)")
+        #expect(try await RoutedVideo.videoSize(output) == CGSize(width: 1680, height: 2622))
+        await session.end()
+    }
+
     @Test("screenshot captures the Resizable display and says so; the main display afterwards")
     func screenshotRedirect() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()

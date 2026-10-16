@@ -87,11 +87,6 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         guard !trimmedUDID.isEmpty else {
             throw CLIError(errorDescription: "Simulator UDID cannot be empty. Use --udid to specify a simulator.")
         }
-        // Off the main display (an unfolded iPhone Duo, a Resize Mode
-        // session) the recording reads the framebuffer of the display that
-        // hosts the app (docs/ai/010-display-routing, S5).
-        let source = try await RoutingDisplayGuard.captureSource(udid: trimmedUDID, verb: "record-video", logger: logger)
-
         let simulatorSet = try await getSimulatorSet(deviceSetPath: nil, logger: logger, reporter: EmptyEventReporter.shared)
         guard let targetSimulator = simulatorSet.allSimulators.first(where: { $0.udid == trimmedUDID }) else {
             throw CLIError(errorDescription: "Simulator with UDID \(trimmedUDID) not found.")
@@ -101,6 +96,13 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
             let stateDescription = FBiOSTargetStateStringFromState(targetSimulator.state)
             throw CLIError(errorDescription: "Simulator \(trimmedUDID) is not booted. Current state: \(stateDescription)")
         }
+
+        // Off the main display (an unfolded iPhone Duo, a Resize Mode
+        // session) the recording reads the framebuffer of the display that
+        // hosts the app (docs/ai/010-display-routing, S5). Resolved before
+        // any output file is created.
+        let sceneSize: () async -> CGSize? = { (try? await targetSimulator.frontmostApplicationFrame())?.size }
+        let source = try await RoutingDisplayGuard.captureSource(udid: trimmedUDID, verb: "record-video", logger: logger, sceneSize: sceneSize)
 
         // GIF is transcoded from a finished MP4 (see GIFTranscoder); the
         // capture loop itself always writes H.264, to plan.recordTarget.
@@ -156,7 +158,7 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         // a handler that has nothing left to cancel (invalidate is
         // idempotent; the defer covers the error paths above).
         signalObserver.invalidate()
-        if let notice = await RoutingDisplayGuard.captureMovedNotice(udid: trimmedUDID, verb: "record-video", started: source) {
+        if let notice = await RoutingDisplayGuard.captureMovedNotice(udid: trimmedUDID, verb: "record-video", started: source, sceneSize: sceneSize) {
             FileHandle.standardError.write(Data(notice.utf8))
         }
         try await plan.finalizeRecording()

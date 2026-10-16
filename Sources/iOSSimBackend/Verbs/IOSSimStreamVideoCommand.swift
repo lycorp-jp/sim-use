@@ -149,19 +149,6 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         guard !trimmedUDID.isEmpty else {
             throw CLIError(errorDescription: "Simulator UDID cannot be empty. Use --udid to specify a simulator.")
         }
-        // Off the main display (an unfolded iPhone Duo, a Resize Mode
-        // session) the native formats read the framebuffer of the display
-        // that hosts the app (docs/ai/010-display-routing, S5). The
-        // screenshot loop reads the main display only: refuse it there
-        // before a single byte reaches stdout.
-        let source: CaptureSource?
-        if format.isNativeStream {
-            source = try await RoutingDisplayGuard.captureSource(udid: trimmedUDID, verb: "stream-video", logger: logger)
-        } else {
-            source = nil
-            try await RoutingDisplayGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "stream-video --format \(format.rawValue)", logger: logger)
-        }
-
         let simulatorSet = try await getSimulatorSet(deviceSetPath: nil, logger: logger, reporter: EmptyEventReporter.shared)
         guard let targetSimulator = simulatorSet.allSimulators.first(where: { $0.udid == trimmedUDID }) else {
             throw CLIError(errorDescription: "Simulator with UDID \(trimmedUDID) not found.")
@@ -172,6 +159,20 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             throw CLIError(errorDescription: "Simulator \(trimmedUDID) is not booted. Current state: \(stateDescription)")
         }
 
+        let sceneSize: () async -> CGSize? = { (try? await targetSimulator.frontmostApplicationFrame())?.size }
+        // Off the main display (an unfolded iPhone Duo, a Resize Mode
+        // session) the native formats read the framebuffer of the display
+        // that hosts the app (docs/ai/010-display-routing, S5). The
+        // screenshot loop reads the main display only: refuse it there
+        // before a single byte reaches stdout.
+        let source: CaptureSource?
+        if format.isNativeStream {
+            source = try await RoutingDisplayGuard.captureSource(udid: trimmedUDID, verb: "stream-video", logger: logger, sceneSize: sceneSize)
+        } else {
+            source = nil
+            try await RoutingDisplayGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "stream-video --format \(format.rawValue)", logger: logger)
+        }
+
         let cancellationFlag = CancellationFlag()
         let signalObserver = SignalObserver(signals: [SIGINT, SIGTERM]) {
             cancellationFlag.cancel()
@@ -180,7 +181,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
 
         if format.isNativeStream {
             try await streamNative(from: targetSimulator, source: source, format: format, cancellationFlag: cancellationFlag)
-            if let notice = await RoutingDisplayGuard.captureMovedNotice(udid: trimmedUDID, verb: "stream-video", started: source) {
+            if let notice = await RoutingDisplayGuard.captureMovedNotice(udid: trimmedUDID, verb: "stream-video", started: source, sceneSize: sceneSize) {
                 FileHandle.standardError.write(Data(notice.utf8))
             }
             // The native paths copy encoded bytes through FBVideoStream and

@@ -303,6 +303,39 @@ struct RoutingDisplayGuardTests {
         }
     }
 
+    @Test("the end-of-capture check reads fresh state, not the cache (S5-003)")
+    func captureMovedNoticeIsFresh() async throws {
+        final class Box: @unchecked Sendable {
+            private let lock = NSLock()
+            private var value: ResizableAppSessionState
+            init(_ value: ResizableAppSessionState) { self.value = value }
+            var state: ResizableAppSessionState {
+                get { lock.lock(); defer { lock.unlock() }; return value }
+                set { lock.lock(); value = newValue; lock.unlock() }
+            }
+        }
+        let canvas = try #require(try topology("iphone17").displays.first { $0.name == "Resizable" })
+        let tall = ResizableAppSession(displayUniqueID: canvas.uniqueID, displayName: "Resizable", preferredWidth: 560, preferredHeight: 874)
+        let short = ResizableAppSession(displayUniqueID: canvas.uniqueID, displayName: "Resizable", preferredWidth: 560, preferredHeight: 667)
+        let box = Box(.active(tall))
+        let sessions = ResizableAppSessionMonitor(probe: { _ in box.state }, environment: [:])
+        let topologies = topologyMonitor(.available(try topology("iphone17")))
+        // Prime the caches the way the capture start does.
+        let started = try await RoutingDisplayGuard.captureSource(
+            udid: "U", verb: "record-video", logger: quietLogger, sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologies
+        )
+        #expect(started == nil)
+        let primed = try await RoutingDisplayGuard.captureSource(
+            udid: "U", verb: "record-video", logger: quietLogger, sessionMonitor: sessions, topologyMonitor: topologies
+        )
+        // The session is resized well inside the 5 s cache window.
+        box.state = .active(short)
+        let notice = await RoutingDisplayGuard.captureMovedNotice(
+            udid: "U", verb: "record-video", started: primed, sessionMonitor: sessions, topologyMonitor: topologies
+        )
+        #expect(notice?.contains("was resized") == true, "\(String(describing: notice))")
+    }
+
     @Test("a capture whose app moved to another display ends with a notice (S5)")
     func captureMovedNotice() async throws {
         let open = SimulatorDisplayTopologyState.available(try topology("duo-open"))
