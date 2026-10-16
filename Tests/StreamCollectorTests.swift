@@ -10,8 +10,11 @@ import Testing
 
 @Suite("StreamCollector")
 struct StreamCollectorTests {
+    // Timeouts that should never be reached are long, and finish() runs on
+    // its own thread: in the full parallel suite the global queues and the
+    // cooperative pool can be busy for seconds.
     @Test("bytes a reader callback already took are in the result of finish()")
-    func inFlightReaderIsKept() async throws {
+    func inFlightReaderIsKept() throws {
         let pipe = Pipe()
         let readerTook = DispatchSemaphore(value: 0)
         let release = DispatchSemaphore(value: 0)
@@ -21,18 +24,18 @@ struct StreamCollectorTests {
         })
         pipe.fileHandleForWriting.write(Data("boom".utf8))
         // The reader has the bytes and is paused before it records them.
-        #expect(readerTook.wait(timeout: .now() + 5) == .success)
+        #expect(readerTook.wait(timeout: .now() + 30) == .success)
 
         let result = Box()
         let finished = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
+        Thread {
             result.data = collector.finish()
             finished.signal()
-        }
+        }.start()
         // finish() must wait for the reader rather than return without it.
         #expect(finished.wait(timeout: .now() + 0.3) == .timedOut)
         release.signal()
-        #expect(finished.wait(timeout: .now() + 5) == .success)
+        #expect(finished.wait(timeout: .now() + 30) == .success)
         #expect(result.data == Data("boom".utf8))
         try pipe.fileHandleForWriting.close()
     }
