@@ -218,6 +218,43 @@ struct OutlineSideBarTests {
         #expect(outline.entries.first { $0.uniqueId == "BackButton" }?.region.kind == "Top")
     }
 
+    @Test("a segmented control above a leading bar does not hide the bar")
+    func segmentedControlAboveLeadingBar() throws {
+        // A 27.1 SDK app on the Duo cover in landscape-right (LINE's chat
+        // list): its own header starts inside the leading strip, above the
+        // bar, with a two-segment control at x 42. The segments neither
+        // join the bar's column nor count as content crossing it.
+        let tabs = (0..<5).map { element("RadioButton", "Tab \($0)", 26, 182 + 50 * $0, 44, 58) }
+        let children = (tabs + [
+            element("RadioButton", "Chats", 42, 28, 65, 36),
+            element("RadioButton", "Friends", 107, 28, 57, 36),
+            element("Button", "Add", 598, 34, 36, 24),
+            element("GenericElement", "Search", 100, 84, 518, 39),
+            element("StaticText", "Notice", 84, 128, 594, 68),
+            element("Button", "Row 1", 84, 196, 594, 68),
+            element("Button", "Row 2", 84, 264, 594, 68),
+            element("Group", "", 84, 0, 594, 466),
+        ]).joined(separator: ",")
+        let outline = OutlineFormatter.render(tree: try tree(children, width: 678, height: 466))
+        for index in 0..<5 {
+            #expect(outline.regionKind(label: "Tab \(index)") == "Leading")
+        }
+        #expect(outline.regionKind(label: "Chats") == "Top")
+        #expect(outline.regionKind(label: "Row 1") == "Content")
+    }
+
+    @Test("content that crosses the bar's edge beside the bar still blocks it")
+    func crossingBesideTheBarBlocks() throws {
+        // The same screen with a row that runs under the tabs: not a bar.
+        let tabs = (0..<5).map { element("RadioButton", "Tab \($0)", 26, 182 + 50 * $0, 44, 58) }
+        let children = (tabs + [
+            element("StaticText", "Notice", 84, 128, 594, 68),
+            element("Button", "Row 1", 0, 264, 678, 68),
+        ]).joined(separator: ",")
+        let outline = OutlineFormatter.render(tree: try tree(children, width: 678, height: 466))
+        #expect(outline.entries.allSatisfy { !["Leading", "Trailing"].contains($0.region.kind) })
+    }
+
     @Test("a single tab with unrelated items above it is not a bar")
     func singleTabAnchor() throws {
         let children = [
