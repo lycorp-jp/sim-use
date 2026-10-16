@@ -37,30 +37,28 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 ## iOS: Resize Mode (resizable app session)
 
-**Symptom:** `tap`, `long-press`, `swipe`, `touch`, `gesture`, `multi-touch`, `paste --via-menu`, a `batch` with a touch step, `record-video` or `stream-video` fails with `A resizable app session (Xcode 27 Resize Mode) is active on simulator …` (`--json`: `ok: false` with a `hint`). `ui` prints `[i] A resizable app session … is active` (`--json`: `advisory.kind: resizable_app_session`) and its `App:` header shows a size that is not a real device size (`560x874`, `375x667`, `874x402` on an upright iPhone 17). `screenshot` prints `[i] Captured the 'Resizable' display …`.
+**Symptom:** The `ui` header ends in `display Resizable 560x874` (`--json`: a `data.display` object with `kind: virtual` and `resizableSession`), its size is not a real device size, and `screenshot` prints `[i] Captured the 'Resizable' display …`. `record-video` and `stream-video` fail with `… captures only the main display …`.
 
-**Why:** Xcode 27 can move the frontmost app of an iOS 27+ simulator onto a virtual display named `Resizable` and give it any size (Device Hub's resize button, or `xcrun devicectl device appResize start`). The main display then shows only the wallpaper, with SpringBoard frontmost. Simulator touch input, the main framebuffer and the accessibility point hit-test are all bound to the main display, so a tap would be reported as delivered and reach nothing — which is why sim-use refuses it. Keyboard input is device-wide and does reach the app. Issue: https://github.com/lycorp-jp/sim-use/issues/143.
+**Why:** Xcode 27 can move the frontmost app of an iOS 27+ simulator onto a virtual display named `Resizable` and give it any size (Device Hub's resize button, or `xcrun devicectl device appResize start`). sim-use detects the session and routes touch input, hit-tests and screenshots to that display. Video capture still reads only the main display, which shows the wallpaper. Issue: https://github.com/lycorp-jp/sim-use/issues/143.
 
 **Recipes:**
-1. Observe freely: `ui` is the app's own tree at the resized size (hit-test recovery and orientation calibration are skipped, so collapsed groups stay collapsed), and `screenshot` is redirected to the `Resizable` display. `record-video` and `stream-video` are refused — they can only capture the main display; record the app with `xcrun simctl io <udid> recordVideo --display=<uuid> <file.mov>` (the error's hint fills in the uuid). The `App:` header is the only place the scene's *actual* size shows — `appResize set` reports the size it asked for, which the scene may snap away from.
-2. Drive with the keyboard: `type`, Cmd+V `paste`, `key`, `key-combo`, `key-sequence` and keyboard-only `batch` runs work during a session. `paste --via-menu` is a long-press plus menu taps and is refused like a tap. Focus the field *before* starting the session, since focusing needs a tap.
-3. To tap, end the session: stop the `devicectl device appResize start` process (or rotate the device — rotation ends a session), re-run `ui`, then tap. The app returns to the device's native size.
-4. Never use `--point`/`-x -y` as a workaround — raw coordinates are refused like selectors, and `ui --point` describes SpringBoard, not the app.
-5. The check costs one `devicectl` query per device per 5 s. A session that just *started* is noticed by the next `ui`, selector tap, or touch step of a `batch` (a newly resized root frame bypasses the cache; a `batch` re-checks before every touch step) unless the scene is exactly the device's own size; a session that just *ended*, and standalone raw `-x/-y` taps right after a start, can see the previous answer for up to 5 s. `SIM_USE_RESIZE_SESSION_CHECK=0` disables the check (you are then back to silent no-op taps); the per-device daemon reads it at spawn time, so set it on the first command or pair it with `SIM_USE_NO_DAEMON=1`. This recipe needs sim-use 0.15.0 or newer — the preflight enforces it.
+1. Work as usual: `ui`, selectors, `@N`, `tap`, `swipe`, `gesture`, `type` and `screenshot` all act on the resized app. The `App:` header is the only place the scene's *actual* size shows — `appResize set` reports the size it asked for, which the scene may snap away from.
+2. Explicit `-x/-y` are scene points (the scene is never rotated).
+3. To record video, end the session (stop the `devicectl device appResize start` process), or record the display yourself with `xcrun simctl io <udid> recordVideo --display=<uuid> <file.mov>` (the error's hint fills in the uuid).
+4. The check costs one `devicectl` query per device per 5 s. A `ui` or selector tap whose root changed size re-reads it at once, so a session that just started or ended is noticed by the next `ui`. A raw `-x/-y` tap with no `ui` in between can see the previous answer for up to 5 s. `SIM_USE_RESIZE_SESSION_CHECK=0` disables the check; the per-device daemon reads it at spawn time.
 
 ## iOS: iPhone Duo (multi-display simulator)
 
-**Symptom:** The `ui` header ends in `display LCD-1` (for example `App: Settings  951x669  (landscape-left, display LCD-1)`) and carries `[i] The app is on display 'LCD-1' …` (`--json`: a `data.display` object and `advisory.kind: secondary_display`). `tap`, `long-press`, `swipe`, `touch`, `gesture`, `multi-touch`, a `batch` with a touch step, `ui --point`, `record-video` and `stream-video` fail with `The frontmost app on simulator … is on display 'LCD-1' …`.
+**Symptom:** The `ui` header ends in `display LCD-1` (for example `App: Settings  951x669  (landscape-left, display LCD-1)`; `--json`: a `data.display` object). `record-video` and `stream-video` fail with `… captures only the main display …`.
 
-**Why:** The iPhone Duo simulator (Xcode 27.1) has two integrated displays. Folded, the app is on the cover display, the main display, and everything works as on any iPhone. Unfolded, the app moves to the inner display (`LCD-1`), while simulator touch input and the point hit-test of this sim-use build reach only the main display, so a tap would be reported as delivered and reach nothing — sim-use refuses it instead.
+**Why:** The iPhone Duo simulator (Xcode 27.1) has two integrated displays. Folded, the app is on the cover display, the main one. Unfolded, it is on the inner display (`LCD-1`). sim-use routes touch input, hit-tests and screenshots to the display that hosts the app and takes its orientation from CoreDevice. Video capture still reads only the main display.
 
 **Recipes:**
 1. Check the posture: `sim-use ios fold --device <UDID>` names the active display and its orientation.
-2. Observe freely on the inner display: `ui` reads the app's own tree, sized to the inner display's interface (`951x669` in landscape, `669x951` in portrait); `screenshot` captures the inner display.
-3. Drive with the keyboard: `type` and the key verbs reach the app on the inner display. Focus a field before unfolding, since focusing needs a tap.
-4. To tap, fold: `sim-use ios fold closed --device <UDID>` moves the app to the cover display. A fold clears the `ui` snapshot — re-run `ui` before `tap @N`.
-5. To unfold again: `sim-use ios fold open --device <UDID>`. `ios fold half` or a hinge angle reports the display it ended on, which depends on how the hinge got there.
-6. Rotate with `sim-use ios rotate <orientation>` (interface names, as the `ui` header prints them). It also clears the snapshot.
+2. Fold and unfold with `sim-use ios fold closed|open --device <UDID>`; rotate with `sim-use ios rotate <orientation>` (interface names, as the `ui` header prints them). Both clear the `ui` snapshot — re-run `ui` before `tap @N`.
+3. On the cover display of an iOS 27.1 SDK app the back button sits in the vertical bar on the right and has **no label**: tap it with `#BackButton`, not by the previous screen's title.
+4. Explicit `-x/-y` are the inner panel's unrotated points by default; add `--coordinate-space ui` when the numbers come from `ui`.
+5. To record video, fold the device so the app is on the cover display.
 
 ## System layer detection
 

@@ -1,5 +1,11 @@
 # Xcode 27 Resize Mode (resizable app session): investigation, evidence, and the stop-gap
 
+> **Note (2026-10-16):** the stop-gap below — refuse touch input during a
+> session — is replaced by real routing, and the "scene geometry unresolved"
+> conclusion is wrong: the scene sits at the canvas origin. See
+> [001-touch-routing.md](001-touch-routing.md). The measurements here are
+> kept as recorded.
+
 Work record for [issue #143](https://github.com/lycorp-jp/sim-use/issues/143)
 (reported 2026-09-15 by @iXerol), investigated and reproduced 2026-10-09.
 This document exists so the next person does not have to re-derive any of
@@ -313,3 +319,7 @@ findings live; all four were fixed in the second commit.
    new runtime dependency shape (something must be installed/launched in the
    simulator). Decide whether sim-use accepts that before committing to the
    bump.
+
+## Amendments
+
+- Updated 2026-10-16: touch and AX routing to the `Resizable` display replace the refusal — see [001-touch-routing.md](001-touch-routing.md)
