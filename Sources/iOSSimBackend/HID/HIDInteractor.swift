@@ -18,6 +18,9 @@ public struct HIDInteractor {
         public let simulatorUDID: String
         public let simulator: FBSimulator
         public let hid: FBSimulatorHID
+        /// The transport the connection uses, when known (forced, or the
+        /// auto-selection's dtuhidd signal at creation).
+        public let transport: FBSimulatorHIDTransportType?
     }
 
     // Cache for HID connections per simulator. Each entry carries the
@@ -33,6 +36,7 @@ public struct HIDInteractor {
         let hid: FBSimulatorHID
         let bootToken: HIDBootToken
         let transportTrusted: Bool
+        let transport: FBSimulatorHIDTransportType?
     }
 
     private static var hidConnections: [String: CachedConnection] = [:]
@@ -103,11 +107,15 @@ public struct HIDInteractor {
         }
         logger.info().log("Simulator state verified: booted")
 
-        let hid = try await getOrCreateHIDConnection(for: simulator, logger: logger)
-        return Session(simulatorUDID: simulatorUDID, simulator: simulator, hid: hid)
+        let (hid, transport) = try await getOrCreateHIDConnection(for: simulator, logger: logger)
+        return Session(simulatorUDID: simulatorUDID, simulator: simulator, hid: hid, transport: transport)
     }
 
     public static func performHIDEvent(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
+        var session = session
+        if event.containsTouch {
+            session = try await sessionReachingRoute(session, logger: logger)
+        }
         do {
             try await performHIDEventOnce(event, in: session, logger: logger)
         } catch {
@@ -178,21 +186,75 @@ public struct HIDInteractor {
         session.hid.displayRoute = route
     }
 
+    /// Touch input for a display other than the main one needs the DTUHID
+    /// transport. A simulator booted with Device Hub closed has no dtuhidd,
+    /// so its connection is Indigo: start dtuhidd through its XPC service —
+    /// launchd starts it on demand, as for fold — and rebuild the
+    /// connection, which then selects DTUHID (docs/ai/010-display-routing, S6).
+    private static func sessionReachingRoute(_ session: Session, logger: SimUseLogger) async throws -> Session {
+        let routing = await RoutingDisplayResolver.current(udid: session.simulatorUDID)
+        let route = try routing.hidRoute()
+        guard transportOverride == nil, routeNeedsDTUHID(route: route, transport: session.transport) else { return session }
+        let target = routing.displayName.map { "display '\($0)'" } ?? "the routed display"
+        logger.info().log("Touch input for \(target) needs the DTUHID transport; starting dtuhidd in \(session.simulatorUDID)")
+        try await VendorDefinedHID.startDtuhidd(on: session.simulator, logger: logger)
+        var present = false
+        for _ in 0..<30 {
+            if dtuhiddPresenceHint(forUDID: session.simulatorUDID) == true { present = true; break }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        guard present else {
+            throw CLIError(errorDescription: "Touch input for \(target) of simulator \(session.simulatorUDID) needs dtuhidd (the DTUHID transport), and it did not start. Open the simulator in Device Hub (Xcode 27) and try again.")
+        }
+        clearHIDConnection(for: session.simulatorUDID)
+        return try await makeSession(for: session.simulatorUDID, logger: logger)
+    }
+
+    /// Whether `transport` cannot carry touch input to `route`: only the
+    /// DTUHID transport reaches a digitizer other than the main display's.
+    nonisolated static func routeNeedsDTUHID(route: FBSimulatorHIDDisplayRoute?, transport: FBSimulatorHIDTransportType?) -> Bool {
+        route != nil && transport == .indigo
+    }
+
+    /// Whether a cached connection must be rebuilt because dtuhidd started
+    /// after it was made. An active dtuhidd suppresses the legacy keyboard
+    /// service, so an auto-selected Indigo connection would drop typed text
+    /// silently; fold and rotate start dtuhidd when Device Hub is closed.
+    nonisolated static func transportOutdated(selected: FBSimulatorHIDTransportType?, forced: Bool, dtuhiddPresent: Bool?) -> Bool {
+        !forced && selected == .indigo && dtuhiddPresent == true
+    }
+
+    /// The transport upstream's auto-selection picks for this dtuhidd
+    /// presence (`FBSimulator.defaultHIDTransport`), or the override.
+    nonisolated static func selectedTransport(override: FBSimulatorHIDTransportType?, dtuhiddPresent: Bool?) -> FBSimulatorHIDTransportType? {
+        if let override { return override }
+        return dtuhiddPresent.map { $0 ? .dtuhid : .indigo }
+    }
+
     public static func performHIDEvent(_ event: FBSimulatorHIDEvent, for simulatorUDID: String, logger: SimUseLogger) async throws {
         let session = try await makeSession(for: simulatorUDID, logger: logger)
         try await performHIDEvent(event, in: session, logger: logger)
     }
 
     // Get or create a cached HID connection (matching CompanionLib's connectToHID behavior)
-    private static func getOrCreateHIDConnection(for simulator: FBSimulator, logger: SimUseLogger) async throws -> FBSimulatorHID {
+    private static func getOrCreateHIDConnection(for simulator: FBSimulator, logger: SimUseLogger) async throws -> (FBSimulatorHID, FBSimulatorHIDTransportType?) {
         let currentToken = HIDBootIdentity.token(dataDirectory: simulator.dataDirectory, udid: simulator.udid)
         if let cached = hidConnections[simulator.udid] {
             let sameBoot = HIDBootIdentity.isReusable(cachedToken: cached.bootToken, currentToken: currentToken)
-            if sameBoot && cached.transportTrusted {
+            // Only an auto-selected Indigo connection pays for the presence
+            // check (a process-table read of a millisecond or two).
+            let outdated = cached.transport == .indigo
+                && transportOutdated(selected: cached.transport, forced: transportOverride != nil, dtuhiddPresent: dtuhiddPresenceHint(forUDID: simulator.udid))
+            if sameBoot && cached.transportTrusted && !outdated {
                 logger.info().log("Using existing HID connection for simulator \(simulator.udid)")
-                return cached.hid
+                return (cached.hid, cached.transport)
             }
-            if sameBoot {
+            if sameBoot && outdated {
+                // dtuhidd started since the connection was made (fold or
+                // rotate with Device Hub closed): it suppresses the legacy
+                // keyboard service, so the Indigo connection must go.
+                logger.info().log("dtuhidd started in \(simulator.udid) after its Indigo HID connection was made; rebuilding the connection")
+            } else if sameBoot {
                 // Same boot, but the transport was auto-selected inside
                 // the boot-attach trust window (issue #67): dtuhidd may
                 // have appeared since the probe, so the selection must
@@ -214,11 +276,11 @@ public struct HIDInteractor {
         // override when present, otherwise the dtuhidd-presence fact the
         // selection keys on (a ~1–2 ms sysctl probe we already pay for
         // the boot-identity token).
+        let dtuhiddPresent = transportOverride == nil ? dtuhiddPresenceHint(forUDID: simulator.udid) : nil
         if let transportOverride {
             logger.info().log("HID transport forced via SIM_USE_HID_TRANSPORT: \(transportOverride)")
         } else {
-            let presence = dtuhiddPresenceHint(forUDID: simulator.udid)
-                .map { $0 ? "present" : "absent" } ?? "unknown"
+            let presence = dtuhiddPresent.map { $0 ? "present" : "absent" } ?? "unknown"
             logger.info().log("HID transport: auto (dtuhidd in this simulator's process tree: \(presence); upstream selects DTUHID when present)")
         }
         // Bare construction, not `simulator.connectToHID()`: upstream's
@@ -233,15 +295,16 @@ public struct HIDInteractor {
         // only the auto-selection is window-gated.
         let transportTrusted = transportOverride != nil
             || HIDBootIdentity.isTransportSelectionTrustworthy(token: currentToken, now: Date())
+        let transport = selectedTransport(override: transportOverride, dtuhiddPresent: dtuhiddPresent)
         hidConnections[simulator.udid] = CachedConnection(
-            hid: hid, bootToken: currentToken, transportTrusted: transportTrusted)
+            hid: hid, bootToken: currentToken, transportTrusted: transportTrusted, transport: transport)
         if transportTrusted {
             logger.info().log("HID connection created and cached for simulator \(simulator.udid)")
         } else {
             logger.info().log("HID connection created for simulator \(simulator.udid) inside the transport trust window (launchd_sim uptime < \(Int(HIDBootIdentity.transportTrustWindow)) s); the next command re-derives the transport selection")
         }
 
-        return hid
+        return (hid, transport)
     }
 
     /// Whether a `dtuhidd` currently lives in the simulator's
