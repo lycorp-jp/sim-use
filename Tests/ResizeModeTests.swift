@@ -220,6 +220,34 @@ struct ResizeModeTests {
         #expect(try await detected() == "Detected: 2", "the first gesture after the session must land on the main display")
     }
 
+    @Test("a batch keeps the connection its first routed touch upgraded (S6-001)")
+    func batchKeepsUpgradedConnection() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "text-input")
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+        // With Device Hub closed the batch's session starts on Indigo; the
+        // routed tap starts dtuhidd and upgrades the connection, and the
+        // type step must use the upgraded one, not the disconnected one.
+        let (outline, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        let field = outline.components(separatedBy: "\n").first { $0.contains("TextField") } ?? ""
+        let frame = try #require(field.firstMatch(of: #/\((\d+),(\d+) (\d+)x(\d+)\)/#), "no text field: \(outline.prefix(400))")
+        let x = Int(frame.1)! + Int(frame.3)! / 2, y = Int(frame.2)! + Int(frame.4)! / 2
+        let text = "s6b\(Int.random(in: 100...999))"
+        let batch = try await CommandRunner.run(
+            // Two keyboard chunks and a second touch (outside the field: a
+            // second tap on it soon after the first is a double tap that
+            // selects the text).
+            "\(simUse) ios batch --udid \(udid) --step 'tap -x \(x) -y \(y)' --step 'type \(text)' --step 'type x' --step 'tap -x 280 -y 700'",
+            allowFailure: true, timeout: 60)
+        #expect(batch.exitCode == 0, "batch failed: \(batch.output.suffix(400))")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let (after, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        #expect(after.contains("TextField  \"\(text)x\""), "typed text should reach the field: \(after.prefix(500))")
+        await session.end()
+    }
+
     @Test("the first gesture after a session is resized uses the new scene size (R161-01)")
     func firstGestureAfterResize() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()

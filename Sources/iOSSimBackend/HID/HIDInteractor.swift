@@ -17,10 +17,32 @@ public struct HIDInteractor {
     public struct Session {
         public let simulatorUDID: String
         public let simulator: FBSimulator
-        public let hid: FBSimulatorHID
+        /// Shared by every copy of the session: when a routed touch moves
+        /// the session to the DTUHID transport, or a dead transport is
+        /// rebuilt, a caller holding the session across events (batch,
+        /// type, multi-touch) sends the next event on the new connection,
+        /// not on the one that was disconnected (review S6-001).
+        let connection: Connection
+
+        public var hid: FBSimulatorHID { connection.hid }
         /// The transport the connection uses, when known (forced, or the
         /// auto-selection's dtuhidd signal at creation).
-        public let transport: FBSimulatorHIDTransportType?
+        public var transport: FBSimulatorHIDTransportType? { connection.transport }
+    }
+
+    final class Connection {
+        var hid: FBSimulatorHID
+        var transport: FBSimulatorHIDTransportType?
+
+        init(hid: FBSimulatorHID, transport: FBSimulatorHIDTransportType?) {
+            self.hid = hid
+            self.transport = transport
+        }
+
+        func adopt(_ other: Connection) {
+            hid = other.hid
+            transport = other.transport
+        }
     }
 
     // Cache for HID connections per simulator. Each entry carries the
@@ -108,13 +130,12 @@ public struct HIDInteractor {
         logger.info().log("Simulator state verified: booted")
 
         let (hid, transport) = try await getOrCreateHIDConnection(for: simulator, logger: logger)
-        return Session(simulatorUDID: simulatorUDID, simulator: simulator, hid: hid, transport: transport)
+        return Session(simulatorUDID: simulatorUDID, simulator: simulator, connection: Connection(hid: hid, transport: transport))
     }
 
     public static func performHIDEvent(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
-        var session = session
         if event.containsTouch {
-            session = try await sessionReachingRoute(session, logger: logger)
+            try await reachRoute(with: session, logger: logger)
         }
         do {
             try await performHIDEventOnce(event, in: session, logger: logger)
@@ -128,6 +149,9 @@ public struct HIDInteractor {
             }, rebuildAndRetry: {
                 logger.info().log("Dead HID transport for \(session.simulatorUDID); rebuilding session and retrying once...")
                 let freshSession = try await makeSession(for: session.simulatorUDID, logger: logger)
+                // Later events of the caller's session use the rebuilt
+                // connection too.
+                session.connection.adopt(freshSession.connection)
                 do {
                     try await performHIDEventOnce(event, in: freshSession, logger: logger)
                 } catch {
@@ -191,10 +215,10 @@ public struct HIDInteractor {
     /// so its connection is Indigo: start dtuhidd through its XPC service —
     /// launchd starts it on demand, as for fold — and rebuild the
     /// connection, which then selects DTUHID (docs/ai/010-display-routing, S6).
-    private static func sessionReachingRoute(_ session: Session, logger: SimUseLogger) async throws -> Session {
+    private static func reachRoute(with session: Session, logger: SimUseLogger) async throws {
         let routing = await RoutingDisplayResolver.current(udid: session.simulatorUDID)
         let route = try routing.hidRoute()
-        guard transportOverride == nil, routeNeedsDTUHID(route: route, transport: session.transport) else { return session }
+        guard transportOverride == nil, routeNeedsDTUHID(route: route, transport: session.transport) else { return }
         let target = routing.displayName.map { "display '\($0)'" } ?? "the routed display"
         logger.info().log("Touch input for \(target) needs the DTUHID transport; starting dtuhidd in \(session.simulatorUDID)")
         try await VendorDefinedHID.startDtuhidd(on: session.simulator, logger: logger)
@@ -207,7 +231,8 @@ public struct HIDInteractor {
             throw CLIError(errorDescription: "Touch input for \(target) of simulator \(session.simulatorUDID) needs dtuhidd (the DTUHID transport), and it did not start. Open the simulator in Device Hub (Xcode 27) and try again.")
         }
         clearHIDConnection(for: session.simulatorUDID)
-        return try await makeSession(for: session.simulatorUDID, logger: logger)
+        let fresh = try await makeSession(for: session.simulatorUDID, logger: logger)
+        session.connection.adopt(fresh.connection)
     }
 
     /// Whether `transport` cannot carry touch input to `route`: only the
