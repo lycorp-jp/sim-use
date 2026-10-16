@@ -133,7 +133,7 @@ jobs:
           path: |
             build_products/XCFrameworks
             build_products/PrivateHeaders
-          key: fb-xcframeworks-${{ runner.arch }}-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('scripts/build.sh') }}
+          key: fb-xcframeworks-${{ runner.arch }}-xcode-${{ steps.xcode.outputs.version }}-${{ hashFiles('scripts/build.sh', 'patches/idb/**') }}
 
       # The idb checkout generates its Xcode project with XcodeGen.
       - name: Install XcodeGen
