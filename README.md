@@ -124,44 +124,46 @@ Device Hub is open — the HID transport is selected automatically per
 boot. Note that Xcode 27 no longer bundles Simulator.app; the one from an
 Xcode 26.x install still works, as does Device Hub itself.
 
-**Resize Mode is detected, not driven.** Xcode 27 can put an iOS 27+
-simulator into a *resizable app session* (Device Hub's resize button, or
-`xcrun devicectl device appResize start`), which moves the frontmost app
-onto a virtual `Resizable` display at an arbitrary size while the main
-display keeps only the wallpaper. Simulator touch input, the framebuffer
-and the accessibility hit-test all stay bound to the main display, so
-during a session sim-use refuses `tap`, `long-press`, `swipe`, `touch`,
-`gesture`, `multi-touch` and touch-bearing `batch` runs with an
-explanation (a tap would otherwise report success and deliver nothing),
-refuses `record-video` and `stream-video` (they capture only the main
-display; the hint gives the `simctl io … recordVideo --display=` form),
-redirects `screenshot` to the `Resizable` display, and tags `ui` with a
-`resizable_app_session` advisory. `ui` itself, `type`, Cmd+V `paste` and
-the key verbs keep working; `paste --via-menu` is a touch path and is
-refused like the touch verbs. The detection is one `devicectl device info
-appResize` per device per 5 s, refreshed early the first time `ui` sees a
-scene size that is not a device size (a batch re-checks before every
-touch step); `SIM_USE_RESIZE_SESSION_CHECK=0` turns it off (read by the
-per-device daemon when it starts). The bundled skill's preflight requires
-sim-use 0.15.0 or newer for this reason. Background:
-[issue #143](https://github.com/lycorp-jp/sim-use/issues/143) and
-`docs/ai/009-resizable-app-session/000-investigation.md`.
+**Resize Mode and the iPhone Duo inner display are driven.** Xcode 27 can
+put an iOS 27+ simulator into a *resizable app session* (Device Hub's
+resize button, or `xcrun devicectl device appResize start`), which moves
+the frontmost app onto a virtual `Resizable` display at an arbitrary
+size. Xcode 27.1's iPhone Duo has two integrated displays: the cover
+display (primary, active when folded) and the inner display (active when
+unfolded). sim-use reads the displays from `xcrun devicectl device info
+displays` and routes everything to the display that hosts the app: touch
+input (`tap`, `long-press`, `swipe`, `touch`, `gesture`, `multi-touch`,
+`batch`) goes to that display's digitizer, accessibility hit-tests
+(`ui --point`, collapsed-children recovery) run on it, and `screenshot`
+captures it. The `ui` header names it (`App: Settings  951x669
+(landscape-left, display LCD-1)`, `(display Resizable 560x874)`) and
+`--json` carries a `display` object; neither appears on the main display.
+On a display other than the main one the orientation comes from
+CoreDevice instead of hit-test probes. `record-video` and `stream-video`
+still capture only the main display and refuse with an explanation
+there. Explicit `-x/-y` / `--point` coordinates are native to the display
+that hosts the app (the inner panel's unrotated points; a Resize Mode
+scene's points); add `--coordinate-space ui` to give the numbers `ui`
+prints. `sim-use ios fold closed|open|half|<degrees>` folds and unfolds the
+Duo and confirms which display became active; `sim-use ios fold` alone
+reports the posture.
 
-**iPhone Duo and other multi-display simulators.** Xcode 27.1's iPhone
-Duo has two integrated displays: the cover display (primary, active when
-folded) and the inner display (active when unfolded). `sim-use ios fold
-closed|open|half|<degrees>` folds and unfolds it and confirms which display
-became active; `sim-use ios fold` alone reports the posture. While the
-inner display hosts the app, `ui` reads the app's own tree, sizes the
-outline to the inner display's interface (`951x669` in landscape) and tags
-the header with `display LCD-1` (`--json`: a `display` object and a
-`secondary_display` advisory); `screenshot` captures the inner display;
-`type` and the key verbs work. Touch verbs, `ui --point`, `record-video`
-and `stream-video` are refused with an explanation instead of reporting a
-tap that reaches only the dark cover display. Detection reads `xcrun
-devicectl device info displays` (~0.1 s), once per daemon on a
-single-display simulator and every 2 s on a multi-display one;
-`SIM_USE_DISPLAY_TOPOLOGY_CHECK=0` turns it off. Background:
+An app whose scene is smaller than its display — an iOS 27.0 SDK app keeps
+out of the iPhone Duo's status bar strip, an older SDK app runs centred on
+the inner display — is placed by a few hit-test probes, so taps land on
+it in every orientation.
+
+The display list costs one ~0.1 s `devicectl` query per daemon on a
+single-display simulator and at most one every 2 s on a multi-display
+one; the Resize Mode check is one `devicectl device info appResize` per
+device per 5 s. A `ui` (or a selector tap) whose accessibility root
+changed size re-reads both at once — after a fold, or when a session
+starts or ends. A raw `-x/-y` tap right after such a change, with no
+`ui` in between, can still see the previous answer for that long.
+`SIM_USE_DISPLAY_TOPOLOGY_CHECK=0` and `SIM_USE_RESIZE_SESSION_CHECK=0`
+turn the checks off (read by the per-device daemon when it starts).
+Background: [issue #143](https://github.com/lycorp-jp/sim-use/issues/143),
+`docs/ai/009-resizable-app-session/000-investigation.md` and
 `docs/ai/010-display-routing/000-plan.md`.
 
 ### Linux (Android only)

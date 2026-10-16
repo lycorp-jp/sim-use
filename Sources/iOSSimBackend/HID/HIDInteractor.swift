@@ -134,6 +134,7 @@ public struct HIDInteractor {
 
     private static func performHIDEventOnce(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
         logger.info().log("Performing HID event...")
+        try await routeTouches(of: event, in: session, logger: logger)
         let timeoutMs = sendTimeoutMs
         // Capture the hid handle, not the whole Session: FBSimulatorHID is
         // @unchecked Sendable upstream, while Session carries the
@@ -160,6 +161,21 @@ public struct HIDInteractor {
             logger.info().log("Applying stabilization delay of \(stabilizationDelayMs)ms...")
             try await Task.sleep(nanoseconds: stabilizationDelayMs * 1_000_000)
         }
+    }
+
+    /// Points the connection's touch input at the display that hosts the
+    /// app (an unfolded iPhone Duo's inner display, a Resize Mode session),
+    /// or back at the main display. Resolved per event from the daemon's
+    /// cached routing state; keyboard and button events are device-wide
+    /// and skip it. Work record: docs/ai/010-display-routing/000-plan.md.
+    static func routeTouches(of event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
+        guard event.containsTouch else { return }
+        let routing = await RoutingDisplayResolver.current(udid: session.simulatorUDID)
+        let route = try routing.hidRoute()
+        if route != session.hid.displayRoute {
+            logger.info().log("Touch input routed to \(routing.displayName.map { "display \($0) (digitizer target \(route?.digitizerTarget ?? 0))" } ?? "the main display")")
+        }
+        session.hid.displayRoute = route
     }
 
     public static func performHIDEvent(_ event: FBSimulatorHIDEvent, for simulatorUDID: String, logger: SimUseLogger) async throws {
@@ -260,4 +276,18 @@ public struct HIDInteractor {
         hidConnections[simulatorUDID]?.hid.disconnect()
         hidConnections.removeValue(forKey: simulatorUDID)
     }
-} 
+}
+
+extension FBSimulatorHIDEvent {
+    /// True for a touch, a two-finger touch, or a composite holding one.
+    var containsTouch: Bool {
+        switch self {
+        case .touch, .twoFingerTouch:
+            return true
+        case .composite(let events):
+            return events.contains { $0.containsTouch }
+        default:
+            return false
+        }
+    }
+}

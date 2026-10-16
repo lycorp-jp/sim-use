@@ -104,83 +104,65 @@ public struct AccessibilityFetcher {
         perf.stage("sim lookup")
 
         let native = NativePortraitSize(screenInfo: target.screenInfo)
-        let probe: CollapsedChildrenRecovery.PointProbe = { point in
-            let start = DispatchTime.now()
-            // `nestedFormat: false` — probes only need the topmost hit's own
-            // frame / role / label for dedup; the nested subtree is dropped
-            // because every probed hit is tagged synthesized and never
-            // re-walked into its children anyway. Cuts per-probe XPC cost
-            // significantly on WebView-heavy pages.
-            let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false)
-            let durationMs = Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000
-            perf.recordProbe(durationMs: durationMs, phase: "objectAtPoint")
-            return raw as? [String: Any]
-        }
-
-        if let point {
-            // Resizable app session (issue #143): the hit-test answers for
-            // the main display (SpringBoard) during a session, whatever the
-            // point. No tree to corroborate with here, so the cached answer
-            // is taken as-is.
-            let routing = await RoutingDisplayResolver.current(udid: simulatorUDID)
-            perf.stage("routing display check")
-            if case .secondary(let display) = routing {
-                throw SecondaryDisplayPointQueryError(udid: simulatorUDID, display: display)
+        // A probe addresses one accessibility display: the main one (0)
+        // unless the app is on a secondary integrated display or in a
+        // Resize Mode session (docs/ai/010-display-routing).
+        func makeProbe(displayId: UInt32) -> CollapsedChildrenRecovery.PointProbe {
+            { point in
+                let start = DispatchTime.now()
+                // `nestedFormat: false` — probes only need the topmost hit's
+                // own frame / role / label for dedup; the nested subtree is
+                // dropped because every probed hit is tagged synthesized and
+                // never re-walked into its children anyway. Cuts per-probe
+                // XPC cost significantly on WebView-heavy pages.
+                let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false, displayId: displayId)
+                let durationMs = Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000
+                perf.recordProbe(durationMs: durationMs, phase: "objectAtPoint")
+                return raw as? [String: Any]
             }
-            let resizableSession: ResizableAppSession? = {
-                if case .resizable(let session, _) = routing { return session }
-                return nil
-            }()
-            return try await pointQuery(
-                target: target,
-                point: point,
-                native: native,
-                resizableSession: resizableSession,
-                probe: probe,
-                logger: logger,
-                perf: perf
-            )
         }
+        let authoritative = CoreDeviceOrientation.provider(udid: simulatorUDID)
 
+        // A point query fetches the tree first, like the full outline: the
+        // routing display (a Resize Mode session that just started, an
+        // unfolded iPhone Duo), its calibration and the place of an inset
+        // scene all come from it (R158-02, R158-05). A cached routing
+        // answer alone could describe the main display's SpringBoard.
         var info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
         perf.stage("tree fetch XPC")
 
-        // Resizable app session (Xcode 27 Resize Mode, issue #143): the
-        // frontmost app renders on the virtual "Resizable" display while
-        // the point hit-test XPC resolves on the main display, where
-        // SpringBoard is frontmost. Every hit-test driven step below —
-        // calibration probes, collapsed-children recovery — would
-        // therefore describe SpringBoard, not the app. The monitor caches
-        // the ~0.3 s devicectl query; a root frame that is neither the
-        // device's portrait size nor its landscape swap is in-band
-        // evidence of a session. New evidence bypasses a cached "no
-        // session", so a session started moments ago is seen now rather
-        // than after the TTL; the same evidence seen again does not
-        // (R150-03). A scene at exactly the device's size has no evidence
-        // and waits for the TTL — the documented gap.
-        //
-        // A secondary integrated display (the unfolded iPhone Duo inner
-        // screen) is the same situation: the tree follows the app, the
-        // hit-test stays on the main display. Work record:
-        // docs/ai/010-display-routing/000-plan.md.
+        // Which display hosts the app. The tree fetch follows the
+        // frontmost app on any display; the point hit-test addresses one
+        // display, so every hit-test driven step below — calibration
+        // probes, collapsed-children recovery, the remote-content retry —
+        // runs on the routing display. Off the main display (a Resize Mode
+        // session, issue #143; an unfolded iPhone Duo) CoreDevice knows the
+        // transform, so no calibration probes are needed. The session
+        // monitor caches its ~0.3 s devicectl query; a root frame that is
+        // neither the device's portrait size nor its landscape swap is
+        // in-band evidence that bypasses a cached "no session" (R150-03),
+        // and a root size that changed re-reads the display topology
+        // (R157-02). Work record: docs/ai/010-display-routing/000-plan.md.
         let sceneEvidence = Self.resizedSceneEvidence(info: info, native: native)
         let rootFrame = rawDisplayFrame(in: rawRoots(of: info))
         let routing = await RoutingDisplayResolver.current(
             udid: simulatorUDID,
             evidence: sceneEvidence,
+            deviceSizedRoot: sceneEvidence == nil && rootFrame != nil && native != nil,
             rootSize: rootFrame.map { SimulatorDisplayTopologyMonitor.RootSize(width: Double($0.width), height: Double($0.height)) }
         )
-        let resizableSession: ResizableAppSession? = {
-            if case .resizable(let session, _) = routing { return session }
-            return nil
-        }()
         perf.stage("routing display check")
-        if case .secondary(let display) = routing {
-            logger.info().log("App is on secondary display \(display.name) (id \(display.displayID), \(display.rotation.rawValue)); hit-test driven recovery and calibration are skipped")
-        } else if let resizableSession {
-            logger.info().log("Resizable app session active (\(resizableSession.displayName) \(resizableSession.preferredSizeDescription)); hit-test driven recovery and calibration are skipped")
-        } else if let sceneEvidence {
-            logger.info().log("AX root frame \(Int(sceneEvidence.width))x\(Int(sceneEvidence.height)) is not a device size but CoreDevice reports no resizable app session; proceeding normally")
+        let probe = makeProbe(displayId: routing.accessibilityDisplayID)
+        let fixedCalibration = routing.fixedCalibration(sceneSize: rootFrame?.size)
+        switch routing {
+        case .secondary(let display):
+            logger.info().log("App is on secondary display \(display.name) (id \(display.displayID), \(display.rotation.rawValue)); hit-tests address that display")
+        case .resizable(let session, _):
+            logger.info().log("Resizable app session active (\(session.displayName) \(session.preferredSizeDescription)); hit-tests address that display")
+        case .main:
+            if let sceneEvidence {
+                logger.info().log("AX root frame \(Int(sceneEvidence.width))x\(Int(sceneEvidence.height)) is not a device size but CoreDevice reports no resizable app session; proceeding normally")
+            }
         }
 
         // Empty-shell retry (issue #64): a remote-process presentation
@@ -189,17 +171,16 @@ public struct AccessibilityFetcher {
         // remote-content discovery so the visible cross-process elements
         // materialize. The plain first fetch keeps the hot path untouched —
         // healthy and sparse-but-valid trees never pay for the grid probes.
-        // Skipped under a resizable app session: the retry's grid
-        // hit-tests would collect SpringBoard's elements from the main
-        // display, which is the splicing this path exists to avoid.
         var remoteAdvisory: CommandAdvisory? = nil
-        if routing.isMain, isEmptyShellTree(info) {
+        if isEmptyShellTree(info) {
             logger.info().log("Frontmost accessibility tree is an empty shell; retrying with remote-content discovery")
-            let samplingScale = native.map { uiScaleFromRawTree(info, native: $0) } ?? .identity
+            let canvas = fixedCalibration?.native ?? native
+            let samplingScale = canvas.map { uiScaleFromRawTree(info, native: $0) } ?? .identity
             if let retried = try? await target.legacyAccessibilityElements(
                     nestedFormat: true,
                     includeRemoteContent: true,
-                    remoteSamplingRegion: remoteContentSamplingRegion(native: native, uiScale: samplingScale)),
+                    remoteSamplingRegion: remoteContentSamplingRegion(native: canvas, uiScale: samplingScale),
+                    displayId: routing.accessibilityDisplayID),
                !isEmptyShellTree(retried) {
                 info = retried
                 remoteAdvisory = CommandAdvisory(
@@ -212,48 +193,34 @@ public struct AccessibilityFetcher {
             perf.stage("remote-content retry")
         }
 
-        if !routing.isMain {
-            // The raw tree is the app's own and its frames are UI space,
-            // so it is returned as fetched, without the recovery walk
-            // (whose synthesized children would come from the main
-            // display — the splicing #143 reports). A resized scene is
-            // upright; a secondary display's rotation comes from
-            // CoreDevice instead of the probes, which cannot reach it.
-            let calibration: OrientationCalibration
-            let advisory: CommandAdvisory
-            switch routing {
-            case .resizable(let session, _):
-                let display = rawDisplayFrame(in: rawRoots(of: info))
-                calibration = .identity(native: native)
-                advisory = ResizableAppSessionAdvisory.describeUI(
-                    session: session,
-                    sceneSize: display.map { (width: Double($0.width), height: Double($0.height)) },
-                    native: native
-                )
-            case .secondary(let display):
-                calibration = OrientationCalibration(
-                    orientation: display.rotation.interfaceOrientation,
-                    native: display.panelPoints ?? native,
-                    probesUsed: 0,
-                    advisory: nil
-                )
-                advisory = SecondaryDisplayAdvisory.describeUI(display: display)
-            case .main:
-                preconditionFailure("routing.isMain was checked above")
-            }
-            let data = try serializeAccessibilityInfo(info)
-            perf.stage("serialize")
-            perf.finish()
-            return FetchResult(
-                data: data,
-                calibration: calibration,
-                advisory: CommandAdvisory.merged([remoteAdvisory, advisory].compactMap { $0 }),
-                routing: routing
+        let calibration: OrientationCalibration
+        if let fixedCalibration {
+            let roots = rawRoots(of: info)
+            calibration = await OrientationCalibrator.resolveSceneOffset(
+                fixedCalibration,
+                sceneSize: rootFrame?.size,
+                discriminators: rawDiscriminatorRects(in: roots, display: rootFrame),
+                probe: probe,
+                logger: logger
             )
+        } else {
+            calibration = await calibrate(info: info, native: native, probe: probe, logger: logger, authoritative: authoritative)
         }
-
-        let calibration = await calibrate(info: info, native: native, probe: probe, logger: logger)
         perf.stage("calibrate")
+
+        if let point {
+            // `point` is in the app's UI space; the hit-test takes the
+            // routing display's unrotated points, offset for an inset scene.
+            let hit = try await target.legacyAccessibilityElement(
+                at: calibration.probeCGPoint(point.cgPoint),
+                nestedFormat: true,
+                displayId: routing.accessibilityDisplayID
+            )
+            perf.stage("point XPC (routed)")
+            let data = try serializeAccessibilityInfo(hit)
+            perf.finish()
+            return FetchResult(data: data, calibration: calibration, routing: routing)
+        }
 
         // AX frames are UI-space while the hit-test consumes points on
         // the native-portrait AXES (issue #34; the metric stays UI —
@@ -277,7 +244,7 @@ public struct AccessibilityFetcher {
         let data = try serializeAccessibilityInfo(recovered)
         perf.stage("serialize")
         perf.finish()
-        return FetchResult(data: data, calibration: calibration, advisory: remoteAdvisory)
+        return FetchResult(data: data, calibration: calibration, advisory: remoteAdvisory, routing: routing)
     }
 
     /// Whether a fetched tree payload is an "empty shell" warranting the
@@ -389,141 +356,7 @@ public struct AccessibilityFetcher {
         }
     }
 
-    // MARK: - Point query (UI-space semantics)
-
-    /// `--point` coordinates are UI space — the space every printed frame
-    /// uses. The hit-test XPC consumes points on native-portrait axes,
-    /// so a rotated device needs the query transformed. The first probe doubles as
-    /// calibration evidence: its returned frame settles the orientation
-    /// only when exactly one candidate maps the probe point into it. Any
-    /// tie (a fat frame containing several projections proves nothing)
-    /// falls through to a full tree calibration — giving portrait the tie
-    /// would return the wrong element on rotated devices.
-    ///
-    /// The hit-test consumes UI-METRIC points on native-portrait axes
-    /// (verified live on a display-downscaled iPhone 12 mini — see
-    /// `NativePortraitSize.uiMetric`), so in portrait the identity probe
-    /// queries the exact requested point on every device, downscaled or
-    /// not, and the fast path stays single-probe. Only the HID dispatch
-    /// side of a calibration carries the `UIPointScale`.
-    ///
-    /// One deliberate gap: the fast path's bounds gate below compares
-    /// against the native (pixels/scale) portrait size, because no scale
-    /// is known before a tree is fetched. On a downscaled panel, points
-    /// in the UI-only edge bands (x in 360..<375, y in 780..<812 on the
-    /// mini) skip the identity probe and take the tree-calibration
-    /// fallback — same result, one tree fetch slower. Widening the gate
-    /// would not help: `soleOrientation` clamps its projections to the
-    /// native canvas, so a probe out there could never settle anything.
-    private static func pointQuery(
-        target: FBSimulator,
-        point: AccessibilityPoint,
-        native: NativePortraitSize?,
-        resizableSession: ResizableAppSession? = nil,
-        probe: @escaping CollapsedChildrenRecovery.PointProbe,
-        logger: SimUseLogger,
-        perf: PerfLog
-    ) async throws -> FetchResult {
-        func nestedQuery(_ p: CGPoint) async throws -> AnyObject {
-            try await target.legacyAccessibilityElement(at: p, nestedFormat: true)
-        }
-        // Under a resizable app session the hit-test answers for the main
-        // display (SpringBoard), whatever the point — say so rather than
-        // let the caller mistake it for the app (issue #143).
-        let sessionAdvisory = resizableSession.map(ResizableAppSessionAdvisory.pointQuery)
-
-        guard let native else {
-            // No screen info — keep the legacy raw-space behavior.
-            let info = try await nestedQuery(point.cgPoint)
-            perf.stage("point XPC")
-            let data = try serializeAccessibilityInfo(info)
-            perf.finish()
-            return FetchResult(data: data, calibration: .identity(), advisory: sessionAdvisory, routing: Self.routing(for: resizableSession))
-        }
-
-        var orientation: DisplayOrientation? = nil
-        var identityResult: AnyObject? = nil
-        var calibration: OrientationCalibration? = nil
-
-        if resizableSession != nil {
-            // Nothing to calibrate against: the probe canvas is the main
-            // display, and a resized scene's size says nothing about
-            // rotation. Query the raw point and skip the tree calibration.
-            orientation = .portrait
-        }
-
-        if point.x < native.width, point.y < native.height {
-            if let raw = try? await nestedQuery(point.cgPoint) {
-                perf.stage("point XPC")
-                identityResult = raw
-                if resizableSession == nil,
-                   let dict = raw as? [String: Any],
-                   let frame = OrientationCalibrator.frameRect(of: dict) {
-                    orientation = OrientationCalibrator.soleOrientation(
-                        mapping: point.cgPoint, into: frame, native: native
-                    )
-                }
-            }
-        }
-        // A UI point outside the native portrait bounds can only exist in
-        // a landscape UI — the identity probe was skipped above and the
-        // tree calibration below settles which landscape.
-
-        if orientation == nil {
-            if let info: AnyObject = try? await target.legacyAccessibilityElements(nestedFormat: true) {
-                perf.stage("tree fetch XPC (point calibration)")
-                let treeCalibration = await calibrate(info: info, native: native, probe: probe, logger: logger)
-                calibration = treeCalibration
-                orientation = treeCalibration.orientation
-            }
-        }
-
-        let resolved = orientation ?? .portrait
-        // `orientation == nil` here means both the identity probe and the
-        // tree-fetch calibration failed to settle anything — that is a
-        // degraded portrait guess, not a clean single-probe confirmation,
-        // and must say so.
-        let finalCalibration = calibration ?? OrientationCalibration(
-            orientation: resolved,
-            native: native,
-            probesUsed: 1,
-            advisory: orientation == nil
-                ? CommandAdvisory(
-                    kind: .orientationCalibrationFallback,
-                    message: "Orientation could not be confirmed for the point query; assuming portrait. The result may be wrong if the device is rotated."
-                )
-                : nil
-        )
-
-        let info: AnyObject
-        // The hit-test consumes UI-METRIC points on native-portrait
-        // axes, so the portrait probe transform is the identity even on
-        // display-downscaled devices — the identity probe already
-        // queried the right point and its result is reusable. Rotated
-        // devices re-issue through `probeCGPoint` (axes only, never the
-        // HID metric scale).
-        if resolved == .portrait, let identityResult {
-            info = identityResult
-        } else {
-            info = try await nestedQuery(finalCalibration.probeCGPoint(point.cgPoint))
-            perf.stage("point XPC (transformed)")
-        }
-        let data = try serializeAccessibilityInfo(info)
-        perf.stage("serialize")
-        perf.finish()
-        // The calibration advisory reaches callers through
-        // `calibration.advisory`; only the session one rides here.
-        return FetchResult(
-            data: data,
-            calibration: finalCalibration,
-            advisory: sessionAdvisory,
-            routing: Self.routing(for: resizableSession)
-        )
-    }
-
-    private static func routing(for session: ResizableAppSession?) -> RoutingDisplay {
-        session.map { .resizable($0, nil) } ?? .main
-    }
+    // MARK: - Calibration only
 
     /// Orientation calibration WITHOUT the collapsed-children recovery
     /// walk — for verbs that need the current orientation but not the
@@ -544,12 +377,37 @@ public struct AccessibilityFetcher {
             throw CLIError(errorDescription: "Simulator with UDID \(simulatorUDID) not found in set.")
         }
         let native = NativePortraitSize(screenInfo: target.screenInfo)
+        let info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
+        let rootFrame = rawDisplayFrame(in: rawRoots(of: info))
+        // The same session and topology signals as the full fetch: a scene
+        // that just changed (a session started or ended) re-checks the
+        // cached routing before this calibration is used (R158-03).
+        let sceneEvidence = Self.resizedSceneEvidence(info: info, native: native)
+        let routing = await RoutingDisplayResolver.current(
+            udid: simulatorUDID,
+            evidence: sceneEvidence,
+            deviceSizedRoot: sceneEvidence == nil && rootFrame != nil && native != nil,
+            rootSize: rootFrame.map { SimulatorDisplayTopologyMonitor.RootSize(width: Double($0.width), height: Double($0.height)) }
+        )
+        let displayId = routing.accessibilityDisplayID
         let probe: CollapsedChildrenRecovery.PointProbe = { point in
-            let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false)
+            let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false, displayId: displayId)
             return raw as? [String: Any]
         }
-        let info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
-        return await calibrate(info: info, native: native, probe: probe, logger: logger)
+        if let fixed = routing.fixedCalibration(sceneSize: rootFrame?.size) {
+            let roots = rawRoots(of: info)
+            return await OrientationCalibrator.resolveSceneOffset(
+                fixed,
+                sceneSize: rootFrame?.size,
+                discriminators: rawDiscriminatorRects(in: roots, display: rootFrame),
+                probe: probe,
+                logger: logger
+            )
+        }
+        return await calibrate(
+            info: info, native: native, probe: probe, logger: logger,
+            authoritative: CoreDeviceOrientation.provider(udid: simulatorUDID)
+        )
     }
 
     // MARK: - Calibration over the raw tree payload
@@ -558,7 +416,8 @@ public struct AccessibilityFetcher {
         info: AnyObject,
         native: NativePortraitSize?,
         probe: @escaping CollapsedChildrenRecovery.PointProbe,
-        logger: SimUseLogger
+        logger: SimUseLogger,
+        authoritative: AuthoritativeOrientation? = nil
     ) async -> OrientationCalibration {
         let roots = rawRoots(of: info)
         let display = rawDisplayFrame(in: roots)
@@ -567,7 +426,8 @@ public struct AccessibilityFetcher {
             uiScreenSize: display.map { (width: $0.width, height: $0.height) },
             discriminators: rawDiscriminatorRects(in: roots, display: display),
             probe: probe,
-            logger: logger
+            logger: logger,
+            authoritative: authoritative
         )
     }
 

@@ -235,8 +235,8 @@ struct ResizableAppSessionMonitorTests {
     private let resizedScene = ResizableAppSessionMonitor.SceneEvidence(width: 560, height: 874)
     private let otherScene = ResizableAppSessionMonitor.SceneEvidence(width: 375, height: 667)
 
-    @Test("new scene evidence bypasses a cached inactive answer; a cached active one is never bypassed")
-    func evidenceBypassesInactive() async {
+    @Test("new scene evidence bypasses a cached answer, inactive or active (R158-01)")
+    func evidenceBypassesCache() async {
         let clock = Clock()
         let counter = Counter()
         counter.states = [.inactive, .active(sampleSession), .inactive]
@@ -246,10 +246,13 @@ struct ResizableAppSessionMonitorTests {
         // In-band evidence of a session: re-probe despite the fresh cache.
         #expect(await monitor.state(for: "A", evidence: resizedScene) == .active(sampleSession))
         #expect(counter.count == 2)
-        // Now active and cached: evidence — even different evidence — does
-        // not force another probe.
-        #expect(await monitor.state(for: "A", evidence: otherScene) == .active(sampleSession))
+        // The same scene rides the cache.
+        #expect(await monitor.state(for: "A", evidence: resizedScene) == .active(sampleSession))
         #expect(counter.count == 2)
+        // Active and cached, but the scene changed: touches are routed now,
+        // so a session that may have ended is re-checked.
+        #expect(await monitor.state(for: "A", evidence: otherScene) == .inactive)
+        #expect(counter.count == 3)
     }
 
     @Test("the same evidence seen again rides the cache (R150-03: a downscaled display is not a resize per fetch)")
@@ -375,19 +378,31 @@ struct ResizableAppSessionGuardTests {
     /// which resolves to the main display.
     private let noTopology = SimulatorDisplayTopologyMonitor(probe: { _ in .unavailable(reason: "test") }, environment: [:])
 
-    @Test("an active session refuses the verb with the session attached")
-    func activeSessionThrows() async {
-        do {
+    @Test("an active session no longer refuses touch: the input is routed to the Resizable display")
+    func activeSessionRoutes() async throws {
+        let topology = SimulatorDisplayTopologyMonitor(
+            probe: { _ in
+                .available(SimulatorDisplayTopology(displays: [
+                    SimulatorDisplay(
+                        displayID: 4, uniqueID: sampleSession.displayUniqueID, name: "Resizable", kind: .virtual,
+                        isPrimary: false, isActive: false, backlightState: "off", rotation: .rot0,
+                        pixelWidth: 7680, pixelHeight: 4320, pointScale: 3
+                    ),
+                ], deviceOrientation: "portrait"))
+            },
+            environment: [:]
+        )
+        try await RoutingDisplayGuard.assertTouchInputReachesApp(
+            udid: "UDID-1", verb: "tap", logger: quietLogger, sessionMonitor: monitor(returning: .active(sampleSession)), topologyMonitor: topology
+        )
+    }
+
+    @Test("an active session whose display CoreDevice does not list cannot be routed and fails")
+    func activeSessionWithoutDisplayFails() async {
+        await #expect(throws: CLIError.self) {
             try await RoutingDisplayGuard.assertTouchInputReachesApp(
                 udid: "UDID-1", verb: "tap", logger: quietLogger, sessionMonitor: monitor(returning: .active(sampleSession)), topologyMonitor: noTopology
             )
-            Issue.record("expected ResizableAppSessionError")
-        } catch let error as ResizableAppSessionError {
-            #expect(error.verb == "tap")
-            #expect(error.udid == "UDID-1")
-            #expect(error.session == sampleSession)
-        } catch {
-            Issue.record("unexpected error \(error)")
         }
     }
 
@@ -430,55 +445,8 @@ struct ResizableAppSessionGuardTests {
         )
     }
 
-    @Test("the error names the verb, the size, the issue and says nothing was sent")
-    func errorMessage() {
-        let error = ResizableAppSessionError(verb: "long-press", udid: "UDID-1", session: sampleSession)
-        let message = error.localizedDescription
-        #expect(message.contains("resizable app session"))
-        #expect(message.contains("UDID-1"))
-        #expect(message.contains("'Resizable' display (560x874 points requested)"))
-        #expect(message.contains("this long-press would report success and deliver nothing"))
-        #expect(message.contains("#143"))
-        #expect(message.contains("No input was sent."))
-    }
-
-    @Test("the hint gives the way out and the escape hatch")
-    func errorHint() throws {
-        let hint = try #require(ResizableAppSessionError(verb: "tap", udid: "U", session: sampleSession).hint)
-        #expect(hint.contains("devicectl device appResize start"))
-        #expect(hint.contains("`type`, the key verbs and Cmd+V `paste` keep working"))
-        #expect(hint.contains("`paste --via-menu` is a touch path and is refused"))
-        #expect(hint.contains("\(ResizableAppSessionMonitor.disableEnvironmentKey)=0"))
-    }
-
-    @Test("describe-ui advisory reports scene, requested and main-display sizes")
-    func describeUIAdvisory() {
-        let advisory = ResizableAppSessionAdvisory.describeUI(
-            session: sampleSession,
-            sceneSize: (width: 437, height: 874),
-            native: NativePortraitSize(width: 402, height: 874)
-        )
-        #expect(advisory.kind == .resizableAppSession)
-        #expect(advisory.message.contains("437x874 points (requested 560x874 points)"))
-        #expect(advisory.message.contains("main display is 402x874"))
-        #expect(advisory.message.contains("recovery and orientation calibration were skipped"))
-        #expect(advisory.message.contains("Touch paths (tap, long-press, swipe, touch, gesture, multi-touch, touch-bearing batch steps, paste --via-menu) and main-display video capture (record-video, stream-video) are refused"))
-        #expect(advisory.message.contains("Cmd+V `paste` and `screenshot` work"))
-    }
-
-    @Test("describe-ui advisory degrades without scene or native sizes")
-    func describeUIAdvisoryWithoutSizes() {
-        let advisory = ResizableAppSessionAdvisory.describeUI(session: sampleSession, sceneSize: nil, native: nil)
-        #expect(advisory.message.contains("at requested 560x874 points."))
-        #expect(!advisory.message.contains("main display is"))
-    }
-
-    @Test("point-query and screenshot advisories carry the kind and the display")
-    func pointAndScreenshotAdvisories() {
-        let point = ResizableAppSessionAdvisory.pointQuery(session: sampleSession)
-        #expect(point.kind == .resizableAppSession)
-        #expect(point.message.contains("describes SpringBoard rather than the app"))
-
+    @Test("the screenshot advisory carries the kind and the display")
+    func screenshotAdvisory() {
         let shot = ResizableAppSessionAdvisory.screenshot(session: sampleSession, pixelSize: (width: 1680, height: 2622))
         #expect(shot.kind == .resizableAppSession)
         #expect(shot.message.contains("Captured the 'Resizable' display (560x874 points requested, 1680x2622 px)"))
@@ -648,5 +616,106 @@ struct BatchTouchStepScanTests {
         for kind in IOSSimBatchCommand.touchStepKinds {
             #expect(IOSSimBatchCommand.stepKind(of: "\(kind.rawValue) --x 1") == kind)
         }
+    }
+}
+
+@Suite("ResizableAppSessionMonitor — a device-sized root ends a cached session")
+struct ResizableSessionEndEvidenceTests {
+    final class Answers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var queue: [ResizableAppSessionState]
+        init(_ queue: [ResizableAppSessionState]) { self.queue = queue }
+        func next() -> ResizableAppSessionState {
+            lock.lock(); defer { lock.unlock() }
+            return queue.count > 1 ? queue.removeFirst() : queue[0]
+        }
+    }
+
+    @Test("a cached active session is re-probed once when the AX root is the device's own size")
+    func deviceSizedRootReprobesActive() async {
+        let answers = Answers([.active(sampleSession), .inactive])
+        let frozen = Date(timeIntervalSince1970: 0)
+        let monitor = ResizableAppSessionMonitor(ttl: 60, clock: { frozen }, probe: { _ in answers.next() }, environment: [:])
+        #expect(await monitor.state(for: "U").session == sampleSession)
+        #expect(await monitor.state(for: "U", deviceSizedRoot: true) == .inactive)
+        #expect(await monitor.probeCount == 2)
+    }
+
+    @Test("a session that really is at the device's size is re-probed only once")
+    func deviceSizedSessionDoesNotReprobeEveryFetch() async {
+        let frozen = Date(timeIntervalSince1970: 0)
+        let monitor = ResizableAppSessionMonitor(ttl: 60, clock: { frozen }, probe: { _ in .active(sampleSession) }, environment: [:])
+        _ = await monitor.state(for: "U")
+        _ = await monitor.state(for: "U", deviceSizedRoot: true)
+        _ = await monitor.state(for: "U", deviceSizedRoot: true)
+        _ = await monitor.state(for: "U", deviceSizedRoot: true)
+        #expect(await monitor.probeCount == 2)
+    }
+}
+
+@Suite("ResizableAppSessionMonitor — a changed scene re-checks a cached session (R158-01)")
+struct ResizableSessionChangedEvidenceTests {
+    final class Answers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var queue: [ResizableAppSessionState]
+        init(_ queue: [ResizableAppSessionState]) { self.queue = queue }
+        func next() -> ResizableAppSessionState {
+            lock.lock(); defer { lock.unlock() }
+            return queue.count > 1 ? queue.removeFirst() : queue[0]
+        }
+    }
+
+    private typealias Evidence = ResizableAppSessionMonitor.SceneEvidence
+
+    @Test("an inset scene after a session (LINE on the Duo cover, 386x678) re-checks the cached active answer")
+    func insetSceneAfterSession() async {
+        let answers = Answers([.active(sampleSession), .inactive])
+        let frozen = Date(timeIntervalSince1970: 0)
+        let monitor = ResizableAppSessionMonitor(ttl: 60, clock: { frozen }, probe: { _ in answers.next() }, environment: [:])
+        #expect(await monitor.state(for: "U", evidence: Evidence(width: 560, height: 874)).session == sampleSession)
+        // The same scene again rides the cache.
+        #expect(await monitor.state(for: "U", evidence: Evidence(width: 560, height: 874)).session == sampleSession)
+        #expect(await monitor.probeCount == 1)
+        // The session ended; the app is back at its inset size.
+        #expect(await monitor.state(for: "U", evidence: Evidence(width: 386, height: 678)) == .inactive)
+        #expect(await monitor.probeCount == 2)
+    }
+
+    @Test("a panel-downscaled device (iPhone mini, 375x812 evidence) re-checks once after a session")
+    func downscaledDeviceAfterSession() async {
+        let answers = Answers([.active(sampleSession), .inactive])
+        let frozen = Date(timeIntervalSince1970: 0)
+        let monitor = ResizableAppSessionMonitor(ttl: 60, clock: { frozen }, probe: { _ in answers.next() }, environment: [:])
+        _ = await monitor.state(for: "U", evidence: Evidence(width: 560, height: 874))
+        #expect(await monitor.state(for: "U", evidence: Evidence(width: 375, height: 812)) == .inactive)
+        _ = await monitor.state(for: "U", evidence: Evidence(width: 375, height: 812))
+        #expect(await monitor.probeCount == 2)
+    }
+}
+
+@Suite("ResizableAppSessionMonitor — the scene re-check records the real root signal (R158-01 follow-up)")
+struct ResizableSessionRecheckFlagTests {
+    final class Answers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var queue: [ResizableAppSessionState]
+        init(_ queue: [ResizableAppSessionState]) { self.queue = queue }
+        func next() -> ResizableAppSessionState {
+            lock.lock(); defer { lock.unlock() }
+            return queue.count > 1 ? queue.removeFirst() : queue[0]
+        }
+    }
+
+    @Test("active without evidence → active with resized evidence → the device-sized root after the session re-checks")
+    func deviceSizedRootAfterSceneRecheck() async {
+        let answers = Answers([.active(sampleSession), .active(sampleSession), .inactive])
+        let frozen = Date(timeIntervalSince1970: 0)
+        let monitor = ResizableAppSessionMonitor(ttl: 60, clock: { frozen }, probe: { _ in answers.next() }, environment: [:])
+        // A raw lookup (no tree) caches active.
+        #expect(await monitor.state(for: "U").session == sampleSession)
+        // The tree shows the 560x874 scene: re-checked, still active.
+        #expect(await monitor.state(for: "U", evidence: .init(width: 560, height: 874), deviceSizedRoot: false).session == sampleSession)
+        // The session ended; the root is the device's own size again.
+        #expect(await monitor.state(for: "U", deviceSizedRoot: true) == .inactive)
+        #expect(await monitor.probeCount == 3)
     }
 }

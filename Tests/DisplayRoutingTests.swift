@@ -267,20 +267,13 @@ struct RoutingDisplayResolverTests {
 
 @Suite("RoutingDisplayGuard — refusals off the main display")
 struct RoutingDisplayGuardTests {
-    @Test("a secondary display refuses touch and capture with display-specific errors")
-    func secondaryRefuses() async throws {
+    @Test("a secondary display lets touch through (routed) and refuses main-display capture")
+    func secondaryRoutesTouchRefusesCapture() async throws {
         let topologyState = SimulatorDisplayTopologyState.available(try topology("duo-open"))
-        do {
-            try await RoutingDisplayGuard.assertTouchInputReachesApp(
-                udid: "U", verb: "tap", logger: quietLogger,
-                sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologyMonitor(topologyState)
-            )
-            Issue.record("expected SecondaryDisplayInputError")
-        } catch let error as SecondaryDisplayInputError {
-            #expect(error.display.name == "LCD-1")
-            #expect(error.localizedDescription.contains("this tap would report success and deliver nothing. No input was sent."))
-            #expect(error.hint?.contains("sim-use ios fold closed") == true)
-        }
+        try await RoutingDisplayGuard.assertTouchInputReachesApp(
+            udid: "U", verb: "tap", logger: quietLogger,
+            sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologyMonitor(topologyState)
+        )
         do {
             try await RoutingDisplayGuard.assertCaptureReachesApp(
                 udid: "U", verb: "record-video", logger: quietLogger,
@@ -307,10 +300,7 @@ struct RoutingDisplayGuardTests {
     func refusalProtocol() throws {
         let display = try #require(try topology("duo-open").activeIntegrated)
         let refusals: [any Error] = [
-            SecondaryDisplayInputError(verb: "batch", udid: "U", display: display),
             SecondaryDisplayCaptureError(verb: "record-video", udid: "U", display: display),
-            SecondaryDisplayPointQueryError(udid: "U", display: display),
-            ResizableAppSessionError(verb: "batch", udid: "U", session: session),
             ResizableAppSessionCaptureError(verb: "record-video", udid: "U", session: session),
         ]
         for refusal in refusals {
@@ -624,12 +614,9 @@ struct TopologyRootEvidenceTests {
         #expect(open.interfaceOrientation == .landscapeLeft)
         #expect(await topologies.probeCount == 2)
 
-        // A touch now gets the secondary-display refusal.
-        await #expect(throws: SecondaryDisplayInputError.self) {
-            try await RoutingDisplayGuard.assertTouchInputReachesApp(
-                udid: "U", verb: "tap", logger: quietLogger, sessionMonitor: sessions, topologyMonitor: topologies
-            )
-        }
+        // Touch input now goes to the inner display's digitizer.
+        let route = try #require(try open.hidRoute())
+        #expect(route.digitizerTarget == 3)
 
         // The same root again rides the cache.
         _ = await RoutingDisplayResolver.current(
@@ -674,11 +661,7 @@ struct TopologyRootEvidenceTests {
         }
         #expect(display.name == "LCD-1")
         #expect(routing.interfaceOrientation == .landscapeLeft)
-        await #expect(throws: SecondaryDisplayInputError.self) {
-            try await RoutingDisplayGuard.assertTouchInputReachesApp(
-                udid: "U", verb: "tap", logger: quietLogger, sessionMonitor: sessions, topologyMonitor: topologies
-            )
-        }
+        #expect(try routing.hidRoute()?.digitizerTarget == 3)
     }
 
     @Test("a rootless probe that sees the same active display keeps the root association")

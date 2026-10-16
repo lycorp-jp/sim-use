@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Status** | In progress |
+| **Status** | In progress (S1 #157; S2 in review) |
 | **Anchor date** | 2026-10-16 |
 | **Primary PRs** | — |
 | **Related** | [009-resizable-app-session](../009-resizable-app-session/000-investigation.md) (#143; this plan replaces its tier-1 guard with real routing), [002-ios-orientation-self-calibration](../002-ios-orientation-self-calibration/000-design.md), [001 dtuhidd short-lived clients](../001-daemon-and-hid-lifecycle/001-dtuhidd-short-lived-clients.md), facebook/idb#965, facebook/idb#980 |
@@ -86,6 +86,16 @@ installed in the simulator. The one-off probe in E7 was for evidence only.
 | E26 | devicectl `info displays` on iOS 18.6 / 26.5 runtimes | No `uniqueId`, no `active` key, no `Resizable` display; `backlightState: unknown`. iOS 27.0 single-display: `uniqueId` present, no `active` key |
 | E27 | devicectl of Xcode 27.0 (651.13.5) on the Duo (iOS 27.1 runtime) | Reads all three displays and `appResize` correctly — open question 2 closed |
 | E28 | `type` with the app on the inner display (S1, touch refused) | Text reaches the focused field: keyboard HID is device-wide |
+
+### Found while building S2 (2026-10-16)
+
+| # | Check | Result |
+| --- | --- | --- |
+| E29 | iOS 27.0 SDK Playground on the Duo cover | The scene is 386x678 (keeps out of the 80 pt status bar strip on the hardware's right edge). In landscape the AX root is 678x386, which matches no device size: the probe calibrator kept four candidates, spent its 3 probes and guessed portrait, so AX-id taps missed. Raw hit-tests showed the mapping itself was right in `landscape-left` |
+| E30 | Same app, `landscape-right` | The strip is at the top of the interface: the scene starts 80 pt down. Panel `(260, 634)` hit the top-trailing corner; `(340, 634)` (no offset) missed. Same 80 pt strip on the inner display (scene 871x669 / 669x871), and HID and hit-test agree on the display-space coordinates |
+| E31 | Scene placement by probes | Offsets {0, gap/2, gap} per axis, first candidate that two elements confirm. A single probe was fooled once: at the wrong offset the probe for LINE's Help button landed on the status bar's Wi-Fi icon, whose frame sits inside the button. With two confirmations: Playground corners 12/12 on the cover (3 orientations) and 16/16 on the inner display (4 orientations) |
+| E32 | LINE `26.18.0` (iOS 27.0 SDK) on the Duo | Welcome → login → back in all four inner orientations; on the cover: login methods → phone number → tap field → `type` → unfold mid-flow (field value kept) → back on the inner display |
+| E33 | Resize Mode after S2 | iPhone 17 / iOS 27.0, 560x874: `Tap Location: (450, 650)` exact, `#BackButton`, `ui --point`, a single pid in the tree. A cached active session outlived the session by up to 5 s; a root at the device's own size now re-checks it |
 
 ### Resizable display (Resize Mode)
 
@@ -304,6 +314,11 @@ refuse with a message that names the requirement.
 | Fold and rotate clear the describe-ui snapshot | Keep it, rely on the stale-snapshot advisory | A fold moves the app to another display with another geometry; a cached `@N` would tap the old coordinates on the new display |
 | S1 also sizes the outline to the secondary display's interface | Leave it to S4 | The header said `669x951 (landscape-left)` — self-contradictory. One argument to `OutlineFormatter.render`; banding rules stay for S4 |
 | A display without `uniqueId` uses its name as the identifier | Drop the entry; make the id optional | E26: every pre-iOS 27 runtime would read as "no display"; `simctl io --display` accepts names |
+| S2: route per event in `HIDInteractor` (`FBSimulatorHID.displayRoute`), calibration via `RoutingDisplay.fixedCalibration` and `AXProbeSession` | Route in every verb | One place applies the route to every touch path (verbs, batch, gestures); keyboard events skip the lookup |
+| S2: the main display asks CoreDevice when probes are ambiguous or the scene is inset | CoreDevice first on every command | Probes cost milliseconds and settle the common case; a fresh devicectl read costs ~0.1 s and is only needed when they cannot (E29) |
+| S2: place an inset scene by probes, two confirmations per offset | Per-device strip tables; Apple's `ReservedRegion` API (in-app only) | Covers the Duo strip in every orientation, centred older-SDK scenes and windowed iPad scenes with one rule; one confirmation was fooled (E31) |
+| S2: drop the `secondary_display` and `resizable_app_session` `ui` advisories | Keep them | Nothing is refused any more on those displays; the header tag and the `display` object say where the app is. `resizable_app_session` stays on `screenshot` |
+| S2: a device-sized AX root re-checks a cached active session | Keep the 5 s staleness | Touches are now routed, not refused: a stale "active" would send them to the display the app left (E33) |
 | Rotate takes interface orientation names | Device orientation names (devicectl) | Agents read the outline tag, which is interface orientation; one vocabulary in the CLI |
 | `fold` and `rotate` are iOS-only verbs (`sim-use ios …`) | Top-level verbs now | No Android implementation yet. Android emulators can fold and rotate, so the arguments stay portable for a later top-level verb (owner decision, 2026-10-16: Android later, separate issue) |
 | Explicit iOS coordinates default to UI space | Keep `native`; UI only on non-main displays | Owner decision 2026-10-16. Same space as the outline and Android; devicectl orientation removes the calibration-failure risk that kept `native` the default. Breaking for callers that hand-write native coordinates on a rotated or downscaled device: `CHANGELOG` `Changed` |
@@ -332,5 +347,7 @@ refuse with a message that names the requirement.
 9. iPad simulators: rotation verified (E23). Resize Mode not tested on an iPad.
 10. devicectl `currentOrientation` also works on single-display devices (E10). It could replace the hit-test calibrator everywhere, which is what the idb migration needs (facebook/idb#980). Out of scope here; record as a follow-up.
 11. Resize Mode on the Duo inner display: refused at `rot90` (E17). Not tested at inner `rot0`.
+12. `gesture rotate-cw` / `rotate-ccw` are not detected by the Playground on the cover, the inner display or a single-display iPhone 17 (pre-existing, display-independent). Not investigated here.
+13. Resolved in review (R158-02): on a multi-display simulator, and off the main display, `describe-ui --point` fetches the tree first and uses the same routing, calibration and scene placement as the full outline. Review R158-05 then removed the single-display fast path too: it answered from a cached routing check, so the first point query after a Resize Mode session started hit SpringBoard. Every point query now fetches the tree first (one more tree fetch on an upright single-display simulator), and `OrientationCalibrator.soleOrientation` is gone.
 
 ## Amendments
