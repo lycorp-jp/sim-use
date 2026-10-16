@@ -11,9 +11,10 @@
 | 2026-10-17 | S4: evidence-gated `Trailing` / `Leading` outline regions for the iOS 27.1 SDK vertical bar; Playground `chrome-test` screen | #163 |
 | 2026-10-17 | S5: `record-video` / `stream-video` capture the routing display (idb patch `display-video.patch`), packed BGRA rows | #164 |
 | 2026-10-17 | S6: Device Hub closed — HID connection rebuilt once `dtuhidd` runs, routed touch starts `dtuhidd`, shared session connection; viewer output race and #162 test fixed | #165 |
+| 2026-10-17 | S4 acceptance with a signed-in LINE (E57): a segmented control in an app header above a leading bar no longer hides the bar | #163 (`72954ac`), merged into #164 and #165 |
 | 2026-10-17 | Device-Hub-open regression of S6: fold / rotate send a report once more when it had no effect, rotate waits for the interface too (E53–E56); the S6-001 batch E2E no longer taps the software keyboard | #165 |
 
-All six PRs are one GitHub stack (#159), each based on the previous branch. Every PR had a review loop: S1 four rounds, S2 four (clean), S3 two (clean), S4 four (not clean only because a signed-in LINE check was blocked), S5 two (clean), S6 four (clean).
+All six PRs are one GitHub stack (#159), each based on the previous branch. Every PR had a review loop: S1 four rounds, S2 four (clean), S3 two (clean), S4 four (not clean only because a signed-in LINE check was blocked; done later, E57), S5 two (clean), S6 four (clean).
 
 ## Outcome (as of 2026-10-17)
 
@@ -34,13 +35,13 @@ Results produced during the work (details per slice in the PRs and in the plan's
 - iPhone Duo / iOS 27.1, `make e2e-ios-duo` (Playground built with Xcode 27.1, side bar required): 7/7 with Device Hub quit (second run; see open questions). With Device Hub reopened on `50670a7`: 5/7 — the same batch test, and `FoldTests.rotateInnerDisplay` (`ios rotate portrait` right after `fold open` left the interface landscape-left; E53–E56).
 - After the posture fix, Device Hub open: `ResizeModeTests` on iPhone 17 and `FoldTests`, `RotateTests`, `ResizeModeTests` on the Duo all passed; the full `make e2e-ios-duo` then passed 7/7. `ios rotate` latency 3.4–3.9 s before and after (12 runs each).
 - New E2E suites: `UICoordinateDefaultTests`, `SideBarOutlineTests`, `RoutedVideoTests`, plus new cases in `ResizeModeTests` and `FoldTests`. They were also run on iPhone 13 mini / iOS 26.5 and iPad Pro 13-inch / iOS 26.5 where relevant.
-- Real apps: LINE 26.18.0 (iOS 27.0 SDK, inset scene) and LINE 26.17.0 built with Xcode 27.1 from the early-bird branch, welcome → login → back on both Duo displays; Settings (UIKit) on the cover display.
+- Real apps: LINE 26.18.0 (iOS 27.0 SDK, inset scene) and LINE 26.17.0 built with Xcode 27.1 from the early-bird branch, welcome → login → back on both Duo displays; Settings (UIKit) on the cover display. Signed in (27.1 SDK build): home tab → chat tab → a chat → back on the cover (portrait, landscape-right) and the inner display (landscape-left, portrait), side regions checked in all six orientations (E57). After the side-bar fix: `make test` 1700 passed; `SideBarOutlineTests` green on the Duo and iPhone 17.
 - GitHub CI green on the S3–S6 heads after the hang fix.
 
 ## Deviations from plan
 
 - **S3 orientation source:** the plan said devicectl first. Measured cost made the selector calibration (probes, CoreDevice only when ambiguous) the choice, and the explicit-coordinate path reads the `describe-ui` snapshot first (decision rows S3).
-- **S4 acceptance:** the signed-in LINE main tabs / chat flow was not checked — no signed-in account on the simulator (E44). iPad goldens were added after review.
+- **S4 acceptance:** checked last, after the stack, when a test account was available (E57); it found the segmented-control case on the cover in landscape-right. iPad goldens were added after review.
 - **S4 gating rule:** "anchor outside the top band" did not hold (E40); the final rule is in the S4 decision rows.
 - **S5:** capture through an idb patch instead of `simctl recordVideo` (file-only, no `stream-video`); videos keep the panel's native orientation.
 - **S6:** works with Device Hub closed instead of refusing; it also fixed a keyboard loss after `fold` / `rotate` that S1 had introduced for Hub-less boots.
