@@ -128,6 +128,16 @@ Playground `chrome-test` (NavigationStack, leading and trailing toolbar items, b
 | E46 | `simctl io recordVideo --display=<devicectl uniqueId>` | Inner display with the UI in landscape-left: a 2006x2852 movie, panel-native portrait (not rotated like `simctl … screenshot`). Resize Mode 560x874: 1680x2622 — simctl cuts the scene from the canvas. `recordVideo` writes only to a file, so it cannot carry `stream-video` |
 | E47 | sim-use after S5 | Inner display: `record-video` 2008x2854 (H.264 even padding), 149 frames in ~5 s, a tap during the recording visible. Resize Mode 560x874: `record-video` and `stream-video --format h264` both 1680x2622, the scene with no canvas. Fold during an inner recording: the video stays 2008x2854 and stderr ends with the moved-display notice |
 
+### Found while building S6 (2026-10-17, Device Hub quit)
+
+| # | Check | Result |
+| --- | --- | --- |
+| E48 | Quit Device Hub | Both booted simulators shut down. `simctl boot` (Xcode 27.1) of the Duo, and of iPhone 17 / iOS 27.0: no `dtuhidd` under `launchd_sim`; `devicectl` works |
+| E49 | `ios fold` with no `dtuhidd` | Works. The XPC report to `com.apple.coredevice.feature.remote.hid.vendordefined` makes launchd start `dtuhidd` under the simulator's `launchd_sim`; it stays running. `devicectl device appResize start` does **not** start it |
+| E50 | Cold boot, tap on the cover, unfold, tap on the inner display (before S6) | The first tap made an Indigo connection (no `dtuhidd`); the inner tap failed with `The legacy Indigo HID transport reaches only the main display`. A Resize Mode tap failed the same way |
+| E51 | Same, tap the cover text field, fold open and closed, `type` (before S6) | `type` reported success, the field stayed empty; a daemon restart (new connection, DTUHID) typed correctly. The fold had started `dtuhidd`, which suppresses the legacy keyboard service under the cached Indigo connection |
+| E52 | After S6, Device Hub quit | Inner taps 1 → 2 → 3 at the exact locations; typing after fold/unfold works; a Resize Mode tap on a cold iPhone 17 starts `dtuhidd` and lands at `(450, 650)`. Fold, rotate, AX routing, screenshot and video need no change |
+
 ### Resizable display (Resize Mode)
 
 Sessions: Duo folded, Settings, 560x874 and then 375x667 (`appResize set
@@ -329,6 +339,8 @@ Scope: with Device Hub quit, check `fold`, `rotate`, touch and AX routing.
 Make it work if dtuhidd can be started on demand or Indigo can route; else
 refuse with a message that names the requirement.
 
+Result: works (E48–E52). dtuhidd can be started on demand; Indigo cannot route.
+
 ### After the stack
 
 - File an issue for Android `fold` / `rotate`.
@@ -373,6 +385,7 @@ refuse with a message that names the requirement.
 | S5: the end-of-capture check invalidates the session cache and refreshes a multi-display topology (review S5-003) | Reuse the 5 s / 2 s caches | A capture shorter than the cache window otherwise ends with no notice |
 | S5: videos keep the panel's native portrait orientation | Rotate to the interface orientation | The main display has always recorded its framebuffer unrotated (`simctl recordVideo` does the same, E46); one rule for every display. Rotating every display is a separate change |
 | S5: a display change during a capture keeps the starting display and ends with a stderr notice | Follow the new display; stop the capture | A new display changes the frame size mid-file; stopping loses the take. The notice names both displays; `--json` is unchanged (no new advisory kind) |
+| S6: Device Hub closed — work, not refuse | Refuse routed input without dtuhidd | dtuhidd starts on demand through its XPC service (E49), which sim-use already uses for fold/rotate. A cached auto-selected Indigo connection is rebuilt once dtuhidd runs (keyboard, E51); routed touch starts dtuhidd itself (Resize Mode never does, E49). Only if dtuhidd still does not start does the command fail, naming Device Hub |
 | Posture shown only on a non-main routing display | Always; never | Owner decision 2026-10-16: single-display output stays identical |
 | Device Hub closed: make it work if possible, else refuse with the requirement | Must work | Owner decision 2026-10-16 |
 
@@ -386,7 +399,7 @@ refuse with a message that names the requirement.
 
 ## Open questions
 
-1. **Hub closed / Simulator.app.** A fresh headless `simctl boot` (Device Hub running, but not showing the device) already had `dtuhidd` in its process tree, and `devicectl` worked. Not tested with Device Hub quit. With no dtuhidd, sim-use selects the Indigo transport (`defaultHIDTransport`). Can Indigo route to a non-main display? Not tested.
+1. Resolved by S6 (E48–E52) for Device Hub closed; Simulator.app (Xcode 26.x) with an iPhone Duo was not tried. **Hub closed / Simulator.app.** A fresh headless `simctl boot` (Device Hub running, but not showing the device) already had `dtuhidd` in its process tree, and `devicectl` worked. Not tested with Device Hub quit. With no dtuhidd, sim-use selects the Indigo transport (`defaultHIDTransport`). Can Indigo route to a non-main display? Not tested.
 2. Resolved by E27: the selected Xcode's devicectl (27.0 or 27.1) reads the Duo.
 3. Resolved by E21 (path-dependent). Not known: the rule behind it (angle delta, speed, or both), and whether a fully dark display (`off` on both) can happen with Always-On disabled.
 4. Resolved in S4 (E39–E43): with the iOS 27.1 SDK the tab bar is in the vertical bar on the cover (all orientations) and on the inner display in landscape; horizontal at the bottom on the inner display in portrait and with the iOS 27.0 SDK everywhere.
