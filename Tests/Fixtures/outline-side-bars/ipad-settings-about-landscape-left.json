@@ -1,0 +1,989 @@
+{
+ "raw": [
+  {
+   "AXFrame": "{{0, 0}, {1376, 1032}}",
+   "AXLabel": "设置",
+   "AXUniqueId": null,
+   "AXValue": null,
+   "children": [
+    {
+     "AXFrame": "{{26, 87}, {288, 44}}",
+     "AXLabel": null,
+     "AXUniqueId": null,
+     "AXValue": "搜索",
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 44,
+      "width": 288,
+      "x": 26,
+      "y": 87
+     },
+     "help": null,
+     "pid": 49563,
+     "role": "AXTextField",
+     "role_description": "search text field",
+     "subrole": "AXSearchField",
+     "title": null,
+     "traits": [
+      "TextEntry",
+      "TextOperationsAvailable",
+      "SearchField",
+      "Scrollable"
+     ],
+     "type": "TextField"
+    },
+    {
+     "AXFrame": "{{281, 98}, {17, 22}}",
+     "AXLabel": "听写",
+     "AXUniqueId": "Dictate",
+     "AXValue": null,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 22,
+      "width": 17,
+      "x": 281,
+      "y": 98
+     },
+     "help": "轻点两下开始听写。完成后再双指轻点两下。",
+     "pid": 49563,
+     "role": "AXButton",
+     "role_description": "button",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Button",
+      "Scrollable"
+     ],
+     "type": "Button"
+    },
+    {
+     "AXFrame": "{{10, 32}, {320, 990}}",
+     "AXLabel": "边栏",
+     "AXUniqueId": null,
+     "AXValue": null,
+     "children": [
+      {
+       "AXFrame": "{{26, 146}, {288, 82.5}}",
+       "AXLabel": "Apple账户、登录以访问iCloud数据、App Store、Apple服务等。",
+       "AXUniqueId": "com.apple.settings.primaryAppleAccount",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 82.5,
+        "width": 288,
+        "x": 26,
+        "y": 146
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 301}, {288, 52.5}}",
+       "AXLabel": "通用",
+       "AXUniqueId": "com.apple.settings.general",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 301
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Selected",
+        "StaticText",
+        "Scrollable",
+        "Button"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 353.5}, {288, 52.5}}",
+       "AXLabel": "辅助功能",
+       "AXUniqueId": "com.apple.settings.accessibility",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 353.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 458.5}, {288, 52.5}}",
+       "AXLabel": "搜索",
+       "AXUniqueId": "com.apple.settings.search",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 458.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 511}, {288, 52.5}}",
+       "AXLabel": "相机",
+       "AXUniqueId": "com.apple.settings.camera",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 511
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 616}, {288, 52.5}}",
+       "AXLabel": "Apple智能与Siri",
+       "AXUniqueId": "com.apple.settings.siri",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 616
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 678.5}, {288, 52.5}}",
+       "AXLabel": "屏幕时间",
+       "AXUniqueId": "com.apple.settings.screenTime",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 678.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 741}, {288, 52.5}}",
+       "AXLabel": "密码",
+       "AXUniqueId": "com.apple.settings.passcodeAndBiometrics",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 741
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 856}, {288, 52.5}}",
+       "AXLabel": "Game Center",
+       "AXUniqueId": "com.apple.settings.gameCenter",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 856
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 908.5}, {288, 52.5}}",
+       "AXLabel": "iCloud",
+       "AXUniqueId": "com.apple.settings.iCloud",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 908.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 793.5}, {288, 52.5}}",
+       "AXLabel": "隐私与安全性",
+       "AXUniqueId": "com.apple.settings.privacyAndSecurity",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 793.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 238.5}, {288, 52.5}}",
+       "AXLabel": "Apple智能已就绪",
+       "AXUniqueId": "com.apple.settings.followUpItem.com.apple.icloud.gm",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 238.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 563.5}, {288, 52.5}}",
+       "AXLabel": "主屏幕与App资源库",
+       "AXUniqueId": "com.apple.settings.homeScreen",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 563.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 406}, {288, 52.5}}",
+       "AXLabel": "多任务与手势",
+       "AXUniqueId": "com.apple.settings.multitaskingAndGestures",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 406
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      }
+     ],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 990,
+      "width": 320,
+      "x": 10,
+      "y": 32
+     },
+     "help": null,
+     "pid": 49563,
+     "role": "AXGroup",
+     "role_description": "群组",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Scrollable"
+     ],
+     "type": "Group"
+    },
+    {
+     "AXFrame": "{{350, 32}, {44, 44}}",
+     "AXLabel": "通用",
+     "AXUniqueId": "BackButton",
+     "AXValue": null,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 44,
+      "width": 44,
+      "x": 350,
+      "y": 32
+     },
+     "help": null,
+     "pid": 49563,
+     "role": "AXButton",
+     "role_description": "back button",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Button",
+      "Scrollable",
+      "BackButton"
+     ],
+     "type": "Button"
+    },
+    {
+     "AXFrame": "{{824, 43.5}, {67.5, 21}}",
+     "AXLabel": "关于本机",
+     "AXUniqueId": null,
+     "AXValue": null,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 21,
+      "width": 67.5,
+      "x": 824,
+      "y": 43.5
+     },
+     "help": null,
+     "pid": 49563,
+     "role": "AXHeading",
+     "role_description": "heading",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Scrollable",
+      "Header"
+     ],
+     "type": "Heading"
+    },
+    {
+     "AXFrame": "{{0, 0}, {1376, 1032}}",
+     "AXLabel": null,
+     "AXUniqueId": null,
+     "AXValue": null,
+     "children": [
+      {
+       "AXFrame": "{{405, 103.5}, {896, 53.5}}",
+       "AXLabel": "名称、iPad",
+       "AXUniqueId": "NAME_CELL_ID",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 103.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 157}, {896, 53.5}}",
+       "AXLabel": "iPadOS版本、26.5",
+       "AXUniqueId": "SW_VERSION_SPECIFIER",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 157
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Button",
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{405, 210.5}, {896, 53.5}}",
+       "AXLabel": "型号名称、iPad Pro 13-inch (M5)",
+       "AXUniqueId": "ProductModelName",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 210.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 264}, {896, 53.5}}",
+       "AXLabel": "型号、A3361J/A",
+       "AXUniqueId": "ProductModel",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 264
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 317.5}, {896, 53.5}}",
+       "AXLabel": "序列号、MJ9VQG4NQV",
+       "AXUniqueId": "SerialNumber",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 317.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 406}, {896, 53.5}}",
+       "AXLabel": "歌曲、0",
+       "AXUniqueId": "SONGS",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 406
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 459.5}, {896, 53.5}}",
+       "AXLabel": "视频、0",
+       "AXUniqueId": "VIDEOS",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 459.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 513}, {896, 53.5}}",
+       "AXLabel": "照片、6",
+       "AXUniqueId": "PHOTOS",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 513
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 566.5}, {896, 53.5}}",
+       "AXLabel": "应用程序、1",
+       "AXUniqueId": "APPLICATIONS",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 566.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 620}, {896, 53.5}}",
+       "AXLabel": "总容量、994.66 GB",
+       "AXUniqueId": "User Data Capacity",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 620
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 673.5}, {896, 53.5}}",
+       "AXLabel": "可用容量、103.58 GB",
+       "AXUniqueId": "User Data Available",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 673.5
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{405, 797}, {896, 53.5}}",
+       "AXLabel": "证书信任设置",
+       "AXUniqueId": "CERT_TRUST_SETTINGS",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 53.5,
+        "width": 896,
+        "x": 405,
+        "y": 797
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Button",
+        "Scrollable",
+        "TextOperationsAvailable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{26, 971}, {288, 52.5}}",
+       "AXLabel": "App",
+       "AXUniqueId": "com.apple.settings.apps",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.5,
+        "width": 288,
+        "x": 26,
+        "y": 971
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Button",
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{10, 32}, {320, 990}}",
+       "AXLabel": null,
+       "AXUniqueId": null,
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 990,
+        "width": 320,
+        "x": 10,
+        "y": 32
+       },
+       "help": null,
+       "pid": 49563,
+       "role": "AXGroup",
+       "role_description": "group",
+       "subrole": null,
+       "synthesized": true,
+       "title": null,
+       "traits": [
+        "Scrollable"
+       ],
+       "type": "Group"
+      }
+     ],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 1032,
+      "width": 1376,
+      "x": 0,
+      "y": 0
+     },
+     "help": null,
+     "pid": 49563,
+     "role": "AXGroup",
+     "role_description": "群组",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Scrollable"
+     ],
+     "type": "Group"
+    }
+   ],
+   "content_required": false,
+   "custom_actions": [],
+   "enabled": true,
+   "frame": {
+    "height": 1032,
+    "width": 1376,
+    "x": 0,
+    "y": 0
+   },
+   "help": null,
+   "pid": 49563,
+   "role": "AXApplication",
+   "role_description": "application",
+   "subrole": null,
+   "title": null,
+   "traits": [
+    "None"
+   ],
+   "type": "Application"
+  }
+ ],
+ "screen": {
+  "height": 1032,
+  "width": 1376
+ }
+}

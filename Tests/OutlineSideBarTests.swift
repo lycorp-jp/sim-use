@@ -10,8 +10,9 @@ import Testing
 // toolbar items, tab bar — into a bar along one side. The outline groups
 // that bar into `[Trailing …]` / `[Leading …]` only on that evidence; every
 // other tree renders as before. Fixtures are raw `ui --json` trees captured
-// from the Playground `chrome-test` screen (Xcode 27.1 and 27.0 builds) on
-// an iPhone Duo / iOS 27.1 and an iPhone 17 / iOS 27.0.
+// from the Playground `chrome-test` screen (Xcode 27.1 and 27.0 builds) and
+// Settings on an iPhone Duo / iOS 27.1, an iPhone 17 / iOS 27.0 and an iPad
+// Pro 13-inch / iOS 26.5.
 
 private struct Fixture: Decodable {
     struct Size: Decodable { let width: Double; let height: Double }
@@ -121,6 +122,12 @@ struct OutlineSideBarTests {
         "iphone17-chrome-portrait",
         "iphone17-chrome-landscape-left",
         "iphone17-settings-general",
+        // iPad Pro 13-inch / iOS 26.5: the plan's single-display iPad goldens.
+        "ipad-chrome-portrait",
+        "ipad-chrome-landscape-left",
+        "ipad-settings-landscape-left",
+        "ipad-settings-about-portrait",
+        "ipad-settings-about-landscape-left",
     ])
     func noBar(fixture: String) throws {
         let outline = try render(fixture)

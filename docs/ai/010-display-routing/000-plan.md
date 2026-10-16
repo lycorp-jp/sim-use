@@ -299,7 +299,7 @@ toolbar, trailing buttons).
 Acceptance:
 
 - Duo cover display: `#BackButton` and the status bar are in `Trailing`; content rows stay in `Content`. Inner display (landscape and portrait): bands match the 951x669 / 669x951 UI. Tab bar position verified on both displays and placed in a sensible region.
-- Golden fixtures for single-display trees (iPhone portrait, landscape, iPad) are unchanged.
+- Golden fixtures for single-display trees (iPhone portrait, landscape, iPad) are unchanged. Done: `Tests/Fixtures/outline-side-bars/` pins iPhone 17 (Playground chrome portrait/landscape, Settings) and iPad Pro 13-inch / iOS 26.5 (Playground chrome portrait/landscape, Settings sidebar, Settings › About with its back button) with no side region; with no bar the formatter takes the S3 path unchanged.
 - LINE app (simulator build) on both Duo displays: main tabs, a chat, back navigation driven only through `ui` + `tap @N`. **Not met:** the main tabs need a signed-in account (E44); welcome → login → back was driven on both displays with the 27.0 and the 27.1 SDK builds instead.
 
 ### S5 — Video on the routing display
