@@ -325,35 +325,42 @@ struct ViewerAPIHandlers {
 /// `terminationHandler` to grab everything the child wrote up to its
 /// own exit (and not whatever any inherited grandchild keeps writing
 /// afterwards).
-private final class StreamCollector: @unchecked Sendable {
+final class StreamCollector: @unchecked Sendable {
     private let handle: FileHandle
     private let lock = NSLock()
     private var buffer = Data()
     private var done = false
 
-    init(handle: FileHandle) {
+    /// `afterRead` is a test seam: it runs after a callback has taken
+    /// bytes off the pipe and before they are recorded.
+    init(handle: FileHandle, afterRead: (@Sendable () -> Void)? = nil) {
         self.handle = handle
         handle.readabilityHandler = { [weak self] fh in
             guard let self else { return }
+            // Taking bytes off the pipe and recording them is one step under
+            // the lock, so `finish()` never returns while a callback holds
+            // bytes it has not recorded yet (review S6-002). A callback that
+            // gets the lock after `finish()` reads nothing: `finish()` has
+            // drained the pipe.
+            self.lock.lock()
+            guard !self.done else {
+                self.lock.unlock()
+                return
+            }
             let chunk = fh.availableData
+            afterRead?()
+            self.buffer.append(chunk)
+            self.lock.unlock()
             if chunk.isEmpty {
                 // Pipe writer closed (real EOF). Detach so we stop
                 // burning a dispatch source on an empty pipe.
                 self.detach()
-                return
             }
-            self.lock.lock()
-            if !self.done {
-                self.buffer.append(chunk)
-            }
-            self.lock.unlock()
         }
     }
 
     func finish() -> Data {
-        detach()
         lock.lock()
-        defer { lock.unlock() }
         // The exit can be reported before the readability handler has run
         // for the child's last write, which is then still in the pipe. Read
         // what is there without blocking: an inherited grandchild may keep
@@ -362,7 +369,11 @@ private final class StreamCollector: @unchecked Sendable {
             buffer.append(Self.readAvailable(from: handle.fileDescriptor))
         }
         done = true
-        return buffer
+        let result = buffer
+        lock.unlock()
+        // Outside the lock: a callback waiting for it must not wait on us.
+        detach()
+        return result
     }
 
     private static func readAvailable(from fd: Int32) -> Data {
