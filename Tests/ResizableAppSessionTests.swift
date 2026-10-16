@@ -235,8 +235,8 @@ struct ResizableAppSessionMonitorTests {
     private let resizedScene = ResizableAppSessionMonitor.SceneEvidence(width: 560, height: 874)
     private let otherScene = ResizableAppSessionMonitor.SceneEvidence(width: 375, height: 667)
 
-    @Test("new scene evidence bypasses a cached inactive answer; a cached active one is never bypassed")
-    func evidenceBypassesInactive() async {
+    @Test("new scene evidence bypasses a cached answer, inactive or active (R158-01)")
+    func evidenceBypassesCache() async {
         let clock = Clock()
         let counter = Counter()
         counter.states = [.inactive, .active(sampleSession), .inactive]
@@ -246,10 +246,13 @@ struct ResizableAppSessionMonitorTests {
         // In-band evidence of a session: re-probe despite the fresh cache.
         #expect(await monitor.state(for: "A", evidence: resizedScene) == .active(sampleSession))
         #expect(counter.count == 2)
-        // Now active and cached: evidence — even different evidence — does
-        // not force another probe.
-        #expect(await monitor.state(for: "A", evidence: otherScene) == .active(sampleSession))
+        // The same scene rides the cache.
+        #expect(await monitor.state(for: "A", evidence: resizedScene) == .active(sampleSession))
         #expect(counter.count == 2)
+        // Active and cached, but the scene changed: touches are routed now,
+        // so a session that may have ended is re-checked.
+        #expect(await monitor.state(for: "A", evidence: otherScene) == .inactive)
+        #expect(counter.count == 3)
     }
 
     @Test("the same evidence seen again rides the cache (R150-03: a downscaled display is not a resize per fetch)")
@@ -646,6 +649,46 @@ struct ResizableSessionEndEvidenceTests {
         _ = await monitor.state(for: "U", deviceSizedRoot: true)
         _ = await monitor.state(for: "U", deviceSizedRoot: true)
         _ = await monitor.state(for: "U", deviceSizedRoot: true)
+        #expect(await monitor.probeCount == 2)
+    }
+}
+
+@Suite("ResizableAppSessionMonitor — a changed scene re-checks a cached session (R158-01)")
+struct ResizableSessionChangedEvidenceTests {
+    final class Answers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var queue: [ResizableAppSessionState]
+        init(_ queue: [ResizableAppSessionState]) { self.queue = queue }
+        func next() -> ResizableAppSessionState {
+            lock.lock(); defer { lock.unlock() }
+            return queue.count > 1 ? queue.removeFirst() : queue[0]
+        }
+    }
+
+    private typealias Evidence = ResizableAppSessionMonitor.SceneEvidence
+
+    @Test("an inset scene after a session (LINE on the Duo cover, 386x678) re-checks the cached active answer")
+    func insetSceneAfterSession() async {
+        let answers = Answers([.active(sampleSession), .inactive])
+        let frozen = Date(timeIntervalSince1970: 0)
+        let monitor = ResizableAppSessionMonitor(ttl: 60, clock: { frozen }, probe: { _ in answers.next() }, environment: [:])
+        #expect(await monitor.state(for: "U", evidence: Evidence(width: 560, height: 874)).session == sampleSession)
+        // The same scene again rides the cache.
+        #expect(await monitor.state(for: "U", evidence: Evidence(width: 560, height: 874)).session == sampleSession)
+        #expect(await monitor.probeCount == 1)
+        // The session ended; the app is back at its inset size.
+        #expect(await monitor.state(for: "U", evidence: Evidence(width: 386, height: 678)) == .inactive)
+        #expect(await monitor.probeCount == 2)
+    }
+
+    @Test("a panel-downscaled device (iPhone mini, 375x812 evidence) re-checks once after a session")
+    func downscaledDeviceAfterSession() async {
+        let answers = Answers([.active(sampleSession), .inactive])
+        let frozen = Date(timeIntervalSince1970: 0)
+        let monitor = ResizableAppSessionMonitor(ttl: 60, clock: { frozen }, probe: { _ in answers.next() }, environment: [:])
+        _ = await monitor.state(for: "U", evidence: Evidence(width: 560, height: 874))
+        #expect(await monitor.state(for: "U", evidence: Evidence(width: 375, height: 812)) == .inactive)
+        _ = await monitor.state(for: "U", evidence: Evidence(width: 375, height: 812))
         #expect(await monitor.probeCount == 2)
     }
 }

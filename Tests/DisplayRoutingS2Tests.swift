@@ -258,6 +258,23 @@ struct SceneOffsetTests {
         #expect(result.sceneOffset == CGPoint(x: 0, y: 80))
     }
 
+    @Test("an inset scene under rotation maps to the measured panel point (E30, R158-02)")
+    func insetMappingUnderRotation() {
+        // iOS 27.0 SDK Playground on the Duo cover in landscape-right: the
+        // top-trailing corner's centre (634, 126) in scene points was hit
+        // live at panel (260, 634), and missed at (340, 634) without the
+        // 80 pt offset.
+        let calibration = OrientationCalibration(
+            orientation: .landscapeRight, native: coverNative, probesUsed: 0, advisory: nil,
+            sceneOffset: CGPoint(x: 0, y: 80), sceneSize: CGSize(width: 678, height: 386)
+        )
+        #expect(calibration.probeCGPoint(CGPoint(x: 634, y: 126)) == CGPoint(x: 260, y: 634))
+        #expect(calibration.hidCGPoint(CGPoint(x: 634, y: 126)) == CGPoint(x: 260, y: 634))
+        #expect(!calibration.isIdentity)
+        let unplaced = OrientationCalibration(orientation: .landscapeRight, native: coverNative, probesUsed: 0, advisory: nil)
+        #expect(unplaced.probeCGPoint(CGPoint(x: 634, y: 126)) == CGPoint(x: 340, y: 634))
+    }
+
     @Test("a scene that fills the display costs no probe")
     @MainActor
     func fullScene() async {

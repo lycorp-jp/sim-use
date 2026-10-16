@@ -216,15 +216,16 @@ public actor ResizableAppSessionMonitor {
     /// The session state for `udid`, from the cache when fresh.
     ///
     /// `evidence` is in-band evidence of a resized scene (see
-    /// `SceneEvidence`). Evidence that *differs* from what the cached
-    /// non-active answer was probed with bypasses that answer, so a
-    /// session that started inside the TTL window is noticed on the first
-    /// command that can see it, instead of up to `ttl` seconds later. The
-    /// same evidence seen again does not re-probe: a display whose AX size
-    /// legitimately never matches the device size (review finding
-    /// R150-03) pays one probe per TTL like everyone else. A cached
-    /// *active* answer is never bypassed: nothing in-band proves a session
-    /// ended, and the TTL already bounds that staleness.
+    /// `SceneEvidence`), and `deviceSizedRoot` says the AX root is the
+    /// device's own size. Evidence that *differs* from what the cached
+    /// answer was probed with bypasses it, inactive or active: a session
+    /// that started or ended inside the TTL window is noticed on the first
+    /// command that can see it. Touch input is routed to the `Resizable`
+    /// display while the answer is active, so a stale active answer would
+    /// tap the display the app left (R158-01). The same evidence seen again
+    /// does not re-probe: a display whose AX size legitimately never
+    /// matches the device size (review finding R150-03) pays one probe per
+    /// TTL like everyone else.
     public func state(for udid: String, evidence: SceneEvidence? = nil, deviceSizedRoot: Bool = false) -> ResizableAppSessionState {
         if let raw = environment[Self.disableEnvironmentKey]?.lowercased(),
            ["0", "false", "no", "off"].contains(raw)
@@ -238,12 +239,14 @@ public actor ResizableAppSessionMonitor {
         let now = clock()
         if let entry = cache[udid], now.timeIntervalSince(entry.checkedAt) < ttl {
             if case .active = entry.state {
-                // An AX root at the device's own size is evidence the session
-                // ended: touch input is routed to the Resizable display while
-                // the answer says active, so a stale one would tap the wrong
-                // display. Re-probe once; a session that really is at the
-                // device's size then rides the cache.
-                if deviceSizedRoot, !entry.deviceSizedRoot {
+                // A changed scene is evidence the session ended: touch input
+                // is routed to the Resizable display while the answer says
+                // active, so a stale one would tap the wrong display. That
+                // covers a root at the device's own size and a root back at
+                // an app's own inset size (LINE on the iPhone Duo cover, R158-01).
+                // Re-probe once per change; the same scene rides the cache.
+                let sceneChanged = evidence != nil && evidence != entry.evidence
+                if sceneChanged || (deviceSizedRoot && !entry.deviceSizedRoot) {
                     probeCount += 1
                     let state = probe(udid)
                     cache[udid] = CacheEntry(state: state, checkedAt: now, evidence: evidence, deviceSizedRoot: true)

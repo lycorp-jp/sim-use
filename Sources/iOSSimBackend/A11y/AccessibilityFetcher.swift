@@ -124,24 +124,25 @@ public struct AccessibilityFetcher {
         let authoritative = CoreDeviceOrientation.provider(udid: simulatorUDID)
 
         if let point {
-            // No tree to corroborate with here, so the cached routing answer
-            // is taken as-is.
-            let routing = await RoutingDisplayResolver.current(udid: simulatorUDID)
+            // On a single-display simulator with the app on its only
+            // display, the point query keeps its one-probe fast path. Every
+            // other case needs the tree first: the routing display, its
+            // calibration and the place of an inset scene come from it
+            // (R158-02), exactly as for the full outline below.
+            let cachedRouting = await RoutingDisplayResolver.current(udid: simulatorUDID)
+            let multiDisplay = await SimulatorDisplayTopologyMonitor.shared.state(for: simulatorUDID).topology?.isMultiDisplay ?? false
             perf.stage("routing display check")
-            if let fixed = routing.fixedCalibration(sceneSize: nil) {
-                return try await routedPointQuery(
-                    target: target, point: point, routing: routing, calibration: fixed, perf: perf
+            if cachedRouting.isMain, !multiDisplay {
+                return try await pointQuery(
+                    target: target,
+                    point: point,
+                    native: native,
+                    probe: makeProbe(displayId: 0),
+                    authoritative: authoritative,
+                    logger: logger,
+                    perf: perf
                 )
             }
-            return try await pointQuery(
-                target: target,
-                point: point,
-                native: native,
-                probe: makeProbe(displayId: 0),
-                authoritative: authoritative,
-                logger: logger,
-                perf: perf
-            )
         }
 
         var info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
@@ -223,6 +224,20 @@ public struct AccessibilityFetcher {
             calibration = await calibrate(info: info, native: native, probe: probe, logger: logger, authoritative: authoritative)
         }
         perf.stage("calibrate")
+
+        if let point {
+            // `point` is in the app's UI space; the hit-test takes the
+            // routing display's unrotated points, offset for an inset scene.
+            let hit = try await target.legacyAccessibilityElement(
+                at: calibration.probeCGPoint(point.cgPoint),
+                nestedFormat: true,
+                displayId: routing.accessibilityDisplayID
+            )
+            perf.stage("point XPC (routed)")
+            let data = try serializeAccessibilityInfo(hit)
+            perf.finish()
+            return FetchResult(data: data, calibration: calibration, routing: routing)
+        }
 
         // AX frames are UI-space while the hit-test consumes points on
         // the native-portrait AXES (issue #34; the metric stays UI —
@@ -471,28 +486,6 @@ public struct AccessibilityFetcher {
         // The calibration advisory reaches callers through
         // `calibration.advisory`.
         return FetchResult(data: data, calibration: finalCalibration)
-    }
-
-    /// `describe-ui --point` off the main display: `point` is in the
-    /// routing display's UI space, and the hit-test takes the display's
-    /// unrotated points (a secondary panel, plan E6) or scene points (a
-    /// Resize Mode session, E15) on that display's accessibility id.
-    private static func routedPointQuery(
-        target: FBSimulator,
-        point: AccessibilityPoint,
-        routing: RoutingDisplay,
-        calibration: OrientationCalibration,
-        perf: PerfLog
-    ) async throws -> FetchResult {
-        let info = try await target.legacyAccessibilityElement(
-            at: calibration.probeCGPoint(point.cgPoint),
-            nestedFormat: true,
-            displayId: routing.accessibilityDisplayID
-        )
-        perf.stage("point XPC (routed)")
-        let data = try serializeAccessibilityInfo(info)
-        perf.finish()
-        return FetchResult(data: data, calibration: calibration, routing: routing)
     }
 
     /// Orientation calibration WITHOUT the collapsed-children recovery
