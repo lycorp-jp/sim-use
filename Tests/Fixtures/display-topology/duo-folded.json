@@ -1,0 +1,99 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.displays",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.13.5"
+  },
+  "result": {
+    "backlightState": "activeOn",
+    "displays": [
+      {
+        "active": true,
+        "backlightState": "activeOn",
+        "bounds": [
+          [
+            0,
+            0
+          ],
+          [
+            1398,
+            2034
+          ]
+        ],
+        "currentOrientation": "rot0",
+        "displayId": 1,
+        "name": "LCD",
+        "nativeSize": [
+          1398,
+          2034
+        ],
+        "pointScale": 3,
+        "primary": true,
+        "type": {
+          "integrated": {}
+        },
+        "uniqueId": "23926379-D497-49B6-A285-9DB212BCF38D"
+      },
+      {
+        "active": false,
+        "backlightState": "off",
+        "bounds": [
+          [
+            0,
+            0
+          ],
+          [
+            2007,
+            2853
+          ]
+        ],
+        "currentOrientation": "rot0",
+        "displayId": 3,
+        "name": "LCD-1",
+        "nativeSize": [
+          2007,
+          2853
+        ],
+        "pointScale": 3,
+        "primary": false,
+        "type": {
+          "integrated": {}
+        },
+        "uniqueId": "37AFD618-C3EB-415F-AC4B-ABA9E4D465CF"
+      },
+      {
+        "active": false,
+        "backlightState": "off",
+        "bounds": [
+          [
+            0,
+            0
+          ],
+          [
+            7680,
+            4320
+          ]
+        ],
+        "currentOrientation": "rot0",
+        "displayId": 5,
+        "name": "Resizable",
+        "nativeSize": [
+          7680,
+          4320
+        ],
+        "pointScale": 3,
+        "primary": false,
+        "type": {
+          "virtual": {}
+        },
+        "uniqueId": "7C42B556-2B95-4526-B558-C06CDA5AF3F7"
+      }
+    ],
+    "orientation": {
+      "currentDeviceNonFlatOrientation": "portrait",
+      "currentDeviceOrientation": "portrait",
+      "currentDeviceOrientationLocked": false
+    }
+  }
+}

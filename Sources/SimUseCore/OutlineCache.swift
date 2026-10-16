@@ -196,6 +196,14 @@ public enum OutlineCache {
         }
     }
 
+    /// Removes the cached snapshot so the next `@N` lookup fails with
+    /// `ReadError.missing` instead of reusing coordinates captured before
+    /// the screen changed shape (a fold or a rotation). A missing file is
+    /// not an error.
+    public static func invalidate(udid: String, home: URL = homeDirectory) {
+        try? FileManager.default.removeItem(at: file(for: udid, home: home))
+    }
+
     public static func read(udid: String, home: URL = homeDirectory) throws -> Payload {
         let url = file(for: udid, home: home)
         guard FileManager.default.fileExists(atPath: url.path) else {

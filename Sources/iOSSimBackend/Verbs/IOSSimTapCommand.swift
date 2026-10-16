@@ -177,7 +177,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         // Resizable app session (issue #143): touch HID cannot reach the
         // app, so refuse before resolving a target rather than report a
         // tap that was never delivered. `long-press` shares this path.
-        try await ResizableAppSessionGuard.assertTouchInputReachesApp(
+        try await RoutingDisplayGuard.assertTouchInputReachesApp(
             udid: device.resolved,
             verb: (duration ?? 0) > 0 ? "long-press" : "tap",
             logger: logger
@@ -305,7 +305,7 @@ public struct IOSSimTapCommand: SimUseExecutableCommand {
         // inside the cache window is known by now. Cache hit otherwise —
         // effectively free. Raw -x/-y fetched nothing and relies on the
         // first check alone.
-        try await ResizableAppSessionGuard.assertTouchInputReachesApp(
+        try await RoutingDisplayGuard.assertTouchInputReachesApp(
             udid: device.resolved,
             verb: (duration ?? 0) > 0 ? "long-press" : "tap",
             logger: logger

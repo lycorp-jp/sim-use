@@ -113,6 +113,11 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
         /// (whose AX space already rotates with the screen) and on
         /// legacy daemons. Codable omits the key when nil.
         public let orientation: String?
+        /// The display that hosts the app when it is not the main display
+        /// (a Resize Mode session, or a secondary integrated display such
+        /// as the unfolded iPhone Duo inner screen). Codable omits the key
+        /// on the main display, so single-display output is unchanged.
+        public let display: RoutingDisplayInfo?
         /// Degraded-calibration warning (guessed orientation). Excluded
         /// from the encoded `data` payload via `CodingKeys` — the
         /// envelope hoists it to the top-level `advisory` key. See
@@ -131,6 +136,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             appPackage: String,
             crashDialog: CrashDialogSignal? = nil,
             orientation: String? = nil,
+            display: RoutingDisplayInfo? = nil,
             commandAdvisory: CommandAdvisory? = nil
         ) {
             self.platform = platform
@@ -144,6 +150,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             self.appPackage = appPackage
             self.crashDialog = crashDialog
             self.orientation = orientation
+            self.display = display
             self.commandAdvisory = commandAdvisory
         }
 
@@ -159,6 +166,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             case appPackage
             case crashDialog
             case orientation
+            case display
         }
     }
 
@@ -263,12 +271,21 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             cachedSnapshot: DaemonDispatch.lastLivenessSnapshot
         )
         let orientation = fetchResult.calibration?.orientation
+        let routing = fetchResult.routing
+        // Off the main display the interface size comes from CoreDevice:
+        // a rotated secondary display keeps its panel-portrait root frame.
+        var screenSize: (width: Double, height: Double)? = nil
+        if case .secondary = routing {
+            screenSize = fetchResult.calibration?.uiScreenSize()
+        }
         let outline = OutlineFormatter.render(
             tree: typedTree,
             foregroundBundleId: appPackage.isEmpty ? nil : appPackage,
             // Portrait keeps the legacy header byte-for-byte; only a
             // rotated screen earns the tag.
-            orientationTag: orientation.flatMap { $0 == .portrait ? nil : $0.rawValue }
+            orientationTag: orientation.flatMap { $0 == .portrait ? nil : $0.rawValue },
+            displayTag: routing.headerTag,
+            screenSize: screenSize
         )
 
         // Alias cache is best-effort: a write failure (permissions, full
@@ -297,6 +314,7 @@ public struct IOSSimDescribeUICommand: SimUseExecutableCommand {
             appLabel: outline.appLabel,
             appPackage: appPackage,
             orientation: orientation?.rawValue,
+            display: routing.info,
             // Degraded calibration (guessed orientation) and remote-content
             // recovery (issue #64) must both reach the caller: the outline
             // may be a guess-mapped or cross-process-recovered view rather

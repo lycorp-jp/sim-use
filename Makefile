@@ -1,4 +1,4 @@
-.PHONY: help build test e2e e2e-ios e2e-android e2e-matrix eval clean viewer sync-skills
+.PHONY: help build test e2e e2e-ios e2e-ios-duo e2e-android e2e-matrix eval clean viewer sync-skills
 
 # pipefail below needs bash; macOS /bin/sh is bash-in-posix-mode but
 # being explicit costs nothing.
@@ -30,6 +30,7 @@ help:
 	@echo "  make test    Run unit tests (no simulator needed)"
 	@echo "  make e2e     Run BOTH iOS + Android E2E suites in sequence (~15 min iOS alone)"
 	@echo "  make e2e-ios      Run iOS E2E tests on a booted simulator (~15 min for a full green run)"
+	@echo "  make e2e-ios-duo  Run the display-routing / fold / rotate E2E suites on an iPhone Duo"
 	@echo "  make e2e-android  Run Android E2E tests on a connected device/emulator"
 	@echo "  make e2e-matrix   Run iOS E2E across Xcode 26/27 x Simulator/Device Hub legs"
 	@echo "  make eval    Run agent evals (real \`claude -p\` cost; prompts first)"
@@ -75,6 +76,13 @@ e2e:
 # (each HID-driven suite waits on real simulator gestures/animations).
 e2e-ios:
 	./scripts/test-runner.sh
+
+# iOS E2E on an iPhone Duo (multi-display) simulator: picks a booted or
+# available iPhone Duo (needs the Xcode 27.1+ runtime) and runs the suites
+# that exercise display routing, fold and rotation there. Pass suite
+# filters via ARGS to narrow it, e.g. `make e2e-ios-duo ARGS=FoldTests`.
+e2e-ios-duo:
+	./scripts/e2e-duo.sh $(ARGS)
 
 # Android device E2E: builds the CLI + playground fixture, installs it on
 # ANDROID_SERIAL (default emulator-5554), and runs the Android suites.

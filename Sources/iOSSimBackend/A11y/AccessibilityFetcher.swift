@@ -33,22 +33,30 @@ public struct AccessibilityFetcher {
         public let data: Data
         public let calibration: OrientationCalibration?
         public let advisory: CommandAdvisory?
-        /// Non-nil when the fetch ran under an active resizable app
-        /// session (issue #143): the tree is the frontmost app's own, but
-        /// calibration and collapsed-children recovery were skipped
-        /// because the hit-test resolves on the main display.
-        public let resizableSession: ResizableAppSession?
+        /// The display that hosts the app for this fetch. Off the main
+        /// display (a Resize Mode session, issue #143, or a secondary
+        /// integrated display such as the unfolded iPhone Duo) the tree is
+        /// the frontmost app's own, but calibration and collapsed-children
+        /// recovery were skipped because the hit-test resolves on the main
+        /// display.
+        public let routing: RoutingDisplay
+
+        /// The active Resize Mode session, when `routing` is one.
+        public var resizableSession: ResizableAppSession? {
+            if case .resizable(let session, _) = routing { return session }
+            return nil
+        }
 
         public init(
             data: Data,
             calibration: OrientationCalibration?,
             advisory: CommandAdvisory? = nil,
-            resizableSession: ResizableAppSession? = nil
+            routing: RoutingDisplay = .main
         ) {
             self.data = data
             self.calibration = calibration
             self.advisory = advisory
-            self.resizableSession = resizableSession
+            self.routing = routing
         }
     }
 
@@ -114,8 +122,15 @@ public struct AccessibilityFetcher {
             // the main display (SpringBoard) during a session, whatever the
             // point. No tree to corroborate with here, so the cached answer
             // is taken as-is.
-            let resizableSession = await ResizableAppSessionMonitor.shared.state(for: simulatorUDID).session
-            perf.stage("resizable session check")
+            let routing = await RoutingDisplayResolver.current(udid: simulatorUDID)
+            perf.stage("routing display check")
+            if case .secondary(let display) = routing {
+                throw SecondaryDisplayPointQueryError(udid: simulatorUDID, display: display)
+            }
+            let resizableSession: ResizableAppSession? = {
+                if case .resizable(let session, _) = routing { return session }
+                return nil
+            }()
             return try await pointQuery(
                 target: target,
                 point: point,
@@ -143,12 +158,26 @@ public struct AccessibilityFetcher {
         // than after the TTL; the same evidence seen again does not
         // (R150-03). A scene at exactly the device's size has no evidence
         // and waits for the TTL — the documented gap.
+        //
+        // A secondary integrated display (the unfolded iPhone Duo inner
+        // screen) is the same situation: the tree follows the app, the
+        // hit-test stays on the main display. Work record:
+        // docs/ai/010-display-routing/000-plan.md.
         let sceneEvidence = Self.resizedSceneEvidence(info: info, native: native)
-        let resizableSession = await ResizableAppSessionMonitor.shared
-            .state(for: simulatorUDID, evidence: sceneEvidence)
-            .session
-        perf.stage("resizable session check")
-        if let resizableSession {
+        let rootFrame = rawDisplayFrame(in: rawRoots(of: info))
+        let routing = await RoutingDisplayResolver.current(
+            udid: simulatorUDID,
+            evidence: sceneEvidence,
+            rootSize: rootFrame.map { SimulatorDisplayTopologyMonitor.RootSize(width: Double($0.width), height: Double($0.height)) }
+        )
+        let resizableSession: ResizableAppSession? = {
+            if case .resizable(let session, _) = routing { return session }
+            return nil
+        }()
+        perf.stage("routing display check")
+        if case .secondary(let display) = routing {
+            logger.info().log("App is on secondary display \(display.name) (id \(display.displayID), \(display.rotation.rawValue)); hit-test driven recovery and calibration are skipped")
+        } else if let resizableSession {
             logger.info().log("Resizable app session active (\(resizableSession.displayName) \(resizableSession.preferredSizeDescription)); hit-test driven recovery and calibration are skipped")
         } else if let sceneEvidence {
             logger.info().log("AX root frame \(Int(sceneEvidence.width))x\(Int(sceneEvidence.height)) is not a device size but CoreDevice reports no resizable app session; proceeding normally")
@@ -164,7 +193,7 @@ public struct AccessibilityFetcher {
         // hit-tests would collect SpringBoard's elements from the main
         // display, which is the splicing this path exists to avoid.
         var remoteAdvisory: CommandAdvisory? = nil
-        if resizableSession == nil, isEmptyShellTree(info) {
+        if routing.isMain, isEmptyShellTree(info) {
             logger.info().log("Frontmost accessibility tree is an empty shell; retrying with remote-content discovery")
             let samplingScale = native.map { uiScaleFromRawTree(info, native: $0) } ?? .identity
             if let retried = try? await target.legacyAccessibilityElements(
@@ -183,27 +212,43 @@ public struct AccessibilityFetcher {
             perf.stage("remote-content retry")
         }
 
-        if let resizableSession {
-            // The raw tree is the app's own and its frames are scene
-            // space, so it is returned as fetched: identity calibration
-            // (a resized scene's size says nothing about rotation, and
-            // the probes would land on SpringBoard anyway) and no
-            // recovery walk (whose synthesized children would be
-            // SpringBoard's — the splicing the issue reports).
-            let display = rawDisplayFrame(in: rawRoots(of: info))
-            let advisory = ResizableAppSessionAdvisory.describeUI(
-                session: resizableSession,
-                sceneSize: display.map { (width: Double($0.width), height: Double($0.height)) },
-                native: native
-            )
+        if !routing.isMain {
+            // The raw tree is the app's own and its frames are UI space,
+            // so it is returned as fetched, without the recovery walk
+            // (whose synthesized children would come from the main
+            // display — the splicing #143 reports). A resized scene is
+            // upright; a secondary display's rotation comes from
+            // CoreDevice instead of the probes, which cannot reach it.
+            let calibration: OrientationCalibration
+            let advisory: CommandAdvisory
+            switch routing {
+            case .resizable(let session, _):
+                let display = rawDisplayFrame(in: rawRoots(of: info))
+                calibration = .identity(native: native)
+                advisory = ResizableAppSessionAdvisory.describeUI(
+                    session: session,
+                    sceneSize: display.map { (width: Double($0.width), height: Double($0.height)) },
+                    native: native
+                )
+            case .secondary(let display):
+                calibration = OrientationCalibration(
+                    orientation: display.rotation.interfaceOrientation,
+                    native: display.panelPoints ?? native,
+                    probesUsed: 0,
+                    advisory: nil
+                )
+                advisory = SecondaryDisplayAdvisory.describeUI(display: display)
+            case .main:
+                preconditionFailure("routing.isMain was checked above")
+            }
             let data = try serializeAccessibilityInfo(info)
             perf.stage("serialize")
             perf.finish()
             return FetchResult(
                 data: data,
-                calibration: .identity(native: native),
+                calibration: calibration,
                 advisory: CommandAdvisory.merged([remoteAdvisory, advisory].compactMap { $0 }),
-                resizableSession: resizableSession
+                routing: routing
             )
         }
 
@@ -393,7 +438,7 @@ public struct AccessibilityFetcher {
             perf.stage("point XPC")
             let data = try serializeAccessibilityInfo(info)
             perf.finish()
-            return FetchResult(data: data, calibration: .identity(), advisory: sessionAdvisory, resizableSession: resizableSession)
+            return FetchResult(data: data, calibration: .identity(), advisory: sessionAdvisory, routing: Self.routing(for: resizableSession))
         }
 
         var orientation: DisplayOrientation? = nil
@@ -472,8 +517,12 @@ public struct AccessibilityFetcher {
             data: data,
             calibration: finalCalibration,
             advisory: sessionAdvisory,
-            resizableSession: resizableSession
+            routing: Self.routing(for: resizableSession)
         )
+    }
+
+    private static func routing(for session: ResizableAppSession?) -> RoutingDisplay {
+        session.map { .resizable($0, nil) } ?? .main
     }
 
     /// Orientation calibration WITHOUT the collapsed-children recovery

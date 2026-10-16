@@ -100,12 +100,14 @@ public enum ResizableAppSessionProbe {
     /// document — success *and* failure — so the exit status alone is not
     /// trusted; the document is.
     public static func classify(terminationStatus: Int32, stdout: Data, stderr: Data) -> ResizableAppSessionState {
-        let json = (try? JSONSerialization.jsonObject(with: stdout)) as? [String: Any]
+        classify(DevicectlQueryOutput(terminationStatus: terminationStatus, stdout: stdout, stderr: stderr))
+    }
 
-        if let result = json?["result"] as? [String: Any],
+    static func classify(_ output: DevicectlQueryOutput) -> ResizableAppSessionState {
+        if let result = output.document?["result"] as? [String: Any],
            let displayUniqueID = result["displayUniqueId"] as? String, !displayUniqueID.isEmpty,
            let size = result["preferredSize"] as? [Any], size.count == 2,
-           let width = Self.number(size[0]), let height = Self.number(size[1])
+           let width = DevicectlQuery.number(size[0]), let height = DevicectlQuery.number(size[1])
         {
             return .active(ResizableAppSession(
                 displayUniqueID: displayUniqueID,
@@ -115,25 +117,18 @@ public enum ResizableAppSessionProbe {
             ))
         }
 
-        if let error = json?["error"] as? [String: Any] {
-            let code = Self.number(error["code"]).map { Int($0) }
-            if code == noSessionErrorCode {
+        if let error = output.errorSummary {
+            if error.code == noSessionErrorCode {
                 return .inactive
             }
-            let description = ((error["userInfo"] as? [String: Any])?["NSLocalizedDescription"] as? [String: Any])?["string"] as? String
-            let domain = (error["domain"] as? String) ?? "CoreDevice"
-            return .unavailable(reason: "\(domain) error \(code.map(String.init) ?? "?")\(description.map { ": \($0)" } ?? "")")
+            return .unavailable(reason: error.summary)
         }
 
-        let text = (String(data: stderr, encoding: .utf8) ?? "") + (String(data: stdout, encoding: .utf8) ?? "")
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.localizedCaseInsensitiveContains("unrecognized subcommand")
-            || trimmed.localizedCaseInsensitiveContains("unknown subcommand")
-            || trimmed.localizedCaseInsensitiveContains("unexpected argument")
-        {
+        if output.isUnknownSubcommand {
             return .unavailable(reason: "devicectl has no `device info appResize` subcommand (Xcode 27+ required)")
         }
-        return .unavailable(reason: "devicectl exited \(terminationStatus)\(trimmed.isEmpty ? "" : ": \(trimmed.prefix(300))")")
+        let trimmed = output.combinedText
+        return .unavailable(reason: "devicectl exited \(output.terminationStatus)\(trimmed.isEmpty ? "" : ": \(trimmed.prefix(300))")")
     }
 
     /// Spawns devicectl and classifies the outcome. Never throws: a failing
@@ -141,53 +136,15 @@ public enum ResizableAppSessionProbe {
     /// `executablePath` is injectable so tests can drive the drain against
     /// `/bin/sh`; production uses `xcrun`.
     public static func run(udid: String, executablePath: String = "/usr/bin/xcrun", arguments: [String]? = nil) -> ResizableAppSessionState {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-        process.arguments = arguments ?? Self.arguments(udid: udid)
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-
-        // Drain both pipes while the child runs so neither can fill the
-        // ~64 KB pipe buffer and deadlock `waitUntilExit()`. Same drain as
-        // `SimctlDeviceLister.runSimctl` and `Devicectl.run`.
-        let bufferLock = NSLock()
-        var outBuffer = Data()
-        var errBuffer = Data()
-        stdout.fileHandleForReading.readabilityHandler = { handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            bufferLock.lock(); outBuffer.append(chunk); bufferLock.unlock()
+        var spawnFailure = "could not spawn xcrun devicectl"
+        guard let output = DevicectlQuery.run(
+            arguments: arguments ?? Self.arguments(udid: udid),
+            executablePath: executablePath,
+            spawnError: { spawnFailure = $0 }
+        ) else {
+            return .unavailable(reason: spawnFailure)
         }
-        stderr.fileHandleForReading.readabilityHandler = { handle in
-            let chunk = handle.availableData
-            guard !chunk.isEmpty else { return }
-            bufferLock.lock(); errBuffer.append(chunk); bufferLock.unlock()
-        }
-
-        do {
-            try process.run()
-        } catch {
-            return .unavailable(reason: "could not spawn xcrun devicectl: \(error.localizedDescription)")
-        }
-        process.waitUntilExit()
-
-        stdout.fileHandleForReading.readabilityHandler = nil
-        stderr.fileHandleForReading.readabilityHandler = nil
-        bufferLock.lock()
-        outBuffer.append(stdout.fileHandleForReading.readDataToEndOfFile())
-        errBuffer.append(stderr.fileHandleForReading.readDataToEndOfFile())
-        bufferLock.unlock()
-
-        return classify(terminationStatus: process.terminationStatus, stdout: outBuffer, stderr: errBuffer)
-    }
-
-    private static func number(_ value: Any?) -> Double? {
-        if let d = value as? Double { return d }
-        if let n = value as? NSNumber { return n.doubleValue }
-        return nil
+        return classify(output)
     }
 }
 
@@ -310,7 +267,7 @@ public actor ResizableAppSessionMonitor {
 /// device-wide and *does* reach the resized app (verified live), so only
 /// touch paths take this: the touch verbs, touch-bearing `batch` steps, and
 /// `paste --via-menu` (a long-press plus menu taps).
-public struct ResizableAppSessionError: LocalizedError, HintProviding, Equatable {
+public struct ResizableAppSessionError: RoutingDisplayRefusal, Equatable {
     public let verb: String
     public let udid: String
     public let session: ResizableAppSession
@@ -342,7 +299,7 @@ public struct ResizableAppSessionError: LocalizedError, HintProviding, Equatable
 /// session; unlike `screenshot` they are not redirected, because their
 /// pipelines (encoder, GIF transcode, stdout sink) sit on that framebuffer
 /// (review finding R150-06).
-public struct ResizableAppSessionCaptureError: LocalizedError, HintProviding, Equatable {
+public struct ResizableAppSessionCaptureError: RoutingDisplayRefusal, Equatable {
     public let verb: String
     public let udid: String
     public let session: ResizableAppSession
@@ -365,47 +322,6 @@ public struct ResizableAppSessionCaptureError: LocalizedError, HintProviding, Eq
             "`xcrun simctl io \(udid) recordVideo --display=\(session.displayUniqueID) <file.mov>`. " +
             "End the session — stop the `xcrun devicectl device appResize start` process, or rotate the device — to use `\(verb)` normally. " +
             "Set \(ResizableAppSessionMonitor.disableEnvironmentKey)=0 to skip this check."
-    }
-}
-
-public enum ResizableAppSessionGuard {
-    /// Call after global setup in every verb that dispatches touch HID.
-    /// `verb` names the surface in the error ("tap", "swipe", "batch", ...).
-    public static func assertTouchInputReachesApp(
-        udid: String,
-        verb: String,
-        logger: SimUseLogger,
-        monitor: ResizableAppSessionMonitor = .shared
-    ) async throws {
-        switch await monitor.state(for: udid) {
-        case .active(let session):
-            logger.info().log("Resizable app session active on \(udid) (\(session.displayName) \(session.preferredSizeDescription)); refusing \(verb)")
-            throw ResizableAppSessionError(verb: verb, udid: udid, session: session)
-        case .inactive:
-            return
-        case .unavailable(let reason):
-            logger.debug().log("Resizable app session check unavailable (\(reason)); proceeding")
-        }
-    }
-
-    /// Call after global setup in every verb that captures the main
-    /// framebuffer without redirection (`record-video`, `stream-video`),
-    /// before any output file is created or byte is emitted.
-    public static func assertCaptureReachesApp(
-        udid: String,
-        verb: String,
-        logger: SimUseLogger,
-        monitor: ResizableAppSessionMonitor = .shared
-    ) async throws {
-        switch await monitor.state(for: udid) {
-        case .active(let session):
-            logger.info().log("Resizable app session active on \(udid) (\(session.displayName) \(session.preferredSizeDescription)); refusing \(verb) (main-display capture only)")
-            throw ResizableAppSessionCaptureError(verb: verb, udid: udid, session: session)
-        case .inactive:
-            return
-        case .unavailable(let reason):
-            logger.debug().log("Resizable app session check unavailable (\(reason)); proceeding")
-        }
     }
 }
 
@@ -455,16 +371,19 @@ public enum ResizableAppSessionAdvisory {
 
 // MARK: - Screenshot capture
 
-/// Captures the Resizable display through `simctl io … screenshot
-/// --display=<uuid>`. CoreSimulator accepts the CoreDevice display UUID
-/// directly (also the screen name `Resizable`; both verified live) and
-/// crops the surface to the app's scene — 560x874 points came back as
-/// 1680x2622 px, not the 7680x4320 px display canvas CoreDevice reports.
+/// Captures one display through `simctl io … screenshot --display=<uuid>`:
+/// the Resize Mode `Resizable` display (issue #143) and a secondary
+/// integrated display such as the unfolded iPhone Duo inner screen.
+/// CoreSimulator accepts the CoreDevice display UUID directly (also the
+/// display name; both verified live), crops the `Resizable` surface to the
+/// app's scene — 560x874 points came back as 1680x2622 px, not the
+/// 7680x4320 px canvas — and returns a secondary display already rotated
+/// to the interface (2853x2007 for the Duo inner screen at `rot90`).
 ///
 /// Not routed through FBSimulatorControl because the pinned idb's
 /// `FBFramebuffer.mainScreenSurface` only knows `displayClass == 0`, and
 /// the IO port descriptor carries no display UUID to match against.
-public enum ResizableDisplayScreenshot {
+public enum DisplayScreenshot {
     /// Pinned by test.
     public static func arguments(udid: String, displayUniqueID: String, destination: URL) -> [String] {
         ["simctl", "io", udid, "screenshot", "--type=png", "--display=\(displayUniqueID)", destination.path]
@@ -476,20 +395,21 @@ public enum ResizableDisplayScreenshot {
     /// as a `CLIError` naming the display.
     public static func capture(
         udid: String,
-        session: ResizableAppSession,
+        displayUniqueID: String,
+        displayName: String,
         to destination: URL,
         executablePath: String = "/usr/bin/xcrun"
     ) throws -> (width: Int, height: Int)? {
         do {
             _ = try SimctlDeviceLister.runSimctl(
                 executablePath: executablePath,
-                args: arguments(udid: udid, displayUniqueID: session.displayUniqueID, destination: destination)
+                args: arguments(udid: udid, displayUniqueID: displayUniqueID, destination: destination)
             )
         } catch {
-            throw CLIError(errorDescription: "Could not capture the '\(session.displayName)' display (\(session.displayUniqueID)) of a resizable app session: \(error.localizedDescription)")
+            throw CLIError(errorDescription: "Could not capture the '\(displayName)' display (\(displayUniqueID)): \(error.localizedDescription)")
         }
         guard FileManager.default.fileExists(atPath: destination.path) else {
-            throw CLIError(errorDescription: "simctl reported success but wrote no screenshot of the '\(session.displayName)' display to \(destination.path)")
+            throw CLIError(errorDescription: "simctl reported success but wrote no screenshot of the '\(displayName)' display to \(destination.path)")
         }
         return pixelSize(of: destination)
     }

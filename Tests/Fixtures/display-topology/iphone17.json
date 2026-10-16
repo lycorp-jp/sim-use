@@ -1,0 +1,70 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.displays",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.13.5"
+  },
+  "result": {
+    "backlightState": "activeOn",
+    "displays": [
+      {
+        "backlightState": "activeOn",
+        "bounds": [
+          [
+            0,
+            0
+          ],
+          [
+            1206,
+            2622
+          ]
+        ],
+        "currentOrientation": "rot0",
+        "displayId": 1,
+        "name": "LCD",
+        "nativeSize": [
+          1206,
+          2622
+        ],
+        "pointScale": 3,
+        "primary": true,
+        "type": {
+          "integrated": {}
+        },
+        "uniqueId": "ABD78CF5-A1EA-4E0B-83A5-9CA191DDDE9A"
+      },
+      {
+        "backlightState": "off",
+        "bounds": [
+          [
+            0,
+            0
+          ],
+          [
+            7680,
+            4320
+          ]
+        ],
+        "currentOrientation": "rot0",
+        "displayId": 4,
+        "name": "Resizable",
+        "nativeSize": [
+          7680,
+          4320
+        ],
+        "pointScale": 3,
+        "primary": false,
+        "type": {
+          "virtual": {}
+        },
+        "uniqueId": "A1E49128-5115-4F11-88C3-7FE5A964D154"
+      }
+    ],
+    "orientation": {
+      "currentDeviceNonFlatOrientation": "portrait",
+      "currentDeviceOrientation": "portrait",
+      "currentDeviceOrientationLocked": false
+    }
+  }
+}

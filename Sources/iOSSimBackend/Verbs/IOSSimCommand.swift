@@ -20,6 +20,8 @@ import Foundation
 ///   * `sim-use ios key-combo`     (HID modifier + key)
 ///   * `sim-use ios key-sequence`  (HID sequence of keycodes)
 ///   * `sim-use ios batch`         (HID-session-pinned step runner)
+///   * `sim-use ios fold`          (hinge of a foldable simulator)
+///   * `sim-use ios rotate`        (device rotation)
 public struct IOSSimCommand: ParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "ios",
@@ -53,6 +55,8 @@ public struct IOSSimCommand: ParsableCommand {
             IOSSimKeyComboCommand.self,
             IOSSimKeySequenceCommand.self,
             IOSSimBatchCommand.self,
+            IOSSimFoldCommand.self,
+            IOSSimRotateCommand.self,
         ]
     )
 

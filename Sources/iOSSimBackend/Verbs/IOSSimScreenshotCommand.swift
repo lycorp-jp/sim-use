@@ -84,18 +84,30 @@ public struct IOSSimScreenshotCommand: SimUseExecutableCommand {
 
         let outputURL = try Self.prepareOutputURL(output: output, simulatorName: targetSimulator.name)
 
-        // During a resizable app session (Xcode 27 Resize Mode) the app
-        // lives on the virtual "Resizable" display and the main
-        // framebuffer — the only one the pinned idb exposes — holds just
-        // the wallpaper (issue #143). Capture the Resizable display
-        // through simctl instead and say so in the advisory.
-        if case .active(let session) = await ResizableAppSessionMonitor.shared.state(for: trimmedUDID) {
+        // The main framebuffer — the only one the pinned idb exposes — is
+        // not where the app is during a Resize Mode session (wallpaper
+        // only, issue #143) or while a secondary integrated display is
+        // active (dark; the unfolded iPhone Duo). Capture the routing
+        // display through simctl instead. Work record:
+        // docs/ai/010-display-routing/000-plan.md.
+        switch await RoutingDisplayResolver.current(udid: trimmedUDID) {
+        case .main:
+            break
+        case .resizable(let session, _):
             logger.info().log("Resizable app session active; capturing display \(session.displayUniqueID) via simctl")
-            let pixelSize = try ResizableDisplayScreenshot.capture(udid: trimmedUDID, session: session, to: outputURL)
+            let pixelSize = try DisplayScreenshot.capture(
+                udid: trimmedUDID, displayUniqueID: session.displayUniqueID, displayName: session.displayName, to: outputURL
+            )
             return ExecutionResult(
                 path: outputURL.path,
                 commandAdvisory: ResizableAppSessionAdvisory.screenshot(session: session, pixelSize: pixelSize)
             )
+        case .secondary(let display):
+            logger.info().log("App is on secondary display \(display.name); capturing display \(display.uniqueID) via simctl")
+            _ = try DisplayScreenshot.capture(
+                udid: trimmedUDID, displayUniqueID: display.uniqueID, displayName: display.name, to: outputURL
+            )
+            return ExecutionResult(path: outputURL.path)
         }
 
         let screenshotData = try await VideoFrameUtilities.captureScreenshotData(from: targetSimulator)

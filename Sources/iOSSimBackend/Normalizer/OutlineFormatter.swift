@@ -65,10 +65,19 @@ public enum OutlineFormatter {
     ///   (issue #34), appended to the `App:` header so agents reading
     ///   the outline know the device is rotated. Pass nil for portrait —
     ///   the common-case header stays byte-identical to the legacy form.
+    /// - Parameter displayTag: names the display that hosts the app when
+    ///   it is not the main display (for example `display LCD-1`), so the
+    ///   single-display header stays byte-identical.
+    /// - Parameter screenSize: the interface size of that display, used
+    ///   instead of the Application root frame, which keeps the panel's
+    ///   portrait size on a rotated secondary display (669x951 for a
+    ///   951x669 interface on the iPhone Duo inner screen).
     public static func render(
         tree: [AccessibilityElement],
         foregroundBundleId: String? = nil,
-        orientationTag: String? = nil
+        orientationTag: String? = nil,
+        displayTag: String? = nil,
+        screenSize: (width: Double, height: Double)? = nil
     ) -> Outline {
         let root = pickRoot(tree)
         let isApplicationRoot = root?.type == "Application"
@@ -79,7 +88,13 @@ public enum OutlineFormatter {
         // element), use a zero screen so the renderer keeps every node
         // and falls back to the neutral `Content` region.
         let screen: Outline.Frame
-        if isApplicationRoot, let appFrame = root?.frame {
+        if isApplicationRoot, let screenSize {
+            screen = Outline.Frame(
+                x: 0, y: 0,
+                width: Int(screenSize.width.rounded()),
+                height: Int(screenSize.height.rounded())
+            )
+        } else if isApplicationRoot, let appFrame = root?.frame {
             screen = Outline.Frame(
                 x: 0, y: 0,
                 width: Int(appFrame.width.rounded()),
@@ -180,7 +195,8 @@ public enum OutlineFormatter {
             ))
         }
 
-        let text = renderText(appLabel: appLabel, screen: screen, entries: entries, orientationTag: orientationTag)
+        let headerTag = [orientationTag, displayTag].compactMap { $0 }.joined(separator: ", ")
+        let text = renderText(appLabel: appLabel, screen: screen, entries: entries, orientationTag: headerTag.isEmpty ? nil : headerTag)
         return Outline(text: text, entries: entries, lists: lists, screen: screen, appLabel: appLabel)
     }
 

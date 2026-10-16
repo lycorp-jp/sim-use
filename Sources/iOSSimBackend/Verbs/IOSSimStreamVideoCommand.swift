@@ -153,7 +153,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         // native FBVideoStream paths and the screenshot loop alike — reads
         // the main framebuffer, which shows only the wallpaper during a
         // session. Refuse before a single byte reaches stdout.
-        try await ResizableAppSessionGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "stream-video", logger: logger)
+        try await RoutingDisplayGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "stream-video", logger: logger)
 
         let simulatorSet = try await getSimulatorSet(deviceSetPath: nil, logger: logger, reporter: EmptyEventReporter.shared)
         guard let targetSimulator = simulatorSet.allSimulators.first(where: { $0.udid == trimmedUDID }) else {

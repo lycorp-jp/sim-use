@@ -46,6 +46,7 @@ docs/ai/NNN-<slug>/
 | 007 | [physical-ios-device-backend](007-physical-ios-device-backend/000-design.md) | 2026-08-10 | Physical iPhones and iPads over the accessibility audit daemon, devicectl screenshots, capability model, top-level routing |
 | 008 | [linux-android-build](008-linux-android-build/000-design.md) | 2026-09-11 | Android-only Linux build, remote adb servers, connection-scoped daemon. Living guide: [linux-guide.md](008-linux-android-build/linux-guide.md) |
 | 009 | [resizable-app-session](009-resizable-app-session/000-investigation.md) | 2026-10-09 | Xcode 27 Resize Mode: root cause, tier-1 guard (#150), path to real touch routing |
+| 010 | [display-routing](010-display-routing/000-plan.md) | 2026-10-16 | Route touch, AX and screenshots to the display that hosts the app (iPhone Duo inner display, Resize Mode #143); fold and rotate verbs; side-rail outline regions (planned) |
 
 ## History
 

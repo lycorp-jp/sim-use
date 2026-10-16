@@ -160,7 +160,7 @@ public struct IOSSimMultiTouchCommand: SimUseExecutableCommand {
         try await setup(logger: logger)
         try await performGlobalSetup(logger: logger)
         // Resizable app session (issue #143): touch HID cannot reach the app.
-        try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "multi-touch", logger: logger)
+        try await RoutingDisplayGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "multi-touch", logger: logger)
 
         let session = try await HIDInteractor.makeSession(for: device.resolved, logger: logger)
 

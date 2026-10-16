@@ -205,7 +205,7 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
         // session is already known; and again per touch step inside the
         // loop below, for a session the cache had not seen yet.
         if Self.containsTouchStep(stepLines) {
-            try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "batch", logger: logger)
+            try await RoutingDisplayGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "batch", logger: logger)
         }
 
         let context = await MainActor.run {
@@ -245,10 +245,10 @@ public struct IOSSimBatchCommand: SimUseExecutableCommand {
                 // parsing and before dispatch, so a refused step sends
                 // nothing.
                 if let kind = tokens.first.flatMap(BatchStepKind.init(rawValue:)), Self.touchStepKinds.contains(kind) {
-                    try await ResizableAppSessionGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "batch", logger: logger)
+                    try await RoutingDisplayGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "batch", logger: logger)
                 }
                 try await runner.run(BatchPlan(primitives: primitives))
-            } catch let refusal as ResizableAppSessionError where !continueOnError {
+            } catch let refusal as any RoutingDisplayRefusal where !continueOnError {
                 // Unchanged, so the hint reaches the error envelope; the
                 // message already names the batch.
                 throw refusal

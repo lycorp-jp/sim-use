@@ -48,6 +48,20 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 4. Never use `--point`/`-x -y` as a workaround — raw coordinates are refused like selectors, and `ui --point` describes SpringBoard, not the app.
 5. The check costs one `devicectl` query per device per 5 s. A session that just *started* is noticed by the next `ui`, selector tap, or touch step of a `batch` (a newly resized root frame bypasses the cache; a `batch` re-checks before every touch step) unless the scene is exactly the device's own size; a session that just *ended*, and standalone raw `-x/-y` taps right after a start, can see the previous answer for up to 5 s. `SIM_USE_RESIZE_SESSION_CHECK=0` disables the check (you are then back to silent no-op taps); the per-device daemon reads it at spawn time, so set it on the first command or pair it with `SIM_USE_NO_DAEMON=1`. This recipe needs sim-use 0.15.0 or newer — the preflight enforces it.
 
+## iOS: iPhone Duo (multi-display simulator)
+
+**Symptom:** The `ui` header ends in `display LCD-1` (for example `App: Settings  951x669  (landscape-left, display LCD-1)`) and carries `[i] The app is on display 'LCD-1' …` (`--json`: a `data.display` object and `advisory.kind: secondary_display`). `tap`, `long-press`, `swipe`, `touch`, `gesture`, `multi-touch`, a `batch` with a touch step, `ui --point`, `record-video` and `stream-video` fail with `The frontmost app on simulator … is on display 'LCD-1' …`.
+
+**Why:** The iPhone Duo simulator (Xcode 27.1) has two integrated displays. Folded, the app is on the cover display, the main display, and everything works as on any iPhone. Unfolded, the app moves to the inner display (`LCD-1`), while simulator touch input and the point hit-test of this sim-use build reach only the main display, so a tap would be reported as delivered and reach nothing — sim-use refuses it instead.
+
+**Recipes:**
+1. Check the posture: `sim-use ios fold --device <UDID>` names the active display and its orientation.
+2. Observe freely on the inner display: `ui` reads the app's own tree, sized to the inner display's interface (`951x669` in landscape, `669x951` in portrait); `screenshot` captures the inner display.
+3. Drive with the keyboard: `type` and the key verbs reach the app on the inner display. Focus a field before unfolding, since focusing needs a tap.
+4. To tap, fold: `sim-use ios fold closed --device <UDID>` moves the app to the cover display. A fold clears the `ui` snapshot — re-run `ui` before `tap @N`.
+5. To unfold again: `sim-use ios fold open --device <UDID>`. `ios fold half` or a hinge angle reports the display it ended on, which depends on how the hinge got there.
+6. Rotate with `sim-use ios rotate <orientation>` (interface names, as the `ui` header prints them). It also clears the snapshot.
+
 ## System layer detection
 
 **Symptom:** `ui` output shows unexpected content — the `App:` header names a system process like `SpringBoard` (iOS) or `com.android.systemui` (Android).

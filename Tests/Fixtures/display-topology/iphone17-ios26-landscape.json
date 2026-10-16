@@ -1,0 +1,43 @@
+{
+  "info": {
+    "commandType": "devicectl.device.info.displays",
+    "jsonVersion": 5,
+    "outcome": "success",
+    "version": "651.13.5"
+  },
+  "result": {
+    "backlightState": "activeOn",
+    "displays": [
+      {
+        "backlightState": "unknown",
+        "bounds": [
+          [
+            0,
+            0
+          ],
+          [
+            1206,
+            2622
+          ]
+        ],
+        "currentOrientation": "rot90",
+        "displayId": 1,
+        "name": "LCD",
+        "nativeSize": [
+          1206,
+          2622
+        ],
+        "pointScale": 3,
+        "primary": true,
+        "type": {
+          "integrated": {}
+        }
+      }
+    ],
+    "orientation": {
+      "currentDeviceNonFlatOrientation": "landscapeRight",
+      "currentDeviceOrientation": "landscapeRight",
+      "currentDeviceOrientationLocked": false
+    }
+  }
+}

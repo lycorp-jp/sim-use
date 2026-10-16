@@ -371,11 +371,15 @@ struct ResizableAppSessionGuardTests {
         ResizableAppSessionMonitor(probe: { _ in state }, environment: [:])
     }
 
+    /// No devicectl in unit tests: the topology probe answers "unavailable",
+    /// which resolves to the main display.
+    private let noTopology = SimulatorDisplayTopologyMonitor(probe: { _ in .unavailable(reason: "test") }, environment: [:])
+
     @Test("an active session refuses the verb with the session attached")
     func activeSessionThrows() async {
         do {
-            try await ResizableAppSessionGuard.assertTouchInputReachesApp(
-                udid: "UDID-1", verb: "tap", logger: quietLogger, monitor: monitor(returning: .active(sampleSession))
+            try await RoutingDisplayGuard.assertTouchInputReachesApp(
+                udid: "UDID-1", verb: "tap", logger: quietLogger, sessionMonitor: monitor(returning: .active(sampleSession)), topologyMonitor: noTopology
             )
             Issue.record("expected ResizableAppSessionError")
         } catch let error as ResizableAppSessionError {
@@ -389,19 +393,19 @@ struct ResizableAppSessionGuardTests {
 
     @Test("no session and an unavailable check both let the verb proceed")
     func inactiveAndUnavailableProceed() async throws {
-        try await ResizableAppSessionGuard.assertTouchInputReachesApp(
-            udid: "U", verb: "swipe", logger: quietLogger, monitor: monitor(returning: .inactive)
+        try await RoutingDisplayGuard.assertTouchInputReachesApp(
+            udid: "U", verb: "swipe", logger: quietLogger, sessionMonitor: monitor(returning: .inactive), topologyMonitor: noTopology
         )
-        try await ResizableAppSessionGuard.assertTouchInputReachesApp(
-            udid: "U", verb: "swipe", logger: quietLogger, monitor: monitor(returning: .unavailable(reason: "n/a"))
+        try await RoutingDisplayGuard.assertTouchInputReachesApp(
+            udid: "U", verb: "swipe", logger: quietLogger, sessionMonitor: monitor(returning: .unavailable(reason: "n/a")), topologyMonitor: noTopology
         )
     }
 
     @Test("an active session refuses main-display video capture with the capture error (R150-06)")
     func activeSessionRefusesCapture() async {
         do {
-            try await ResizableAppSessionGuard.assertCaptureReachesApp(
-                udid: "UDID-1", verb: "record-video", logger: quietLogger, monitor: monitor(returning: .active(sampleSession))
+            try await RoutingDisplayGuard.assertCaptureReachesApp(
+                udid: "UDID-1", verb: "record-video", logger: quietLogger, sessionMonitor: monitor(returning: .active(sampleSession)), topologyMonitor: noTopology
             )
             Issue.record("expected ResizableAppSessionCaptureError")
         } catch let error as ResizableAppSessionCaptureError {
@@ -418,11 +422,11 @@ struct ResizableAppSessionGuardTests {
             Issue.record("unexpected error \(error)")
         }
         // No session / unavailable: capture proceeds.
-        try? await ResizableAppSessionGuard.assertCaptureReachesApp(
-            udid: "U", verb: "stream-video", logger: quietLogger, monitor: monitor(returning: .inactive)
+        try? await RoutingDisplayGuard.assertCaptureReachesApp(
+            udid: "U", verb: "stream-video", logger: quietLogger, sessionMonitor: monitor(returning: .inactive), topologyMonitor: noTopology
         )
-        try? await ResizableAppSessionGuard.assertCaptureReachesApp(
-            udid: "U", verb: "stream-video", logger: quietLogger, monitor: monitor(returning: .unavailable(reason: "n/a"))
+        try? await RoutingDisplayGuard.assertCaptureReachesApp(
+            udid: "U", verb: "stream-video", logger: quietLogger, sessionMonitor: monitor(returning: .unavailable(reason: "n/a")), topologyMonitor: noTopology
         )
     }
 
@@ -497,11 +501,11 @@ struct ResizableAppSessionGuardTests {
 
 // MARK: - Screenshot redirection
 
-@Suite("ResizableDisplayScreenshot — simctl capture of the Resizable display")
-struct ResizableDisplayScreenshotTests {
+@Suite("DisplayScreenshot — simctl capture of a non-main display")
+struct DisplayScreenshotTests {
     @Test("simctl argument vector selects the display by its CoreDevice UUID")
     func argumentsArePinned() {
-        let args = ResizableDisplayScreenshot.arguments(
+        let args = DisplayScreenshot.arguments(
             udid: "ABC", displayUniqueID: "0933D2CA-38DF-4B17-9934-7CDC624B355C", destination: URL(fileURLWithPath: "/tmp/out.png")
         )
         #expect(args == ["simctl", "io", "ABC", "screenshot", "--type=png", "--display=0933D2CA-38DF-4B17-9934-7CDC624B355C", "/tmp/out.png"])
@@ -511,7 +515,7 @@ struct ResizableDisplayScreenshotTests {
     func simctlFailureIsCLIError() {
         let destination = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("resizable-\(UUID().uuidString).png")
         do {
-            _ = try ResizableDisplayScreenshot.capture(udid: "x", session: sampleSession, to: destination, executablePath: "/bin/false")
+            _ = try DisplayScreenshot.capture(udid: "x", displayUniqueID: sampleSession.displayUniqueID, displayName: sampleSession.displayName, to: destination, executablePath: "/bin/false")
             Issue.record("expected a throw")
         } catch let error as CLIError {
             #expect(error.localizedDescription.contains("'Resizable' display (0933D2CA-38DF-4B17-9934-7CDC624B355C)"))
@@ -524,7 +528,7 @@ struct ResizableDisplayScreenshotTests {
     func missingFileIsReported() {
         let destination = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("resizable-\(UUID().uuidString).png")
         do {
-            _ = try ResizableDisplayScreenshot.capture(udid: "x", session: sampleSession, to: destination, executablePath: "/usr/bin/true")
+            _ = try DisplayScreenshot.capture(udid: "x", displayUniqueID: sampleSession.displayUniqueID, displayName: sampleSession.displayName, to: destination, executablePath: "/usr/bin/true")
             Issue.record("expected a throw")
         } catch let error as CLIError {
             #expect(error.localizedDescription.contains("wrote no screenshot"))
@@ -540,7 +544,7 @@ struct ResizableDisplayScreenshotTests {
         let url = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("px-\(UUID().uuidString).png")
         try png.write(to: url)
         defer { try? FileManager.default.removeItem(at: url) }
-        let size = try #require(ResizableDisplayScreenshot.pixelSize(of: url))
+        let size = try #require(DisplayScreenshot.pixelSize(of: url))
         #expect(size.width == 1)
         #expect(size.height == 1)
     }

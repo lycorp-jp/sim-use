@@ -147,6 +147,23 @@ sim-use 0.15.0 or newer for this reason. Background:
 [issue #143](https://github.com/lycorp-jp/sim-use/issues/143) and
 `docs/ai/009-resizable-app-session/000-investigation.md`.
 
+**iPhone Duo and other multi-display simulators.** Xcode 27.1's iPhone
+Duo has two integrated displays: the cover display (primary, active when
+folded) and the inner display (active when unfolded). `sim-use ios fold
+closed|open|half|<degrees>` folds and unfolds it and confirms which display
+became active; `sim-use ios fold` alone reports the posture. While the
+inner display hosts the app, `ui` reads the app's own tree, sizes the
+outline to the inner display's interface (`951x669` in landscape) and tags
+the header with `display LCD-1` (`--json`: a `display` object and a
+`secondary_display` advisory); `screenshot` captures the inner display;
+`type` and the key verbs work. Touch verbs, `ui --point`, `record-video`
+and `stream-video` are refused with an explanation instead of reporting a
+tap that reaches only the dark cover display. Detection reads `xcrun
+devicectl device info displays` (~0.1 s), once per daemon on a
+single-display simulator and every 2 s on a multi-display one;
+`SIM_USE_DISPLAY_TOPOLOGY_CHECK=0` turns it off. Background:
+`docs/ai/010-display-routing/000-plan.md`.
+
 ### Linux (Android only)
 
 The Android backend also builds on Linux with a Swift 6 toolchain — iOS
@@ -188,7 +205,7 @@ For Android, run `sim-use android init --device <serial>` once to install the br
 All device-scoped commands accept `--device <ID>` (optional when only one simulator is booted). Three command layers:
 
   * **Top-level** — cross-platform verbs: `ui`, `tap`, `long-press`, `swipe`, `touch`, `multi-touch`, `type`, `paste`, `button`, `gesture`, `keyboard-state`, `screenshot`, `record-video`, `stream-video`, `app-state`. Same flags on iOS and Android; physical iOS devices route through `ui`, `tap` and `screenshot` only (the rest reject with the reason — see the [capability matrix](#physical-ios-devices)).
-  * **`sim-use ios <verb>`** — iOS-Simulator-only: `key`, `key-combo`, `key-sequence`, `batch`.
+  * **`sim-use ios <verb>`** — iOS-Simulator-only: `key`, `key-combo`, `key-sequence`, `batch`, `rotate`, `fold`.
   * **`sim-use android <verb>`** — Android-only: `init`, `devices`, `ping`, `scroll`.
   * **`sim-use ios-device <verb>`** — physical-iOS-only: `devices`, `ui`, `screenshot`, `tap` (experimental). Peer of `ios`/`android`; also accepts ECIDs and the hierarchy tuning flags the top level doesn't carry.
 
@@ -326,6 +343,30 @@ Key semantics:
 - Fail-fast by default; `--continue-on-error` switches to best-effort.
 - `--wait-timeout <seconds>` makes selector taps poll for the element to appear — primary mechanism for multi-screen flows.
 - `--ax-cache perBatch` (default) reuses one AX snapshot for the whole run; `--ax-cache perStep` refreshes between steps when the UI changes; `--ax-cache none` disables snapshot reuse entirely. `--wait-timeout` polling always refetches.
+
+### Rotation and folding (iOS-only)
+
+`rotate` takes the interface orientation the `ui` header prints and turns
+the device until the display that hosts the app shows it, then reads the
+result back from CoreDevice. It works on every iOS simulator (iPhone, iPad,
+iPhone Duo). An app that does not accept the orientation — a portrait-only
+app, SpringBoard on iPhone, `portrait-upside-down` on an iPhone-size screen
+— keeps its orientation, and the command reports that with an advisory
+(`--json`: `rotate.confirmed: false`) instead of failing.
+
+```bash
+sim-use ios rotate landscape-left --device $UDID      # portrait | landscape-left | landscape-right | portrait-upside-down
+sim-use ios fold open --device $UDID                  # iPhone Duo: inner display
+sim-use ios fold closed --device $UDID                # iPhone Duo: cover display
+sim-use ios fold 90 --json --device $UDID             # any hinge angle; reports the display it observed
+sim-use ios fold --device $UDID                       # report the posture only
+```
+
+Both verbs change the screen geometry, so they clear the cached `ui`
+snapshot: run `ui` again before `tap @N`. A fold also wakes a locked device
+to its lock screen. Single-display simulators rotate through a GSEvent
+sent to SpringBoard; the iPhone Duo rotates and folds through the
+vendor-defined HID reports that Device Hub's posture controls send.
 
 ### Screenshot
 
