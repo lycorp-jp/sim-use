@@ -178,6 +178,74 @@ struct OutlineSideBarTests {
         #expect(outline.entries.allSatisfy { !["Leading", "Trailing"].contains($0.region.kind) })
     }
 
+    @Test("an edge tab of a horizontal tab bar is not a bar anchor (S4-001)")
+    func horizontalTabBarEdge() throws {
+        // An ordinary iPhone: five tabs across the bottom, a trailing
+        // navigation button and status items above, an empty-state text.
+        let tabs = (0..<5).map { element("RadioButton", "Tab \($0)", 10 + 76 * $0, 792, 74, 48) }
+        let children = (tabs + [
+            element("Button", "More", 346, 62, 36, 36),
+            element("Image", "Wi-Fi", 314, 26, 18, 13),
+            element("Image", "Battery", 340, 26, 27, 13),
+            element("StaticText", "Nothing here yet", 40, 300, 260, 44),
+        ]).joined(separator: ",")
+        let outline = OutlineFormatter.render(tree: try tree(children))
+        #expect(outline.entries.allSatisfy { !["Leading", "Trailing"].contains($0.region.kind) })
+    }
+
+    @Test("a single tab with unrelated items above it is not a bar")
+    func singleTabAnchor() throws {
+        let children = [
+            element("RadioButton", "Tab", 330, 792, 60, 48),
+            element("Button", "More", 346, 62, 36, 36),
+            element("StaticText", "Nothing here yet", 40, 300, 260, 44),
+        ].joined(separator: ",")
+        let outline = OutlineFormatter.render(tree: try tree(children))
+        #expect(outline.entries.allSatisfy { !["Leading", "Trailing"].contains($0.region.kind) })
+    }
+
+    @Test("an unlabeled group around the bar keeps the bar (S4-002)")
+    func wrappedBar() throws {
+        let url = try #require(Bundle.module.url(forResource: "Fixtures/outline-side-bars/sdk271-cover-portrait", withExtension: "json"))
+        var document = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        var raw = try #require(document["raw"] as? [[String: Any]])
+        var app = raw[0]
+        var children = try #require(app["children"] as? [[String: Any]])
+        // Move every element of the bar (x >= 384) under one rail group.
+        func inBar(_ node: [String: Any]) -> Bool {
+            guard let f = node["frame"] as? [String: Any], let x = f["x"] as? Double, let w = f["width"] as? Double else { return false }
+            return x >= 384 && w <= 100
+        }
+        func extract(_ nodes: inout [[String: Any]]) -> [[String: Any]] {
+            var taken: [[String: Any]] = []
+            nodes = nodes.compactMap { node in
+                if inBar(node) { taken.append(node); return nil }
+                var node = node
+                if var kids = node["children"] as? [[String: Any]] {
+                    taken += extract(&kids)
+                    node["children"] = kids
+                }
+                return node
+            }
+            return taken
+        }
+        let bar = extract(&children)
+        #expect(bar.count >= 5)
+        children.append([
+            "type": "Group", "AXLabel": "", "children": bar,
+            "frame": ["x": 384.0, "y": 0.0, "width": 82.0, "height": 678.0],
+        ])
+        app["children"] = children
+        raw[0] = app
+        document["raw"] = raw
+        struct Doc: Decodable { let raw: [AccessibilityElement] }
+        let wrapped = try JSONDecoder().decode(Doc.self, from: JSONSerialization.data(withJSONObject: document))
+        let outline = OutlineFormatter.render(tree: wrapped.raw, screenSize: (width: 466, height: 678))
+        #expect(outline.regionKind(id: "BackButton") == "Trailing")
+        #expect(outline.regionKind(id: "chrome-add") == "Trailing")
+        #expect(outline.entries.filter { $0.role == "RadioButton" }.allSatisfy { $0.region.kind == "Trailing" })
+    }
+
     @Test("a point query (no screen) never has a bar")
     func subtree() throws {
         let json = #"[{"type": "Button", "AXLabel": "Back", "AXUniqueId": "BackButton", "frame": {"x": 399, "y": 179, "width": 38, "height": 38}}]"#

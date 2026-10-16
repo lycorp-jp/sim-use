@@ -11,8 +11,11 @@ import SimUseCore
 /// one renders exactly as before:
 ///
 /// 1. An anchor sits in a narrow strip at the edge: the `BackButton`
-///    identifier or a tab item (`RadioButton` / `Tab`).
-/// 2. At least two elements in the anchor's column, stacked vertically.
+///    identifier, or a tab item (`RadioButton` / `Tab`) with no sibling
+///    tab beside it outside the strip — that is a horizontal tab bar.
+/// 2. Vertical chrome in the anchor's column: the back button with at
+///    least one more element above or below it, or at least two tabs
+///    stacked vertically.
 /// 3. The app's wide content stays clear of the bar: at least one wide
 ///    element exists, and nothing except a container (full screen, or a
 ///    full-width group) crosses the bar's inner edge. On a regular iPhone
@@ -67,7 +70,16 @@ enum OutlineSideBars {
             }
         }
         let candidates = items.filter { inStrip($0.frame) }
-        let anchors = candidates.filter { $0.uniqueId == "BackButton" || $0.role.map(anchorRoles.contains) == true }
+        let backButtons = candidates.filter { $0.uniqueId == "BackButton" }
+        let tabs = candidates.filter { tab in
+            guard let role = tab.role, anchorRoles.contains(role) else { return false }
+            // A tab with a sibling tab beside it outside the strip is the
+            // edge of a horizontal tab bar.
+            return !items.contains { other in
+                other.role == role && !inStrip(other.frame) && abs(other.frame.y - tab.frame.y) <= 2
+            }
+        }
+        let anchors = backButtons + tabs
         guard let firstAnchor = anchors.first else { return nil }
 
         // The bar is one column: the candidates that overlap the anchors
@@ -75,7 +87,9 @@ enum OutlineSideBars {
         let columnMinX = anchors.map(\.frame.x).min() ?? firstAnchor.frame.x
         let columnMaxX = anchors.map { $0.frame.x + $0.frame.width }.max() ?? firstAnchor.frame.x
         let members = candidates.filter { $0.frame.x < columnMaxX && $0.frame.x + $0.frame.width > columnMinX }
-        guard isStackedVertically(members.map(\.frame)) else { return nil }
+        let backButtonStack = !backButtons.isEmpty && isStackedVertically(members.map(\.frame))
+        let tabStack = isStackedVertically(tabs.map(\.frame))
+        guard backButtonStack || tabStack else { return nil }
 
         let boundary: Int
         switch edge {
@@ -91,11 +105,12 @@ enum OutlineSideBars {
         return Bar(edge: edge, boundary: boundary)
     }
 
-    /// At least two frames whose vertical ranges do not overlap.
+    /// At least two frames whose vertical ranges do not overlap — any
+    /// pair, so a tall wrapper around the bar does not hide its items.
     private static func isStackedVertically(_ frames: [Outline.Frame]) -> Bool {
-        let sorted = frames.sorted { $0.y < $1.y }
-        guard let first = sorted.first else { return false }
-        return sorted.dropFirst().contains { $0.y >= first.y + first.height }
+        frames.contains { upper in
+            frames.contains { $0.y >= upper.y + upper.height }
+        }
     }
 
     /// Roles that only group other elements. A full-width one (the group a
