@@ -3,6 +3,7 @@
 @testable import iOSSimBackend
 import ArgumentParser
 import Foundation
+import SimUseCore
 import Testing
 
 // Coverage for LINEIOS-216941: `paste` is now an accepted batch step
@@ -14,12 +15,22 @@ import Testing
 @Suite("Batch — paste step parsing")
 @MainActor
 struct BatchPasteStepParsingTests {
+    /// No live simulator in unit tests: a step that needs the tree (a
+    /// default UI-space swipe calibrates) gets an error and degrades to an
+    /// identity dispatch, as the batch does when the tree is unreachable.
+    /// The default fetcher would query CoreSimulator, which on a CI runner
+    /// with no booted simulator never answered and hung the job.
     private func makeContext() -> BatchContext {
         BatchContext(
             simulatorUDID: "FAKE-UDID",
             axCachePolicy: .none,
             typeSubmissionMode: .chunked,
-            typeChunkSize: 200
+            typeChunkSize: 200,
+            fetchElements: { _, _ in throw CLIError(errorDescription: "no simulator in unit tests") },
+            calibrator: { _, _, _ in
+                Issue.record("calibration must not run without a tree")
+                return .identity()
+            }
         )
     }
 
