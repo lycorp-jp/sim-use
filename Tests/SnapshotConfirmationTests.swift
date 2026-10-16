@@ -88,4 +88,23 @@ struct SnapshotConfirmationTests {
             probe: screen(.portrait, shown: elements))
         #expect(ok)
     }
+
+    @Test("the snapshot fits only the scene it was taken of", arguments: [
+        (CGSize(width: 402, height: 874), CGSize(width: 402, height: 874), true),
+        // A rotation swaps the sides; the probes decide the orientation.
+        (CGSize(width: 874, height: 402), CGSize(width: 402, height: 874), true),
+        // The iPhone Duo inner display: interface 951x669, panel-sized root.
+        (CGSize(width: 951, height: 669), CGSize(width: 669, height: 951), true),
+        // A Resize Mode session resized from 560x1200 to 560x667 (R161-01).
+        (CGSize(width: 560, height: 1200), CGSize(width: 560, height: 667), false),
+        (CGSize(width: 386, height: 678), CGSize(width: 466, height: 678), false),
+    ])
+    func sceneSize(snapshot: CGSize, root: CGSize, expected: Bool) {
+        #expect(OrientationCalibrator.snapshotFits(screen: snapshot, rootSize: root) == expected)
+    }
+
+    @Test("an unknown root size does not fit")
+    func unknownRoot() {
+        #expect(!OrientationCalibrator.snapshotFits(screen: CGSize(width: 402, height: 874), rootSize: nil))
+    }
 }

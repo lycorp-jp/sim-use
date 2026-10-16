@@ -297,6 +297,21 @@ enum MultiTouchDispatcher {
         interpolate: (Double) -> ((x: Double, y: Double), (x: Double, y: Double)),
         logger: SimUseLogger
     ) async throws {
+        let event = event(startP1: startP1, startP2: startP2, steps: steps, stepMs: stepMs, interpolate: interpolate)
+        let end = interpolate(1.0)
+        logger.info().log("multi-touch down at (\(startP1.x),\(startP1.y)) + (\(startP2.x),\(startP2.y)), up at (\(end.0.x),\(end.0.y)) + (\(end.1.x),\(end.1.y)) over \(max(steps, 1)) steps")
+        try await HIDInteractor.performHIDEvent(event, in: session, logger: logger)
+    }
+
+    /// The Down → N×Move → Up trajectory as one `.composite` event, so a
+    /// `batch` step can send it as a single primitive too.
+    static func event(
+        startP1: Point,
+        startP2: Point,
+        steps: Int,
+        stepMs: Int,
+        interpolate: (Double) -> (Point, Point)
+    ) -> FBSimulatorHIDEvent {
         // Empirical (Indigo transport): consecutive touch messages with
         // zero delay in between make SimulatorKit's underlying message
         // builder return nil for the subsequent message. Enforce a 5 ms
@@ -332,9 +347,7 @@ enum MultiTouchDispatcher {
             finger1: CGPoint(x: lastP1.x, y: lastP1.y),
             finger2: CGPoint(x: lastP2.x, y: lastP2.y)
         ))
-
-        logger.info().log("multi-touch down at (\(startP1.x),\(startP1.y)) + (\(startP2.x),\(startP2.y)), up at (\(lastP1.x),\(lastP1.y)) + (\(lastP2.x),\(lastP2.y)) over \(safeSteps) steps")
-        try await HIDInteractor.performHIDEvent(.composite(events), in: session, logger: logger)
+        return .composite(events)
     }
 
     /// Minimum delay between consecutive HID Indigo events. Below ~5 ms

@@ -180,28 +180,18 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
             // Pinch / rotate geometry is laid out on the visual canvas and
             // every interpolated sample crosses into HID space; `native`
             // keeps the legacy device-native portrait layout.
-            var calibration: OrientationCalibration? = nil
-            let width: Double
-            let height: Double
-            if effectiveCoordinateSpace == .ui {
-                let uiCalibration = await Self.orientationCalibration(
-                    udid: device.resolved, preset: preset, logger: logger)
-                let visual = GestureOrientationMapping.visualSize(
-                    explicitWidth: screenWidth, explicitHeight: screenHeight, calibration: uiCalibration)
-                calibration = uiCalibration
-                (width, height) = (visual.width, visual.height)
-            } else {
-                width = screenWidth ?? GestureOrientationMapping.legacyWidth
-                height = screenHeight ?? GestureOrientationMapping.legacyHeight
+            let calibration: OrientationCalibration? = effectiveCoordinateSpace == .ui
+                ? await Self.orientationCalibration(udid: device.resolved, preset: preset, logger: logger)
+                : nil
+            let event = try multiTouchEvent(calibration: calibration, logger: logger)
+            let session = try await HIDInteractor.makeSession(for: device.resolved, logger: logger)
+            if let preDelay, preDelay > 0 {
+                try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
             }
-            logger.info().log("Canvas: \(width)x\(height) (\(effectiveCoordinateSpace.rawValue))")
-            try await runMultiTouch(
-                width: width,
-                height: height,
-                calibration: calibration,
-                duration: gestureDuration,
-                logger: logger
-            )
+            try await HIDInteractor.performHIDEvent(event, in: session, logger: logger)
+            if let postDelay, postDelay > 0 {
+                try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
+            }
             logger.info().log("Gesture completed successfully")
             return ExecutionResult(commandAdvisory: calibration?.advisory)
         }
@@ -271,16 +261,23 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         try await HIDInteractor.performHIDEvent(finalEvent, for: device.resolved, logger: logger)
     }
 
-    private func runMultiTouch(
-        width: Double,
-        height: Double,
-        calibration: OrientationCalibration?,
-        duration: Double,
-        logger: SimUseLogger
-    ) async throws {
+    /// The two-finger trajectory of a pinch / rotate preset as one HID
+    /// event, shared by the standalone verb and `batch` steps. With a
+    /// calibration the geometry is laid out on the visual canvas and every
+    /// sample crosses into HID space; without one it is device-native
+    /// portrait on the legacy 390x844 canvas. Pre/post delays are the
+    /// caller's.
+    func multiTouchEvent(calibration: OrientationCalibration?, logger: SimUseLogger? = nil) throws -> FBSimulatorHIDEvent {
+        let canvas: (width: Double, height: Double)
+        if let calibration {
+            canvas = GestureOrientationMapping.visualSize(
+                explicitWidth: screenWidth, explicitHeight: screenHeight, calibration: calibration)
+        } else {
+            canvas = (screenWidth ?? GestureOrientationMapping.legacyWidth, screenHeight ?? GestureOrientationMapping.legacyHeight)
+        }
         let presetStrokes = preset.strokes(
-            screenWidth: width,
-            screenHeight: height,
+            screenWidth: canvas.width,
+            screenHeight: canvas.height,
             scale: scale,
             angle: angle,
             centerX: centerX,
@@ -292,20 +289,14 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         }
         let f1 = presetStrokes[0]
         let f2 = presetStrokes[1]
-        // Spread the user-supplied (or default) duration evenly across
-        // the requested step count when --step-ms is omitted, so the
-        // total Down→Up wall-clock matches `--duration`. Each gap is
-        // floor(duration * 1000 / steps); rounding errors land in the
-        // final hold which is fine for recognisers (they accept slight
-        // jitter).
-        let resolvedStepMs: Int
-        if let stepMs {
-            resolvedStepMs = stepMs
-        } else {
-            resolvedStepMs = max(1, Int((duration * 1000.0 / Double(steps)).rounded()))
-        }
+        // `recommendedDuration` auto-extends rotate sweeps beyond 90°.
+        // Spread the duration evenly across the requested step count when
+        // --step-ms is omitted, so the total Down→Up wall-clock matches it;
+        // rounding errors land in the final hold, which recognisers accept.
+        let gestureDuration = duration ?? preset.recommendedDuration(angle: angle)
+        let resolvedStepMs = stepMs ?? max(1, Int((gestureDuration * 1000.0 / Double(steps)).rounded()))
 
-        logger.info().log("Multi-touch preset \(preset.rawValue) — finger1 (\(f1.startX),\(f1.startY))→(\(f1.endX),\(f1.endY)) finger2 (\(f2.startX),\(f2.startY))→(\(f2.endX),\(f2.endY)) steps=\(steps) step-ms=\(resolvedStepMs)")
+        logger?.info().log("Multi-touch preset \(preset.rawValue) on \(canvas.width)x\(canvas.height) (\(calibration == nil ? "native" : "ui")) — finger1 (\(f1.startX),\(f1.startY))→(\(f1.endX),\(f1.endY)) finger2 (\(f2.startX),\(f2.startY))→(\(f2.endX),\(f2.endY)) steps=\(steps) step-ms=\(resolvedStepMs)")
 
         let trajectory: MultiTouchDispatcher.Trajectory = { t in
             let p1 = f1.point(at: t)
@@ -314,22 +305,12 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         }
         let dispatched = calibration.map { MultiTouchDispatcher.hidTrajectory($0, trajectory) } ?? trajectory
         let start = dispatched(0)
-
-        let session = try await HIDInteractor.makeSession(for: device.resolved, logger: logger)
-        if let preDelay, preDelay > 0 {
-            try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
-        }
-        try await MultiTouchDispatcher.run(
-            session: session,
+        return MultiTouchDispatcher.event(
             startP1: start.0,
             startP2: start.1,
             steps: steps,
             stepMs: resolvedStepMs,
-            interpolate: dispatched,
-            logger: logger
+            interpolate: dispatched
         )
-        if let postDelay, postDelay > 0 {
-            try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
-        }
     }
 }

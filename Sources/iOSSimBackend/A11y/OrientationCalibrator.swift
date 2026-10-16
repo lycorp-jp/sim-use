@@ -475,12 +475,22 @@ public enum OrientationCalibrator {
         logger: SimUseLogger,
         maxProbes: Int = defaultMaxProbes
     ) async -> OrientationCalibration? {
-        guard let session = try? await AXProbeSession.make(udid: udid, logger: logger) else { return nil }
+        // The live root size refreshes the routing display exactly as a
+        // tree fetch would (a session that started, ended or was resized),
+        // and a snapshot of another scene size cannot describe this screen.
+        let perf = PerfLog.start()
+        defer { perf.finish("snapshot calibration") }
+        guard let (session, rootSize) = try? await AXProbeSession.makeReadingRoot(udid: udid, logger: logger) else { return nil }
+        perf.stage("snapshot: root frame + routing")
+        let scene = CGSize(width: payload.screen.width, height: payload.screen.height)
+        guard snapshotFits(screen: scene, rootSize: rootSize) else {
+            logger.info().log("OrientationCalibrator: the describe-ui snapshot (\(payload.screen.width)x\(payload.screen.height)) does not fit the current \(rootSize.map { "\(Int($0.width))x\(Int($0.height))" } ?? "unknown") scene")
+            return nil
+        }
         let center = CGPoint(x: Double(payload.screen.width) / 2, y: Double(payload.screen.height) / 2)
         let discriminators = Array(payload.entries.map(snapshotRect).sorted {
             hypot($0.midX - center.x, $0.midY - center.y) > hypot($1.midX - center.x, $1.midY - center.y)
         }.prefix(discriminatorPoolLimit))
-        let scene = CGSize(width: payload.screen.width, height: payload.screen.height)
         let calibration: OrientationCalibration
         if let fixed = session.fixedCalibration(sceneSize: scene) {
             calibration = await resolveSceneOffset(
@@ -498,16 +508,29 @@ public enum OrientationCalibrator {
                 logger: logger
             )
         }
+        perf.stage("snapshot: calibrate")
         guard calibration.advisory == nil, calibration.native != nil else { return nil }
         let confirmed = await confirms(
             calibration, discriminators: discriminators,
             sceneArea: Double(scene.width * scene.height), probe: session.probe
         )
+        perf.stage("snapshot: confirm")
         guard confirmed else {
             logger.info().log("OrientationCalibrator: the describe-ui snapshot's elements are not in place under \(calibration.orientation.rawValue)")
             return nil
         }
         return calibration
+    }
+
+    /// Whether a snapshot's screen size is the current scene's size. Either
+    /// side order fits: a rotation swaps them (the probes then decide the
+    /// orientation), and on a secondary display the root keeps the panel's
+    /// portrait size while the snapshot has the interface's.
+    nonisolated static func snapshotFits(screen: CGSize, rootSize: CGSize?) -> Bool {
+        guard let rootSize else { return false }
+        func close(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= 1 }
+        return (close(screen.width, rootSize.width) && close(screen.height, rootSize.height))
+            || (close(screen.width, rootSize.height) && close(screen.height, rootSize.width))
     }
 
     /// Whether hit-tests under `calibration` find the snapshot's elements
@@ -755,6 +778,19 @@ public struct AXProbeSession {
     /// full fetch, a scene that changed re-checks the cached routing first.
     /// Pass nil for a snapshot read earlier (the tap-alias path).
     public static func make(udid: String, logger: SimUseLogger, rootSize: CGSize? = nil) async throws -> AXProbeSession {
+        try await make(target: target(udid: udid, logger: logger), udid: udid, logger: logger, rootSize: rootSize)
+    }
+
+    /// A session whose routing display is checked against the live root
+    /// size (read without a tree fetch), plus that size; nil when the
+    /// root cannot be read.
+    static func makeReadingRoot(udid: String, logger: SimUseLogger) async throws -> (AXProbeSession, CGSize?) {
+        let target = try await target(udid: udid, logger: logger)
+        let rootSize = (try? await target.frontmostApplicationFrame()).map(\.size)
+        return (try await make(target: target, udid: udid, logger: logger, rootSize: rootSize), rootSize)
+    }
+
+    private static func target(udid: String, logger: SimUseLogger) async throws -> FBSimulator {
         let simulatorSet = try await getSimulatorSet(
             deviceSetPath: nil,
             logger: logger,
@@ -763,6 +799,10 @@ public struct AXProbeSession {
         guard let target = simulatorSet.allSimulators.first(where: { $0.udid == udid }) else {
             throw CLIError(errorDescription: "Simulator with UDID \(udid) not found in set.")
         }
+        return target
+    }
+
+    private static func make(target: FBSimulator, udid: String, logger: SimUseLogger, rootSize: CGSize?) async throws -> AXProbeSession {
         let native = NativePortraitSize(screenInfo: target.screenInfo)
         var evidence: ResizableAppSessionMonitor.SceneEvidence?
         var deviceSizedRoot = false

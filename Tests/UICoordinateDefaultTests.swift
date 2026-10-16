@@ -181,6 +181,7 @@ struct UICoordinateDefaultTests {
         ("gesture pinch-out --radius 40", "pinch-out"),
         ("gesture pinch-in --radius 120", "pinch-in"),
         ("multi-touch", "pinch-out"),
+        ("batch", "pinch-in"),
     ])
     func pinchInLandscape(command: String, expected: String) async throws {
         let udid = try TestHelpers.requireSimulatorUDID()
@@ -189,10 +190,17 @@ struct UICoordinateDefaultTests {
             let area = try Self.screen(root)
             let cx = Int(area.x + area.width / 2)
             let cy = Int(area.y + area.height / 2)
-            let argv = command == "multi-touch"
-                ? "multi-touch --x1 \(cx - 30) --y1 \(cy) --x2 \(cx + 30) --y2 \(cy)"
+            let argv: String
+            switch command {
+            case "multi-touch":
+                argv = "multi-touch --x1 \(cx - 30) --y1 \(cy) --x2 \(cx + 30) --y2 \(cy)"
                     + " --x1-end \(cx - 130) --y1-end \(cy) --x2-end \(cx + 130) --y2-end \(cy)"
-                : "\(command) --center-x \(cx) --center-y \(cy)"
+            case "batch":
+                // A batch step sends the same two-finger trajectory.
+                argv = "ios batch --step 'gesture pinch-in --radius 120 --center-x \(cx) --center-y \(cy)'"
+            default:
+                argv = "\(command) --center-x \(cx) --center-y \(cy)"
+            }
             try await TestHelpers.runSimUseCommand(argv, simulatorUDID: udid)
             try await Task.sleep(nanoseconds: 1_500_000_000)
             #expect(try await Self.label(containing: "Latest Gesture:", udid: udid) == "Latest Gesture: \(expected)")

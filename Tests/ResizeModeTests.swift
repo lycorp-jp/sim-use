@@ -220,6 +220,28 @@ struct ResizeModeTests {
         #expect(try await detected() == "Detected: 2", "the first gesture after the session must land on the main display")
     }
 
+    @Test("the first gesture after a session is resized uses the new scene size (R161-01)")
+    func firstGestureAfterResize() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "gesture-presets")
+        guard let session = try await Self.startSession(udid: udid, size: "560x1200") else { return }
+        defer { Task { await session.end() } }
+        // A snapshot of the tall scene; then the session shrinks with no
+        // `ui` before the gesture. The old canvas would put the stroke
+        // below the new scene.
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+        _ = try await CommandRunner.run(
+            "xcrun devicectl device appResize set --device \(udid) --preferred-size 560x667 --quiet --timeout 10")
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        _ = try await CommandRunner.run("\(simUse) gesture scroll-up --duration 0.4 --udid \(udid)")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let ui = try await TestHelpers.getUIState(simulatorUDID: udid)
+        let detected = UIStateParser.findElementContainingLabel(in: ui, containing: "Detected:")?.label
+        #expect(detected == "Detected: 1", "the gesture must land in the resized scene, got \(String(describing: detected))")
+        await session.end()
+    }
+
     @Test("the first explicit tap after a session starts, and after it ends, reaches the app (S3)")
     func firstExplicitTapFollowsSession() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()
