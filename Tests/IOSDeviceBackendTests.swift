@@ -99,8 +99,11 @@ struct IOSDeviceBackendTests {
     @Test("cancellation during the root retry wait prevents another read")
     func cancellationDuringRootRetryWaitPreventsAnotherRead() async {
         let transport = ScriptedRootTransport(Array(repeating: .value(.null), count: 5))
+        // A long pause, so the cancellation below always lands in it: with
+        // the production 500 ms pause, a loaded test runner (the full suite,
+        // CI) could finish the pause and read again first (#162).
         let task = Task {
-            try await AXAuditClient(transport: transport).rootElement()
+            try await AXAuditClient(transport: transport).rootElement(delay: .seconds(60), budget: .seconds(120))
         }
         let started = ContinuousClock.now
         while await transport.reads < 1 {

@@ -354,8 +354,28 @@ private final class StreamCollector: @unchecked Sendable {
         detach()
         lock.lock()
         defer { lock.unlock() }
+        // The exit can be reported before the readability handler has run
+        // for the child's last write, which is then still in the pipe. Read
+        // what is there without blocking: an inherited grandchild may keep
+        // the write end open, so a read to end-of-file could wait forever.
+        if !done {
+            buffer.append(Self.readAvailable(from: handle.fileDescriptor))
+        }
         done = true
         return buffer
+    }
+
+    private static func readAvailable(from fd: Int32) -> Data {
+        let flags = fcntl(fd, F_GETFL)
+        guard flags >= 0, fcntl(fd, F_SETFL, flags | O_NONBLOCK) == 0 else { return Data() }
+        var data = Data()
+        var chunk = [UInt8](repeating: 0, count: 16_384)
+        while true {
+            let count = chunk.withUnsafeMutableBytes { read(fd, $0.baseAddress, $0.count) }
+            guard count > 0 else { break }
+            data.append(contentsOf: chunk[0..<count])
+        }
+        return data
     }
 
     private func detach() {
