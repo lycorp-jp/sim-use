@@ -2,9 +2,9 @@
 
 | | |
 | --- | --- |
-| **Status** | In progress (S1 #157; S2 in review) |
+| **Status** | Implemented in the stack #157, #158, #161, #163, #164, #165 (awaiting merge) |
 | **Anchor date** | 2026-10-16 |
-| **Primary PRs** | — |
+| **Primary PRs** | #157 (S1), #158 (S2), #161 (S3), #163 (S4), #164 (S5), #165 (S6) |
 | **Related** | [009-resizable-app-session](../009-resizable-app-session/000-investigation.md) (#143; this plan replaces its tier-1 guard with real routing), [002-ios-orientation-self-calibration](../002-ios-orientation-self-calibration/000-design.md), [001 dtuhidd short-lived clients](../001-daemon-and-hid-lifecycle/001-dtuhidd-short-lived-clients.md), facebook/idb#965, facebook/idb#980 |
 
 ## Background
@@ -138,6 +138,15 @@ Playground `chrome-test` (NavigationStack, leading and trailing toolbar items, b
 | E51 | Same, tap the cover text field, fold open and closed, `type` (before S6) | `type` reported success, the field stayed empty; a daemon restart (new connection, DTUHID) typed correctly. The fold had started `dtuhidd`, which suppresses the legacy keyboard service under the cached Indigo connection |
 | E52 | After S6, Device Hub quit | Inner taps 1 → 2 → 3 at the exact locations; typing after fold/unfold works; a Resize Mode tap on a cold iPhone 17 starts `dtuhidd` and lands at `(450, 650)`. Fold, rotate, AX routing, screenshot and video need no change |
 
+### Found in the Device-Hub-open regression of S6 (2026-10-17)
+
+| # | Check | Result |
+| --- | --- | --- |
+| E53 | `ios rotate` loop on the unfolded Duo with the vendor report connection closed 0 ms after the barrier reply (temporary build) | 12 of 16 reports were lost: the device orientation stayed as before and the command reported `The interface stayed …`, the same output as a refusal. With 100, 250, 400, 700 and 850 ms: 12/12 each. So a report is lost when the connection closes before the guest takes it; the 1 s settle normally leaves a wide margin |
+| E54 | Refused orientation (`portrait-upside-down` on the cover display) | The device orientation does not change either: CoreDevice keeps `portrait`. A lost report and a refusal read back the same |
+| E55 | Temporary build that skips the first vendor report of a daemon | `ios rotate portrait` and `ios fold closed` each logged `had no effect; sending it again` and then confirmed (6.6 s and 7.2 s) |
+| E56 | Sequence inner `landscape-left` → `fold closed` → cover `portrait` → refused `portrait-upside-down` → `portrait` → `fold open` → `rotate portrait`, 57 runs with the resend | Failed 2 times. Traced failure: the topology before was correct (`landscapeRight`, `LCD-1 rot90`, offset 1, sent `landscapeLeft`, the same as every success); the first report and the resend 3 s later both had no effect. Device orientation after `fold open` is `landscapeRight` at once (8 reads in 2.5 s, 3 runs). Not reproduced with `SIM_USE_DEBUG=1` (14 runs), with CPU load, after 20–60 s idle, or without the unfold |
+
 ### Resizable display (Resize Mode)
 
 Sessions: Duo folded, Settings, 560x874 and then 375x667 (`appResize set
@@ -179,7 +188,7 @@ Sessions: Duo folded, Settings, 560x874 and then 375x667 (`appResize set
 
 - An in-simulator helper process (upstream `SimulatorFrameworkBridge`, `axbridge`).
 - Physical Duo devices (`ios-device` backend).
-- Android `fold` / `rotate`. A follow-up issue is filed after this stack; the verb arguments stay portable.
+- Android `fold` / `rotate`. Follow-up issue #166; the verb arguments stay portable.
 
 ## Design
 
@@ -386,6 +395,8 @@ Result: works (E48–E52). dtuhidd can be started on demand; Indigo cannot route
 | S5: videos keep the panel's native portrait orientation | Rotate to the interface orientation | The main display has always recorded its framebuffer unrotated (`simctl recordVideo` does the same, E46); one rule for every display. Rotating every display is a separate change |
 | S5: a display change during a capture keeps the starting display and ends with a stderr notice | Follow the new display; stop the capture | A new display changes the frame size mid-file; stopping loses the take. The notice names both displays; `--json` is unchanged (no new advisory kind) |
 | S6: Device Hub closed — work, not refuse | Refuse routed input without dtuhidd | dtuhidd starts on demand through its XPC service (E49), which sim-use already uses for fold/rotate. A cached auto-selected Indigo connection is rebuilt once dtuhidd runs (keyboard, E51); routed touch starts dtuhidd itself (Resize Mode never does, E49). Only if dtuhidd still does not start does the command fail, naming Device Hub |
+| Fold / rotate send the report once more when it had no effect (same active display; same device orientation and rotation) | Longer settle after the barrier; retry the whole command; no resend | A report can be lost (E53) and the resend recovers it (E55). The report is idempotent, so a refusal only reads back the same (E54); the cost is one more wait on a refusal (`portrait-upside-down` on the cover: 7.4 s). A longer settle bets on one margin and slows every call |
+| Rotate is confirmed at once only when the device orientation **and** the interface reached the target | Device orientation alone | With the device alone, a read taken while the interface still followed was the final answer (open question 18). Same latency on the success path: 3.4–3.9 s per `ios rotate` before and after, 12 runs each |
 | Posture shown only on a non-main routing display | Always; never | Owner decision 2026-10-16: single-display output stays identical |
 | Device Hub closed: make it work if possible, else refuse with the requirement | Must work | Owner decision 2026-10-16 |
 
@@ -417,6 +428,7 @@ Result: works (E48–E52). dtuhidd can be started on demand; Indigo cannot route
 15. S3: `paste --via-menu --target-x/-y` uses the same `hidPoint` mapping as `tap`, but it was not verified live: with Device Hub open the pasteboard write is replaced (#153), and `--via-menu` already fails on iOS 26.5/27.0 with `--target-id` too.
 16. S3: software-keyboard elements have framebuffer-anchored frames in a rotated tree; they are discriminators in both the tree and the snapshot calibration (known issue, see #34 follow-ups).
 17. S3: `tap @N` calibrates from the snapshot without the in-place confirmation that UI-space coordinates now use, so the first alias tap after a Resize Mode session starts or ends may still follow a stale routing cache. Not changed here.
-18. S6: one `make e2e-ios-duo` run with Device Hub closed failed twice on timing: `ios fold closed` did not see the cover become active within 6 s, and an `ios rotate landscape-left` read back the device turned but the interface still landscape-right. Both suites then passed in four reruns and a second full run (7/7). Not understood; no retry was added, because a retry could hide the cause.
+18. S6: one `make e2e-ios-duo` run with Device Hub closed failed twice on timing: `ios fold closed` did not see the cover become active within 6 s, and an `ios rotate landscape-left` read back the device turned but the interface still landscape-right. Both suites then passed in four reruns and a second full run (7/7). **Partly resolved (2026-10-17):** the Device-Hub-open regression failed `FoldTests` once more (`ios rotate portrait` right after `fold open`). A vendor report can be lost (E53), so fold and rotate now send it once more when it had no effect (E55), and rotate no longer takes a turned device with an unturned interface as the answer. Still open: right after an unfold, the guest sometimes ignores orientation reports for more than 3 s (E56, 2 of 57 runs); the cause and the length of that window are not known.
 
 ## Amendments
+- Updated 2026-10-17: all six slices done; action log in [001-action.md](001-action.md)
