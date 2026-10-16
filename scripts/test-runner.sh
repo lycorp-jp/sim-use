@@ -391,6 +391,7 @@ run_tests() {
             "ResizeModeTests"
             "RotateTests"
             "ScreenshotTests"
+            "SideBarOutlineTests"
             "StreamVideoDebugTest"
             "StreamVideoTests"
             "SwipeTests"

@@ -57,7 +57,14 @@ if [[ -z "${SIM_USE_TEST_DEVELOPER_DIR:-}" ]]; then
     fi
 fi
 
+# A Playground built with the iOS 27.1 SDK or later shows the vertical bar
+# on the cover display, so SideBarOutlineTests must find it there.
+playground_xcode_version=$(defaults read "${SIM_USE_TEST_DEVELOPER_DIR:-$(xcode-select -p)}/../Info" CFBundleShortVersionString 2>/dev/null || true)
+if [[ -n "$playground_xcode_version" && "$(printf '%s\n%s\n' "27.1" "$playground_xcode_version" | sort -V | head -1)" == "27.1" ]]; then
+    export SIM_USE_E2E_EXPECT_SIDE_BAR=1
+fi
+
 if [[ $# -eq 0 ]]; then
-    set -- FoldTests RotateTests ResizeModeTests ScreenshotTests UICoordinateDefaultTests
+    set -- FoldTests RotateTests ResizeModeTests ScreenshotTests UICoordinateDefaultTests SideBarOutlineTests
 fi
 exec ./scripts/test-runner.sh "$@"

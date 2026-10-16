@@ -72,6 +72,8 @@ struct ContentView: View {
         // Display
         case "orientation-test":
             OrientationTestView()
+        case "chrome-test":
+            ChromeTestView()
 
         // System
         case "permissions-test":
@@ -110,7 +112,8 @@ struct MainMenuView: View {
             ("key-sequence", "Key Sequence", "Detects CLI key sequences")
         ]),
         ("Display", [
-            ("orientation-test", "Orientation Test", "Rotation + tap-by-id calibration")
+            ("orientation-test", "Orientation Test", "Rotation + tap-by-id calibration"),
+            ("chrome-test", "Chrome Test", "Navigation bar, toolbar and tab bar placement")
         ]),
         ("System", [
             ("permissions-test", "Permissions Test", "System permission prompt dismissal")
