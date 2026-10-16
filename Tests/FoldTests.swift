@@ -122,7 +122,7 @@ struct FoldTests {
             let screen = try #require(data["screen"] as? [String: Any])
             #expect(screen["width"] as? Int == 951)
             #expect(screen["height"] as? Int == 669)
-            #expect((envelope["advisory"] as? [String: Any])?["kind"] as? String == "secondary_display")
+            #expect(envelope["advisory"] == nil, "routing to the inner display needs no advisory: \(String(describing: envelope["advisory"]))")
             #expect((data["outline"] as? String ?? "").contains("951x669  (landscape-left, display "))
 
             let path = NSTemporaryDirectory() + "duo-inner-\(UUID().uuidString).png"
@@ -134,24 +134,76 @@ struct FoldTests {
         }
     }
 
-    @Test("unfolded: touch verbs refuse instead of reporting a tap that never lands; type still works")
+    /// The Playground tap-test screen's "Tap Location: (x, y)" echo.
+    private static func tapLocation(udid: String) async throws -> String? {
+        let (outline, _) = try await CommandRunner.run("\(try TestHelpers.getSimUsePath()) ui --udid \(udid)")
+        return outline.components(separatedBy: "\n").lazy.compactMap { line -> String? in
+            guard let range = line.range(of: "Tap Location: ") else { return nil }
+            return String(line[range.upperBound...].prefix { $0 != "\"" })
+        }.first
+    }
+
+    @Test("unfolded: taps land on the inner display at the UI point; type works")
     func innerDisplayInput() async throws {
         guard let udid = try await Self.duoUDID() else { return }
         try await Self.preservingPosture(udid: udid) {
+            _ = try await Self.fold("open", udid: udid)
+            _ = try await TestHelpers.runSimUseCommand("ios rotate landscape-left", simulatorUDID: udid)
+            try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+            for (x, y) in [(100, 200), (800, 550)] {
+                _ = try await TestHelpers.runSimUseCommand("tap -x \(x) -y \(y) --coordinate-space ui", simulatorUDID: udid)
+                try await Task.sleep(nanoseconds: 600_000_000)
+                #expect(try await Self.tapLocation(udid: udid) == "(\(x), \(y))")
+            }
+
             _ = try await Self.fold("closed", udid: udid)
             // The text-input screen focuses its field on launch.
             try await TestHelpers.launchPlaygroundApp(to: "text-input")
             _ = try await Self.fold("open", udid: udid)
-
-            let tap = try await TestHelpers.runSimUseCommandAllowFailure("tap -x 100 -y 100", simulatorUDID: udid)
-            #expect(tap.exitCode != 0)
-            #expect(tap.output.contains("No input was sent."), "unexpected: \(tap.output.prefix(300))")
-
             let text = "duo\(Int.random(in: 100...999))"
             _ = try await TestHelpers.runSimUseCommand("type \(text)", simulatorUDID: udid)
             try await Task.sleep(nanoseconds: 800_000_000)
             let (outline, _) = try await CommandRunner.run("\(try TestHelpers.getSimUsePath()) ui --udid \(udid)")
             #expect(outline.contains("TextField  \"\(text)\""), "typed text should reach the field: \(outline.prefix(600))")
+        }
+    }
+
+    @Test("unfolded: taps by AX id land on all four corners in every rotation")
+    func innerDisplayAXTapsAllRotations() async throws {
+        guard let udid = try await Self.duoUDID() else { return }
+        try await Self.preservingPosture(udid: udid) {
+            _ = try await Self.fold("open", udid: udid)
+            for orientation in ["landscape-left", "portrait", "landscape-right", "portrait-upside-down"] {
+                _ = try await TestHelpers.runSimUseCommand("ios rotate \(orientation)", simulatorUDID: udid)
+                try await TestHelpers.launchPlaygroundApp(to: "orientation-test")
+                for corner in ["corner-top-leading", "corner-top-trailing", "corner-bottom-leading", "corner-bottom-trailing"] {
+                    _ = try await TestHelpers.runSimUseCommand("tap --id \(corner)", simulatorUDID: udid)
+                    try await Task.sleep(nanoseconds: 500_000_000)
+                    let ui = try await TestHelpers.getUIState(simulatorUDID: udid)
+                    #expect(
+                        UIStateParser.findElement(in: ui, withIdentifier: "corner-last-tapped")?.value == corner,
+                        "\(orientation): \(corner) should land"
+                    )
+                }
+            }
+            _ = try await TestHelpers.runSimUseCommand("ios rotate landscape-left", simulatorUDID: udid)
+        }
+    }
+
+    @Test("unfolded: a swipe and a gesture preset reach the inner display")
+    func innerDisplaySwipe() async throws {
+        guard let udid = try await Self.duoUDID() else { return }
+        try await Self.preservingPosture(udid: udid) {
+            _ = try await Self.fold("open", udid: udid)
+            try await TestHelpers.launchPlaygroundApp(to: "swipe-test")
+            _ = try await TestHelpers.runSimUseCommand(
+                "swipe --start-x 200 --start-y 400 --end-x 700 --end-y 400 --coordinate-space ui", simulatorUDID: udid
+            )
+            _ = try await TestHelpers.runSimUseCommand("gesture scroll-up", simulatorUDID: udid)
+            try await Task.sleep(nanoseconds: 800_000_000)
+            let ui = try await TestHelpers.getUIState(simulatorUDID: udid)
+            let count = UIStateParser.findElementContainingLabel(in: ui, containing: "Count:")?.label
+            #expect(count == "Count: 2", "both swipes should register: \(String(describing: count))")
         }
     }
 
@@ -193,7 +245,8 @@ struct FoldTests {
             var sawSession = false
             for _ in 0..<20 {
                 let (output, _) = try await CommandRunner.run("\(simUse) ui --json --no-raw --udid \(udid) 2>/dev/null", allowFailure: true)
-                if ((try? Self.json(output))?["advisory"] as? [String: Any])?["kind"] as? String == "resizable_app_session" {
+                let display = ((try? Self.json(output))?["data"] as? [String: Any])?["display"] as? [String: Any]
+                if display?["kind"] as? String == "virtual" {
                     sawSession = true
                     break
                 }
