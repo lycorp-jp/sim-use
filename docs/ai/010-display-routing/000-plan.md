@@ -120,6 +120,14 @@ Playground `chrome-test` (NavigationStack, leading and trailing toolbar items, b
 | E43 | iOS 27.0 SDK build | Horizontal bars on the cover (inset 386x678) and on the inner display (871x669); the tab bar is a declared `Group "Tab Bar"` |
 | E44 | LINE 26.17.0 built with Xcode 27.1 (early-bird branch) on the cover | Fills the 466x678 display (the 27.0 SDK build was a 386x678 inset scene). Welcome and login use custom chrome (`返回` button top left), so no bar; the main tabs need a signed-in account, which this simulator does not have |
 
+### Found while building S5 (2026-10-17)
+
+| # | Check | Result |
+| --- | --- | --- |
+| E45 | `xcrun simctl io <duo> enumerate` | The cover (1398x2034) and inner (2007x2853) ports are **both display class 0**; the `Resizable` port is class 1 with a 7680x4320 IOSurface. idb's `FBFramebuffer.mainScreenSurface` returns the first class-0 port, so it can never read the inner panel |
+| E46 | `simctl io recordVideo --display=<devicectl uniqueId>` | Inner display with the UI in landscape-left: a 2006x2852 movie, panel-native portrait (not rotated like `simctl … screenshot`). Resize Mode 560x874: 1680x2622 — simctl cuts the scene from the canvas. `recordVideo` writes only to a file, so it cannot carry `stream-video` |
+| E47 | sim-use after S5 | Inner display: `record-video` 2008x2854 (H.264 even padding), 149 frames in ~5 s, a tap during the recording visible. Resize Mode 560x874: `record-video` and `stream-video --format h264` both 1680x2622, the scene with no canvas. Fold during an inner recording: the video stays 2008x2854 and stderr ends with the moved-display notice |
+
 ### Resizable display (Resize Mode)
 
 Sessions: Duo folded, Settings, 560x874 and then 375x667 (`appResize set
@@ -313,6 +321,8 @@ the right size and content; a fold during a recording either follows the new
 display or ends with a clear message (decided in the slice); single-display
 recording unchanged.
 
+Result: met — E47; the fold keeps the starting display and ends with a notice (decision above).
+
 ### S6 (conditional) — Device Hub closed
 
 Scope: with Device Hub quit, check `fold`, `rotate`, touch and AX routing.
@@ -357,6 +367,9 @@ refuse with a message that names the requirement.
 | S3: `gesture` pinch/rotate centre and canvas in UI space, every sample mapped | Keep native portrait for multi-touch presets | The calibration is affine, so mapping each interpolated sample keeps lines and arcs; the directional presets already use the UI canvas (#66) |
 | S4: side-bar regions from geometry and anchors, not from device or SDK | Device table ("Duo cover = trailing"); trait/SDK checks; AX roles only | The bar edge depends on the display and the orientation (E40, E41); the host cannot read the app's SDK or traits. Anchors are `BackButton` and tab roles (`RadioButton`/`Tab`) — a tab with a sibling tab beside it outside the strip is a horizontal tab bar and does not count (review S4-001). The vertical evidence is the back button plus one more stacked member of its column reaching below the top band (a regular iPhone stacks its status clock above the back button inside the top band, S4-003), or two stacked tabs; any disjoint pair counts, so a rail wrapper does not hide the stack (S4-002). The app's wide content must stay clear of the bar's inner edge — rows on a regular iPhone cross the leading strip, so its back button never qualifies. Full-width grouping elements (the left-behind navigation bar group, E42) are containers, not crossing content |
 | S4: bar entries listed after the bands, aliases renumbered in print order | Keep reading order (bar items between rows) | An agent reads the bar as one unit; aliases stay monotonic in the text |
+| S5: capture through idb, framebuffer port chosen by pixel size, source crop for the Resize Mode scene (`patches/idb/display-video.patch`) | `simctl io recordVideo --display` for `record-video` | simctl writes only files (no `stream-video`) and has no `--fps`/`--scale`. Two integrated ports share display class 0 (E45), so the port is named by its unrotated size, which CoreDevice reports per display. The crop runs once per frame before the encoder, so every format sees the scene size |
+| S5: videos keep the panel's native portrait orientation | Rotate to the interface orientation | The main display has always recorded its framebuffer unrotated (`simctl recordVideo` does the same, E46); one rule for every display. Rotating every display is a separate change |
+| S5: a display change during a capture keeps the starting display and ends with a stderr notice | Follow the new display; stop the capture | A new display changes the frame size mid-file; stopping loses the take. The notice names both displays; `--json` is unchanged (no new advisory kind) |
 | Posture shown only on a non-main routing display | Always; never | Owner decision 2026-10-16: single-display output stays identical |
 | Device Hub closed: make it work if possible, else refuse with the requirement | Must work | Owner decision 2026-10-16 |
 

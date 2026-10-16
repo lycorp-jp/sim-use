@@ -141,8 +141,11 @@ captures it. The `ui` header names it (`App: Settings  951x669
 `--json` carries a `display` object; neither appears on the main display.
 On a display other than the main one the orientation comes from
 CoreDevice instead of hit-test probes. `record-video` and `stream-video`
-still capture only the main display and refuse with an explanation
-there. Explicit `-x/-y` / `--point` coordinates are the numbers `ui`
+(`h264`, `bgra`) capture that display too — the inner panel in its native
+portrait orientation, like the main display; a Resize Mode scene cut from
+its canvas. A fold during a recording keeps the display it started on and
+says so at the end. The screenshot-based `stream-video` formats read the
+main display only and refuse there. Explicit `-x/-y` / `--point` coordinates are the numbers `ui`
 prints there too; with `--coordinate-space native` they are native to the
 display that hosts the app (the inner panel's unrotated points; a Resize
 Mode scene's points). `sim-use ios fold closed|open|half|<degrees>` folds and unfolds the
