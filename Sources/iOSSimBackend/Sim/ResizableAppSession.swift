@@ -11,19 +11,13 @@ import SimUseCore
 /// hands it an arbitrary logical size; the main display keeps showing
 /// SpringBoard (in practice just the wallpaper).
 ///
-/// Every simulator primitive sim-use drives is bound to the main display:
-/// HID touch is normalised against the main screen and sent to digitizer
-/// target 0, the framebuffer picks `displayClass == 0`, and the AX
-/// hit-test XPC resolves points against the main display even though the
-/// AX tree fetch follows the frontmost app. During a session that makes
-/// taps silent no-ops, screenshots capture wallpaper, and hit-test based
-/// recovery splices SpringBoard nodes into the app's tree (issue #143).
-///
-/// This file is the stop-gap: *detect* the session via CoreDevice and make
-/// every affected verb honest about it. Real routing to the Resizable
-/// display needs upstream idb's multi-display plumbing — see
-/// docs/ai/009-resizable-app-session/000-investigation.md for the evidence, the
-/// `touchscreen(0x104)` digitizer finding and the migration notes.
+/// The session moves the app off the main display, which every simulator
+/// primitive used to be bound to (issue #143). This file detects the
+/// session through CoreDevice; `RoutingDisplayResolver` then routes touch
+/// input, hit-tests and screenshots to the `Resizable` display, and the
+/// video verbs refuse until they can capture it. Evidence and routing:
+/// docs/ai/009-resizable-app-session/000-investigation.md and
+/// docs/ai/010-display-routing/000-plan.md.
 public struct ResizableAppSession: Equatable, Sendable {
     /// CoreDevice display UUID. **Changes on every boot** — never persist it.
     public let displayUniqueID: String
@@ -156,9 +150,9 @@ public enum ResizableAppSessionProbe {
 ///
 /// Why a time-based cache is acceptable here: a session starting or
 /// ending is a rare, user-driven event, and the cost of a stale answer
-/// is bounded — at most `ttl` seconds of the pre-fix behaviour (a tap
-/// reported as delivered that was not) — against a check that otherwise
-/// taxes every touch verb and `ui`.
+/// is bounded — at most `ttl` seconds of touch input routed to the
+/// display the app just left — against a check that otherwise taxes
+/// every touch verb and `ui`. A fold or rotation invalidates it.
 ///
 /// Skipped entirely (as `.unavailable`) only under
 /// `SIM_USE_RESIZE_SESSION_CHECK=0`; a devicectl that lacks the subcommand
@@ -195,6 +189,8 @@ public actor ResizableAppSessionMonitor {
         let checkedAt: Date
         /// The evidence the probe was made with — nil when none was offered.
         let evidence: SceneEvidence?
+        /// The probe was made because the AX root was the device's own size.
+        let deviceSizedRoot: Bool
     }
 
     private let ttl: TimeInterval
@@ -229,7 +225,7 @@ public actor ResizableAppSessionMonitor {
     /// R150-03) pays one probe per TTL like everyone else. A cached
     /// *active* answer is never bypassed: nothing in-band proves a session
     /// ended, and the TTL already bounds that staleness.
-    public func state(for udid: String, evidence: SceneEvidence? = nil) -> ResizableAppSessionState {
+    public func state(for udid: String, evidence: SceneEvidence? = nil, deviceSizedRoot: Bool = false) -> ResizableAppSessionState {
         if let raw = environment[Self.disableEnvironmentKey]?.lowercased(),
            ["0", "false", "no", "off"].contains(raw)
         {
@@ -241,7 +237,20 @@ public actor ResizableAppSessionMonitor {
 
         let now = clock()
         if let entry = cache[udid], now.timeIntervalSince(entry.checkedAt) < ttl {
-            if case .active = entry.state { return entry.state }
+            if case .active = entry.state {
+                // An AX root at the device's own size is evidence the session
+                // ended: touch input is routed to the Resizable display while
+                // the answer says active, so a stale one would tap the wrong
+                // display. Re-probe once; a session that really is at the
+                // device's size then rides the cache.
+                if deviceSizedRoot, !entry.deviceSizedRoot {
+                    probeCount += 1
+                    let state = probe(udid)
+                    cache[udid] = CacheEntry(state: state, checkedAt: now, evidence: evidence, deviceSizedRoot: true)
+                    return state
+                }
+                return entry.state
+            }
             if evidence == nil || evidence == entry.evidence { return entry.state }
         }
 
@@ -250,7 +259,7 @@ public actor ResizableAppSessionMonitor {
         if case .unavailable(let reason) = state, reason.contains("subcommand") {
             toolUnavailableReason = reason
         }
-        cache[udid] = CacheEntry(state: state, checkedAt: now, evidence: evidence)
+        cache[udid] = CacheEntry(state: state, checkedAt: now, evidence: evidence, deviceSizedRoot: deviceSizedRoot)
         return state
     }
 
@@ -260,38 +269,7 @@ public actor ResizableAppSessionMonitor {
     }
 }
 
-// MARK: - Guard (touch verbs)
-
-/// Thrown instead of dispatching a touch while a session is active. Keyboard
-/// HID (`type`, `key`, `key-combo`, `key-sequence`, Cmd+V `paste`) is
-/// device-wide and *does* reach the resized app (verified live), so only
-/// touch paths take this: the touch verbs, touch-bearing `batch` steps, and
-/// `paste --via-menu` (a long-press plus menu taps).
-public struct ResizableAppSessionError: RoutingDisplayRefusal, Equatable {
-    public let verb: String
-    public let udid: String
-    public let session: ResizableAppSession
-
-    public init(verb: String, udid: String, session: ResizableAppSession) {
-        self.verb = verb
-        self.udid = udid
-        self.session = session
-    }
-
-    public var errorDescription: String? {
-        "A resizable app session (Xcode 27 Resize Mode) is active on simulator \(udid): " +
-            "the frontmost app renders on the '\(session.displayName)' display (\(session.preferredSizeDescription) points requested), " +
-            "but simulator touch input reaches only the main display, so this \(verb) would report success and deliver nothing " +
-            "(sim-use issue #143). No input was sent."
-    }
-
-    public var hint: String? {
-        "End the session — stop the `xcrun devicectl device appResize start` process, or rotate the device — and retry, " +
-            "or test at the device's native size. `ui`, `screenshot`, `type`, the key verbs and Cmd+V `paste` keep working during a session; " +
-            "`paste --via-menu` is a touch path and is refused like the touch verbs. " +
-            "Set \(ResizableAppSessionMonitor.disableEnvironmentKey)=0 to skip this check."
-    }
-}
+// MARK: - Capture refusal
 
 /// Thrown instead of starting a video capture while a session is active.
 /// `record-video` and `stream-video` read the main framebuffer (the only
@@ -328,37 +306,6 @@ public struct ResizableAppSessionCaptureError: RoutingDisplayRefusal, Equatable 
 // MARK: - Advisories (read-only verbs)
 
 public enum ResizableAppSessionAdvisory {
-    /// For `describe-ui`: the tree is the app's own, but hit-test based
-    /// steps were skipped because the hit-test resolves on the main display.
-    public static func describeUI(
-        session: ResizableAppSession,
-        sceneSize: (width: Double, height: Double)?,
-        native: NativePortraitSize?
-    ) -> CommandAdvisory {
-        var sizes = "requested \(session.preferredSizeDescription) points"
-        if let sceneSize {
-            sizes = "\(ResizableAppSession.format(sceneSize.width))x\(ResizableAppSession.format(sceneSize.height)) points (\(sizes))"
-        }
-        if let native {
-            sizes += " while the device's main display is \(ResizableAppSession.format(native.width))x\(ResizableAppSession.format(native.height))"
-        }
-        return CommandAdvisory(
-            kind: .resizableAppSession,
-            message: "A resizable app session (Xcode 27 Resize Mode) is active: the app renders on the '\(session.displayName)' display at \(sizes). " +
-                "The outline is the app's own tree; hit-test recovery and orientation calibration were skipped because the simulator resolves points on the main display, where SpringBoard is frontmost. " +
-                "Touch paths (tap, long-press, swipe, touch, gesture, multi-touch, touch-bearing batch steps, paste --via-menu) and main-display video capture (record-video, stream-video) are refused during the session; `type`, the key verbs, Cmd+V `paste` and `screenshot` work."
-        )
-    }
-
-    /// For `describe-ui --point`: the answer is whatever sits on the main
-    /// display at that point (SpringBoard), not the app.
-    public static func pointQuery(session: ResizableAppSession) -> CommandAdvisory {
-        CommandAdvisory(
-            kind: .resizableAppSession,
-            message: "A resizable app session (Xcode 27 Resize Mode) is active: the app renders on the '\(session.displayName)' display, but point hit-tests resolve on the main display, so this result describes SpringBoard rather than the app. Use the full `describe-ui` outline instead."
-        )
-    }
-
     /// For `screenshot`: the capture was redirected to the Resizable display.
     public static func screenshot(session: ResizableAppSession, pixelSize: (width: Int, height: Int)?) -> CommandAdvisory {
         let pixels = pixelSize.map { ", \($0.width)x\($0.height) px" } ?? ""

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import FBSimulatorControl
 import Foundation
 import SimUseCore
 
@@ -99,6 +100,68 @@ public enum RoutingDisplay: Equatable, Sendable {
     }
 }
 
+// MARK: - Addressing a routing display
+
+extension RoutingDisplay {
+    /// The AX translator display the hit-test and the tree fetch address:
+    /// the CoreDevice display id (plan E6, E7, E15). 0 is the main display.
+    public var accessibilityDisplayID: UInt32 {
+        switch self {
+        case .main: return 0
+        case .secondary(let display): return display.displayID
+        case .resizable(_, let display): return display?.displayID ?? 0
+        }
+    }
+
+    /// The UI → HID / hit-test transform off the main display, known from
+    /// CoreDevice without hit-test probes. A secondary display maps through
+    /// its rotation onto its unrotated panel (plan E4). A Resize Mode scene
+    /// is upright and sits at the canvas origin, so its points pass through
+    /// (E14); `sceneSize` is its size in points, when known. Nil on the
+    /// main display, which keeps the self-calibration.
+    public func fixedCalibration(sceneSize: CGSize?) -> OrientationCalibration? {
+        switch self {
+        case .main:
+            return nil
+        case .secondary(let display):
+            return OrientationCalibration(
+                orientation: display.rotation.interfaceOrientation,
+                native: display.panelPoints,
+                probesUsed: 0,
+                advisory: nil
+            )
+        case .resizable:
+            return .identity(native: sceneSize.map { NativePortraitSize(width: Double($0.width), height: Double($0.height)) })
+        }
+    }
+
+    /// Where touch input goes. Nil on the main display (the historical
+    /// path). A Resize Mode session normalizes scene points against the
+    /// whole `Resizable` canvas in pixels (E14, E18); a secondary display
+    /// against its panel.
+    public func hidRoute() throws -> FBSimulatorHIDDisplayRoute? {
+        switch self {
+        case .main:
+            return nil
+        case .secondary(let display):
+            return Self.route(for: display)
+        case .resizable(let session, let display):
+            guard let display else {
+                throw CLIError(errorDescription: "A resizable app session is active, but CoreDevice did not list its '\(session.displayName)' display (\(session.displayUniqueID)), so touch input cannot be routed to it. Re-run the command; if it persists, end the session.")
+            }
+            return Self.route(for: display)
+        }
+    }
+
+    private static func route(for display: SimulatorDisplay) -> FBSimulatorHIDDisplayRoute {
+        FBSimulatorHIDDisplayRoute(
+            digitizerTarget: UInt64(display.displayID),
+            screenSize: CGSize(width: display.pixelWidth, height: display.pixelHeight),
+            screenScale: Float(display.pointScale)
+        )
+    }
+}
+
 /// The `display` object of `describe-ui --json`. Present only when the app
 /// is not on the main display.
 public struct RoutingDisplayInfo: Codable, Equatable, Sendable {
@@ -139,48 +202,14 @@ public enum RoutingDisplayResolver {
     public static func current(
         udid: String,
         evidence: ResizableAppSessionMonitor.SceneEvidence? = nil,
+        deviceSizedRoot: Bool = false,
         rootSize: SimulatorDisplayTopologyMonitor.RootSize? = nil,
         sessionMonitor: ResizableAppSessionMonitor = .shared,
         topologyMonitor: SimulatorDisplayTopologyMonitor = .shared
     ) async -> RoutingDisplay {
-        let session = await sessionMonitor.state(for: udid, evidence: evidence)
+        let session = await sessionMonitor.state(for: udid, evidence: evidence, deviceSizedRoot: deviceSizedRoot)
         let topology = await topologyMonitor.state(for: udid, rootSize: rootSize)
         return resolve(session: session, topology: topology)
-    }
-}
-
-// MARK: - Advisories and refusals for read paths
-
-public enum SecondaryDisplayAdvisory {
-    /// For `describe-ui` while the app is on a secondary integrated display.
-    public static func describeUI(display: SimulatorDisplay) -> CommandAdvisory {
-        CommandAdvisory(
-            kind: .secondaryDisplay,
-            message: "The app is on display '\(display.name)' (id \(display.displayID), \(display.rotation.interfaceOrientation.rawValue)), not the main display. " +
-                "The outline is the app's own tree; hit-test recovery was skipped and the orientation comes from CoreDevice. " +
-                "Touch verbs and record-video / stream-video are refused on this display; `type`, the key verbs and `screenshot` work."
-        )
-    }
-}
-
-/// Thrown by `describe-ui --point` on a secondary integrated display: the
-/// point hit-test resolves on the main display, which is dark.
-public struct SecondaryDisplayPointQueryError: RoutingDisplayRefusal, Equatable {
-    public let udid: String
-    public let display: SimulatorDisplay
-
-    public init(udid: String, display: SimulatorDisplay) {
-        self.udid = udid
-        self.display = display
-    }
-
-    public var errorDescription: String? {
-        "The frontmost app on simulator \(udid) is on display '\(display.name)' (id \(display.displayID)), but point hit-tests resolve on the main display, " +
-            "so `describe-ui --point` cannot describe the app."
-    }
-
-    public var hint: String? {
-        "Use the full `describe-ui` outline, which reads the app's own tree on '\(display.name)'."
     }
 }
 
@@ -190,32 +219,6 @@ public struct SecondaryDisplayPointQueryError: RoutingDisplayRefusal, Equatable 
 /// refusal is final: batch rethrows it unchanged so the hint reaches the
 /// error envelope.
 public protocol RoutingDisplayRefusal: LocalizedError, HintProviding {}
-
-/// Thrown instead of dispatching a touch while the app is on a secondary
-/// integrated display that this build cannot route touch input to.
-public struct SecondaryDisplayInputError: RoutingDisplayRefusal, Equatable {
-    public let verb: String
-    public let udid: String
-    public let display: SimulatorDisplay
-
-    public init(verb: String, udid: String, display: SimulatorDisplay) {
-        self.verb = verb
-        self.udid = udid
-        self.display = display
-    }
-
-    public var errorDescription: String? {
-        "The frontmost app on simulator \(udid) is on display '\(display.name)' (id \(display.displayID)), " +
-            "an integrated display that is not the main display (for example the unfolded iPhone Duo inner screen). " +
-            "Simulator touch input reaches only the main display, so this \(verb) would report success and deliver nothing. No input was sent."
-    }
-
-    public var hint: String? {
-        "Fold the device so the app returns to the main display (`sim-use ios fold closed`) and retry. " +
-            "`ui`, `screenshot`, `type` and the key verbs keep working on '\(display.name)'. " +
-            "Set \(SimulatorDisplayTopologyMonitor.disableEnvironmentKey)=0 to skip this check."
-    }
-}
 
 /// Thrown instead of starting a video capture of the main display while the
 /// app is on a secondary integrated display.
@@ -244,7 +247,10 @@ public struct SecondaryDisplayCaptureError: RoutingDisplayRefusal, Equatable {
 
 public enum RoutingDisplayGuard {
     /// Call after global setup in every verb that dispatches touch HID.
-    /// `verb` names the surface in the error ("tap", "swipe", "batch", ...).
+    /// Touch input reaches the display that hosts the app, so this only
+    /// fails when that display cannot be addressed: a Resize Mode session
+    /// whose display CoreDevice did not list. The route itself is applied
+    /// per event by `HIDInteractor.routeTouches`. `verb` is kept for the log.
     public static func assertTouchInputReachesApp(
         udid: String,
         verb: String,
@@ -252,16 +258,11 @@ public enum RoutingDisplayGuard {
         sessionMonitor: ResizableAppSessionMonitor = .shared,
         topologyMonitor: SimulatorDisplayTopologyMonitor = .shared
     ) async throws {
-        switch await RoutingDisplayResolver.current(udid: udid, sessionMonitor: sessionMonitor, topologyMonitor: topologyMonitor) {
-        case .main:
-            return
-        case .resizable(let session, _):
-            logger.info().log("Resizable app session active on \(udid) (\(session.displayName) \(session.preferredSizeDescription)); refusing \(verb)")
-            throw ResizableAppSessionError(verb: verb, udid: udid, session: session)
-        case .secondary(let display):
-            logger.info().log("App is on secondary display \(display.name) (id \(display.displayID)) of \(udid); refusing \(verb)")
-            throw SecondaryDisplayInputError(verb: verb, udid: udid, display: display)
+        let routing = await RoutingDisplayResolver.current(udid: udid, sessionMonitor: sessionMonitor, topologyMonitor: topologyMonitor)
+        if let name = routing.displayName {
+            logger.info().log("\(verb): the app is on display \(name); touch input is routed there")
         }
+        _ = try routing.hidRoute()
     }
 
     /// Call after global setup in every verb that captures the main

@@ -15,9 +15,6 @@ public struct CommandAdvisory: Codable, Equatable, Sendable {
         /// "Resizable" display while every simulator primitive sim-use
         /// drives is bound to the main display (issue #143).
         case resizableAppSession = "resizable_app_session"
-        /// The frontmost app is on an integrated display that is not the
-        /// main display (the unfolded iPhone Duo inner screen).
-        case secondaryDisplay = "secondary_display"
     }
 
     public let kind: Kind
