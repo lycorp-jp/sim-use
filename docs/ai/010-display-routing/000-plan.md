@@ -417,5 +417,6 @@ Result: works (E48–E52). dtuhidd can be started on demand; Indigo cannot route
 15. S3: `paste --via-menu --target-x/-y` uses the same `hidPoint` mapping as `tap`, but it was not verified live: with Device Hub open the pasteboard write is replaced (#153), and `--via-menu` already fails on iOS 26.5/27.0 with `--target-id` too.
 16. S3: software-keyboard elements have framebuffer-anchored frames in a rotated tree; they are discriminators in both the tree and the snapshot calibration (known issue, see #34 follow-ups).
 17. S3: `tap @N` calibrates from the snapshot without the in-place confirmation that UI-space coordinates now use, so the first alias tap after a Resize Mode session starts or ends may still follow a stale routing cache. Not changed here.
+18. S6: one `make e2e-ios-duo` run with Device Hub closed failed twice on timing: `ios fold closed` did not see the cover become active within 6 s, and an `ios rotate landscape-left` read back the device turned but the interface still landscape-right. Both suites then passed in four reruns and a second full run (7/7). Not understood; no retry was added, because a retry could hide the cause.
 
 ## Amendments
