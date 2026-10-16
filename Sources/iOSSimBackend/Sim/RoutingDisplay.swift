@@ -322,6 +322,9 @@ public enum RoutingDisplayGuard {
     ) async -> String? {
         let now = try? await RoutingDisplayResolver.current(udid: udid, sessionMonitor: sessionMonitor, topologyMonitor: topologyMonitor).captureSource()
         guard now != started else { return nil }
+        if let started, let now, now.displayName == started.displayName, let crop = started.crop {
+            return "[i] The app's scene on display '\(now.displayName)' was resized while `\(verb)` ran; the video keeps the \(Int(crop.width))x\(Int(crop.height)) it started with.\n"
+        }
         let before = started?.displayName ?? "the main display"
         let after = now.map { "display '\($0.displayName)'" } ?? "the main display"
         return "[i] The app moved to \(after) while `\(verb)` ran; the video shows \(started == nil ? before : "display '\(before)'") only, as it was when the capture started.\n"

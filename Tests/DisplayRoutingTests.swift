@@ -322,6 +322,19 @@ struct RoutingDisplayGuardTests {
             sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologyMonitor(open)
         )
         #expect(unfolded?.contains("moved to display 'LCD-1'") == true)
+        // A Resize Mode session resized meanwhile: same display, new scene.
+        let canvas = try #require(try topology("iphone17").displays.first { $0.name == "Resizable" })
+        let small = try #require(try RoutingDisplay.resizable(
+            ResizableAppSession(displayUniqueID: canvas.uniqueID, displayName: "Resizable", preferredWidth: 560, preferredHeight: 874), canvas
+        ).captureSource())
+        let resized = ResizableAppSession(displayUniqueID: canvas.uniqueID, displayName: "Resizable", preferredWidth: 560, preferredHeight: 667)
+        let resizeNotice = await RoutingDisplayGuard.captureMovedNotice(
+            udid: "U", verb: "record-video", started: small,
+            sessionMonitor: sessionMonitor(.active(resized)),
+            topologyMonitor: topologyMonitor(.available(try topology("iphone17")))
+        )
+        #expect(resizeNotice?.contains("was resized") == true, "\(String(describing: resizeNotice))")
+        #expect(resizeNotice?.contains("1680x2622") == true)
         // Still where it started.
         #expect(await RoutingDisplayGuard.captureMovedNotice(
             udid: "U", verb: "record-video", started: inner,
