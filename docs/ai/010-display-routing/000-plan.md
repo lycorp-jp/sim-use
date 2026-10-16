@@ -97,6 +97,16 @@ installed in the simulator. The one-off probe in E7 was for evidence only.
 | E32 | LINE `26.18.0` (iOS 27.0 SDK) on the Duo | Welcome → login → back in all four inner orientations; on the cover: login methods → phone number → tap field → `type` → unfold mid-flow (field value kept) → back on the inner display |
 | E33 | Resize Mode after S2 | iPhone 17 / iOS 27.0, 560x874: `Tap Location: (450, 650)` exact, `#BackButton`, `ui --point`, a single pid in the tree. A cached active session outlived the session by up to 5 s; a root at the device's own size now re-checks it |
 
+### Found while building S3 (2026-10-16)
+
+| # | Check | Result |
+| --- | --- | --- |
+| E34 | Cost of UI-space calibration from the tree, iPhone 17 / iOS 27.0, Playground (`SIM_USE_PERF=1`, daemon log) | Sim lookup 5 ms, tree fetch 64–71 ms, routing check 0.1 ms, one probe 3–4 ms: ~75 ms per command, almost all of it the tree fetch |
+| E35 | Same, calibrated from the `ui` snapshot and confirmed by probes | `tap -x/-y` wall time 618–652 ms default against 603–652 ms `native` (warm daemon, 5–6 runs each), against 697–747 ms when the tree was read |
+| E36 | iPhone 13 mini / iOS 26.5 (UI 375x812, panel 360x780), portrait | `tap -x 355 -y 758` (inside the bottom-trailing corner button in the outline): `native` hit nothing, the default hit the button |
+| E37 | Playground `gesture-presets`, alternating pinches | Only the first pinch after a launch is recognized, in either space (`native` too); the E2E relaunches before each pinch |
+| E38 | `ui` with Control Center open (iPhone 17 / iOS 27.0, Duo / iOS 27.1, released 0.15.0 too) | The process dies with SIGBUS on a stack guard page in the AX serializer on a cooperative thread, 37 frames deep. Not related to this work: issue #160 |
+
 ### Resizable display (Resize Mode)
 
 Sessions: Duo folded, Settings, 560x874 and then 375x667 (`appResize set
@@ -252,15 +262,19 @@ Acceptance:
 ### S3 — Explicit coordinates default to UI space
 
 Scope: `--coordinate-space` default flips to `ui` on every iOS verb that takes
-explicit coordinates (`tap`, `long-press`, `swipe`, `touch`, `gesture`,
-`multi-touch`, `batch` steps); `native` stays available. Orientation source:
-devicectl `currentOrientation` first, calibrator as fallback (Xcode without
-the command, devicectl failure).
+explicit coordinates (`tap` / `long-press` `-x/-y/--point`, `swipe`, `touch`,
+`multi-touch`, `gesture` pinch/rotate `--center-x/-y`, and the same verbs as
+`batch` steps); `native` stays available. Orientation source: the same
+calibration that selectors use (hit-test probes, CoreDevice when probes are
+ambiguous; fixed calibration off the main display). `native` means the
+routing display's native portrait points (S2).
 
 Acceptance:
 
 - Rotated iPhone (all four orientations), downscaled device (iPhone 13 mini class) and Duo inner/Resizable: `tap -x/-y` with numbers read from `ui` lands on the element by default; `--coordinate-space native` reproduces the old behavior.
-- `CHANGELOG.md` `### Changed` entry, skill and README text updated, skill floor bumped.
+- `swipe`, `touch` (atomic and split), `multi-touch` and `gesture pinch-*`/`rotate-*` take outline coordinates by default; batch steps match the standalone verbs.
+- `--coordinate-space` given with an alias or a selector is rejected (either value); with a directional `gesture` preset it is rejected.
+- `CHANGELOG.md` `### Changed` entry, skill and README text updated. The skill floor stays 0.16.0 (S1 already set it; S3 ships in the same release).
 - Unit tests for the default and both spaces; batch parity.
 
 ### S4 — Outline layout on multi-display devices
@@ -323,6 +337,10 @@ refuse with a message that names the requirement.
 | `fold` and `rotate` are iOS-only verbs (`sim-use ios …`) | Top-level verbs now | No Android implementation yet. Android emulators can fold and rotate, so the arguments stay portable for a later top-level verb (owner decision, 2026-10-16: Android later, separate issue) |
 | Explicit iOS coordinates default to UI space | Keep `native`; UI only on non-main displays | Owner decision 2026-10-16. Same space as the outline and Android; devicectl orientation removes the calibration-failure risk that kept `native` the default. Breaking for callers that hand-write native coordinates on a rotated or downscaled device: `CHANGELOG` `Changed` |
 | Record and stream the routing display in this stack | Refuse until the idb migration | Owner decision 2026-10-16: complete Duo support |
+| S3: UI-space orientation from the selector calibration, not devicectl first | devicectl `currentOrientation` on every command | Measured on iPhone 17 / iOS 27.0, portrait: `tap -x/-y` 610–660 ms native, 670–745 ms ui (one tree fetch plus probes). One devicectl read alone is ~0.1–0.3 s. CoreDevice stays the fallback when probes are ambiguous (S2) |
+| S3: UI-space calibration from the `ui` snapshot first, used only when probes confirm the snapshot's elements are in place | Tree every time (+~75 ms, E34); snapshot like `tap @N` (no confirmation) | The snapshot path reads no tree, so the routing display comes from the daemon cache: after a Resize Mode session ended, an unconfirmed snapshot calibration sent the first tap to the gone `Resizable` display (`ResizeModeTests.firstExplicitTapFollowsSession` red without the confirmation). Two in-place hits within four probes cost a few ms (E35); any doubt falls back to the tree, which re-checks the routing (R158-03). CoreDevice is not consulted on this path |
+| S3: split `touch --down` / `--up` take UI coordinates, each half calibrated | Keep `ui` atomic-only (split form would need `native`) | With `ui` as the default, the old rule would reject every split touch. Each half maps the point through the orientation at its own time, which is where the user sees it |
+| S3: `gesture` pinch/rotate centre and canvas in UI space, every sample mapped | Keep native portrait for multi-touch presets | The calibration is affine, so mapping each interpolated sample keeps lines and arcs; the directional presets already use the UI canvas (#66) |
 | Posture shown only on a non-main routing display | Always; never | Owner decision 2026-10-16: single-display output stays identical |
 | Device Hub closed: make it work if possible, else refuse with the requirement | Must work | Owner decision 2026-10-16 |
 
@@ -349,5 +367,10 @@ refuse with a message that names the requirement.
 11. Resize Mode on the Duo inner display: refused at `rot90` (E17). Not tested at inner `rot0`.
 12. `gesture rotate-cw` / `rotate-ccw` are not detected by the Playground on the cover, the inner display or a single-display iPhone 17 (pre-existing, display-independent). Not investigated here.
 13. Resolved in review (R158-02): on a multi-display simulator, and off the main display, `describe-ui --point` fetches the tree first and uses the same routing, calibration and scene placement as the full outline. Review R158-05 then removed the single-display fast path too: it answered from a cached routing check, so the first point query after a Resize Mode session started hit SpringBoard. Every point query now fetches the tree first (one more tree fetch on an upright single-display simulator), and `OrientationCalibrator.soleOrientation` is gone.
+
+14. S3: a `batch` `gesture pinch-*`/`rotate-*` step still sends one single-finger swipe (pre-existing, found with #66) and does not use the coordinate space. Not changed here.
+15. S3: `paste --via-menu --target-x/-y` uses the same `hidPoint` mapping as `tap`, but it was not verified live: with Device Hub open the pasteboard write is replaced (#153), and `--via-menu` already fails on iOS 26.5/27.0 with `--target-id` too.
+16. S3: software-keyboard elements have framebuffer-anchored frames in a rotated tree; they are discriminators in both the tree and the snapshot calibration (known issue, see #34 follow-ups).
+17. S3: `tap @N` calibrates from the snapshot without the in-place confirmation that UI-space coordinates now use, so the first alias tap after a Resize Mode session starts or ends may still follow a stale routing cache. Not changed here.
 
 ## Amendments

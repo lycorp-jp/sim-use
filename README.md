@@ -67,9 +67,10 @@ Multiple selector styles for different needs:
 | `--label` | `tap --label "General"` | Scripted flows with `--wait-timeout` |
 | `-x -y` / `--point` | `tap --point 100,200` | Last resort — no AX data |
 
-AX-derived selectors work in any orientation — sim-use self-calibrates the
-current rotation on each command (iOS). Explicit `-x/-y`/`--point` is
-interpreted in the device-native portrait space.
+Selectors and explicit coordinates work in any orientation — on iOS,
+sim-use self-calibrates the current rotation on each command, so `-x/-y` /
+`--point` take the numbers `ui` prints. `--coordinate-space native` gives
+them in the device's native portrait points instead.
 
 
 ## Why sim-use
@@ -141,10 +142,10 @@ captures it. The `ui` header names it (`App: Settings  951x669
 On a display other than the main one the orientation comes from
 CoreDevice instead of hit-test probes. `record-video` and `stream-video`
 still capture only the main display and refuse with an explanation
-there. Explicit `-x/-y` / `--point` coordinates are native to the display
-that hosts the app (the inner panel's unrotated points; a Resize Mode
-scene's points); add `--coordinate-space ui` to give the numbers `ui`
-prints. `sim-use ios fold closed|open|half|<degrees>` folds and unfolds the
+there. Explicit `-x/-y` / `--point` coordinates are the numbers `ui`
+prints there too; with `--coordinate-space native` they are native to the
+display that hosts the app (the inner panel's unrotated points; a Resize
+Mode scene's points). `sim-use ios fold closed|open|half|<degrees>` folds and unfolds the
 Duo and confirms which display became active; `sim-use ios fold` alone
 reports the posture.
 
@@ -248,7 +249,7 @@ sim-use gesture scroll-down --pre-delay 0.5 --post-delay 1.0 --device $UDID
 
 `--pre-delay` / `--post-delay` / `--duration` work on `tap`, `swipe`, and `gesture` alike for coarse timing control.
 
-Single-finger presets (`scroll-*`, `swipe-from-*-edge`) name **visual** directions and are orientation-aware on iOS: their canvas size and rotation are auto-detected per command, so `scroll-up` scrolls the on-screen content up whether the device is portrait, landscape, or upside-down. Explicit `swipe`/`touch` coordinates remain device-native portrait space by default; pass `--coordinate-space ui` to give them in the visual space `ui` prints instead (orientation-calibrated per command; `touch` supports this in the atomic `--down --up` form only). Pinch/rotate presets remain untransformed. On Android the flag is accepted and ignored — display coordinates already rotate with the UI.
+Single-finger presets (`scroll-*`, `swipe-from-*-edge`) name **visual** directions and are orientation-aware on iOS: their canvas size and rotation are auto-detected per command, so `scroll-up` scrolls the on-screen content up whether the device is portrait, landscape, or upside-down. Explicit `tap`/`swipe`/`touch`/`multi-touch` coordinates, `paste --via-menu --target-x/--target-y` and the pinch/rotate `--center-x/--center-y` are in the same visual space `ui` prints (orientation-calibrated per command; the split `touch --down` / `--up` form calibrates each half). `--coordinate-space native` gives them in the device's native portrait points, as before 0.16.0. Calibration reuses the last `ui` snapshot when it can, so it costs a few milliseconds; with no snapshot it reads the tree once. On Android the flag is accepted and ignored — display coordinates already rotate with the UI.
 
 ### Text input
 
