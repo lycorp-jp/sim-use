@@ -292,8 +292,8 @@ struct ResizeModeTests {
         #expect(after.display == nil)
     }
 
-    @Test("record-video and stream-video are refused during a session, before producing output (R150-06)")
-    func videoCaptureRefused() async throws {
+    @Test("record-video and stream-video capture the scene during a session; the screenshot formats refuse (S5)")
+    func videoCapturesScene() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()
         let simUse = try TestHelpers.getSimUsePath()
         try await TestHelpers.launchPlaygroundApp(to: "tap-test")
@@ -301,26 +301,25 @@ struct ResizeModeTests {
         defer { Task { await session.end() } }
         _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
 
+        // The recording is the 560x874 scene at 3x, cut from the canvas.
         let output = FileManager.default.temporaryDirectory.appendingPathComponent("resize-record-\(UUID().uuidString).mp4")
         defer { try? FileManager.default.removeItem(at: output) }
-        let record = try await CommandRunner.run(
-            "\(simUse) record-video --udid \(udid) --fps 5 --output \(output.path) --json", allowFailure: true, timeout: 20
-        )
-        #expect(record.exitCode != 0)
-        let recordEnvelope = try Self.json(record.output)
-        #expect((recordEnvelope["error"] as? String ?? "").contains("`record-video` captures only the main display"))
-        #expect((recordEnvelope["hint"] as? String ?? "").contains("recordVideo --display="))
-        #expect(!FileManager.default.fileExists(atPath: output.path), "no output file may be created")
+        try await RoutedVideo.record(simUse: simUse, udid: udid, output: output, seconds: 2.5)
+        let size = try await RoutedVideo.videoSize(output)
+        #expect(size == CGSize(width: 1680, height: 2622), "recorded \(String(describing: size))")
 
-        // stream-video rejects --json by design (stdout carries the video
-        // bytes), so the refusal is the plain stderr form; it exits before
-        // the stream starts, so no pipe or timeout dance is needed.
-        let stream = try await CommandRunner.run(
-            "\(simUse) stream-video --udid \(udid) --format h264 --fps 5", allowFailure: true, timeout: 20
+        // The native stream reads the same display.
+        let bytes = try await RoutedVideo.stream(simUse: simUse, udid: udid, seconds: 2.5)
+        #expect(bytes.count > 10_000 && bytes.first == 0x47, "expected an MPEG-TS stream, got \(bytes.count) bytes")
+
+        // The screenshot loop reads the main display only: refused before
+        // a single byte reaches stdout.
+        let refused = try await CommandRunner.run(
+            "\(simUse) stream-video --udid \(udid) --format mjpeg --fps 5", allowFailure: true, timeout: 20
         )
-        #expect(stream.exitCode != 0)
-        #expect(stream.output.contains("`stream-video` captures only the main display"), "stream must refuse before emitting video: \(stream.output.prefix(300))")
-        #expect(stream.output.contains("recordVideo --display="))
+        #expect(refused.exitCode != 0)
+        #expect(refused.output.contains("captures only the main display"), "mjpeg must refuse: \(refused.output.prefix(300))")
+        #expect(refused.output.contains("--format h264"))
 
         await session.end()
     }
