@@ -14,8 +14,9 @@ import SimUseCore
 ///    identifier, or a tab item (`RadioButton` / `Tab`) with no sibling
 ///    tab beside it outside the strip — that is a horizontal tab bar.
 /// 2. Vertical chrome in the anchor's column: the back button with at
-///    least one more element above or below it, or at least two tabs
-///    stacked vertically.
+///    least one more element above or below it, reaching below the top
+///    band — a regular navigation bar keeps the status clock and the back
+///    button both inside it — or at least two tabs stacked vertically.
 /// 3. The app's wide content stays clear of the bar: at least one wide
 ///    element exists, and nothing except a container (full screen, or a
 ///    full-width group) crosses the bar's inner edge. On a regular iPhone
@@ -87,7 +88,9 @@ enum OutlineSideBars {
         let columnMinX = anchors.map(\.frame.x).min() ?? firstAnchor.frame.x
         let columnMaxX = anchors.map { $0.frame.x + $0.frame.width }.max() ?? firstAnchor.frame.x
         let members = candidates.filter { $0.frame.x < columnMaxX && $0.frame.x + $0.frame.width > columnMinX }
-        let backButtonStack = !backButtons.isEmpty && isStackedVertically(members.map(\.frame))
+        let backButtonStack = !backButtons.isEmpty
+            && isStackedVertically(members.map(\.frame))
+            && members.contains { $0.frame.y + $0.frame.height / 2 >= OutlineFormatter.yBandInset }
         let tabStack = isStackedVertically(tabs.map(\.frame))
         guard backButtonStack || tabStack else { return nil }
 

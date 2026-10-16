@@ -193,6 +193,24 @@ struct OutlineSideBarTests {
         #expect(outline.entries.allSatisfy { !["Leading", "Trailing"].contains($0.region.kind) })
     }
 
+    @Test("native top chrome over a centred empty state is not a bar (S4-003)")
+    func statusClockAboveBackButton() throws {
+        // iPhone 17 top chrome (clock above the back button, both in the
+        // top band) with a short centred empty-state label as content.
+        let children = [
+            element("StaticText", "9:41", 56, 22, 36, 22),
+            element("GenericElement", "Dynamic Island", 138, 14, 125, 37),
+            element("Image", "Wi-Fi", 314, 26, 18, 13),
+            element("Image", "Battery", 340, 26, 27, 13),
+            element("Button", "Back", 16, 62, 44, 44, id: "BackButton"),
+            element("Heading", "Details", 150, 74, 100, 22),
+            element("StaticText", "Nothing here yet", 96, 300, 210, 28),
+        ].joined(separator: ",")
+        let outline = OutlineFormatter.render(tree: try tree(children))
+        #expect(outline.entries.allSatisfy { !["Leading", "Trailing"].contains($0.region.kind) })
+        #expect(outline.entries.first { $0.uniqueId == "BackButton" }?.region.kind == "Top")
+    }
+
     @Test("a single tab with unrelated items above it is not a bar")
     func singleTabAnchor() throws {
         let children = [
