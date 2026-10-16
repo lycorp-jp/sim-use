@@ -58,6 +58,6 @@ if [[ -z "${SIM_USE_TEST_DEVELOPER_DIR:-}" ]]; then
 fi
 
 if [[ $# -eq 0 ]]; then
-    set -- FoldTests RotateTests ResizeModeTests ScreenshotTests
+    set -- FoldTests RotateTests ResizeModeTests ScreenshotTests UICoordinateDefaultTests
 fi
 exec ./scripts/test-runner.sh "$@"

@@ -397,6 +397,7 @@ run_tests() {
             "TapTests"
             "TouchTests"
             "TypeTests"
+            "UICoordinateDefaultTests"
         )
     fi
 

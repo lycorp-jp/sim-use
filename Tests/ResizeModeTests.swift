@@ -220,6 +220,32 @@ struct ResizeModeTests {
         #expect(try await detected() == "Detected: 2", "the first gesture after the session must land on the main display")
     }
 
+    @Test("the first explicit tap after a session starts, and after it ends, reaches the app (S3)")
+    func firstExplicitTapFollowsSession() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+        // A device-sized snapshot and a warm "no session"; then the
+        // session starts with no `ui` before the tap. UI-space coordinates
+        // calibrate from the snapshot only when probes confirm it.
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+        _ = try await CommandRunner.run("\(simUse) tap --udid \(udid) -x 450 -y 650")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let (during, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        #expect(Self.tapEcho(during).count == "1", "the first tap in the session must land: \(during.prefix(400))")
+        #expect(Self.tapEcho(during).location == "(450, 650)")
+
+        // The snapshot is now the session's; end it with no `ui` before
+        // the next tap.
+        await session.end()
+        _ = try await CommandRunner.run("\(simUse) tap --udid \(udid) -x 200 -y 400")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let (after, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        #expect(Self.tapEcho(after).count == "2", "the first tap after the session must land on the main display: \(after.prefix(400))")
+    }
+
     @Test("the first point query after a session starts, and after it ends, describes the app (R158-05)")
     func firstPointQueryFollowsSession() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()
