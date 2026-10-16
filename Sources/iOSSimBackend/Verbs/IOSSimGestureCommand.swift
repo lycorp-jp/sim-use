@@ -46,10 +46,10 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
     @Argument(help: "The gesture preset to perform.")
     public var preset: GesturePreset
 
-    @Option(name: .customLong("screen-width"), help: "Canvas width in points for the preset math. Single-finger presets: visual space, auto-detected from the current orientation by default (390 when the screen size is unknown). Pinch/rotate presets: device-native portrait space, fixed 390 default.")
+    @Option(name: .customLong("screen-width"), help: "Canvas width in points for the preset math. Single-finger presets: visual space, auto-detected from the current orientation by default (390 when the screen size is unknown). Pinch/rotate presets: the same visual canvas by default; with --coordinate-space native, device-native portrait space with a fixed 390 default.")
     public var screenWidth: Double?
 
-    @Option(name: .customLong("screen-height"), help: "Canvas height in points for the preset math. Single-finger presets: visual space, auto-detected from the current orientation by default (844 when the screen size is unknown). Pinch/rotate presets: device-native portrait space, fixed 844 default.")
+    @Option(name: .customLong("screen-height"), help: "Canvas height in points for the preset math. Single-finger presets: visual space, auto-detected from the current orientation by default (844 when the screen size is unknown). Pinch/rotate presets: the same visual canvas by default; with --coordinate-space native, device-native portrait space with a fixed 844 default.")
     public var screenHeight: Double?
 
     @Option(name: .customLong("duration"), help: "Duration of the gesture in seconds (uses preset default if not specified).")
@@ -85,6 +85,12 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
     @Option(name: .customLong("post-delay"), help: "Delay after completing the gesture in seconds.")
     public var postDelay: Double?
 
+    @Option(name: .customLong("coordinate-space"), help: "Pinch / rotate presets only: the space of --center-x/--center-y, --radius and the canvas. 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated) or 'native' (the device's native portrait points, legacy 390x844 canvas). Directional presets always follow the visual direction and reject this flag.")
+    public var coordinateSpace: CoordinateSpace?
+
+    /// The space pinch / rotate geometry is given in.
+    public var effectiveCoordinateSpace: CoordinateSpace { coordinateSpace ?? .ui }
+
     @OptionGroup public var device: DeviceOptions
 
     @OptionGroup public var json: JSONOutputOptions
@@ -116,7 +122,8 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
             steps: steps,
             stepMs: stepMs,
             preDelay: preDelay,
-            postDelay: postDelay
+            postDelay: postDelay,
+            coordinateSpace: coordinateSpace
         )
     }
 
@@ -138,7 +145,8 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         steps: Int,
         stepMs: Int?,
         preDelay: Double?,
-        postDelay: Double?
+        postDelay: Double?,
+        coordinateSpace: CoordinateSpace? = nil
     ) throws {
         try GesturePreset.validateOptions(
             preset: preset,
@@ -147,7 +155,8 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
             scale: scale, angle: angle,
             centerX: centerX, centerY: centerY, radius: radius,
             steps: steps, stepMs: stepMs,
-            preDelay: preDelay, postDelay: postDelay
+            preDelay: preDelay, postDelay: postDelay,
+            coordinateSpace: coordinateSpace
         )
     }
 
@@ -168,21 +177,33 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         logger.info().log("Duration: \(gestureDuration)s")
 
         if preset.isMultiTouch {
-            // Multi-touch presets stay in device-native portrait axes:
-            // orientation-aware pinch/rotate would need every
-            // interpolated sample mapped, not just the endpoints, and
-            // is out of scope for the issue #66 fix.
-            let width = screenWidth ?? GestureOrientationMapping.legacyWidth
-            let height = screenHeight ?? GestureOrientationMapping.legacyHeight
-            logger.info().log("Screen size: \(width)x\(height)")
+            // Pinch / rotate geometry is laid out on the visual canvas and
+            // every interpolated sample crosses into HID space; `native`
+            // keeps the legacy device-native portrait layout.
+            var calibration: OrientationCalibration? = nil
+            let width: Double
+            let height: Double
+            if effectiveCoordinateSpace == .ui {
+                let uiCalibration = await Self.orientationCalibration(
+                    udid: device.resolved, preset: preset, logger: logger)
+                let visual = GestureOrientationMapping.visualSize(
+                    explicitWidth: screenWidth, explicitHeight: screenHeight, calibration: uiCalibration)
+                calibration = uiCalibration
+                (width, height) = (visual.width, visual.height)
+            } else {
+                width = screenWidth ?? GestureOrientationMapping.legacyWidth
+                height = screenHeight ?? GestureOrientationMapping.legacyHeight
+            }
+            logger.info().log("Canvas: \(width)x\(height) (\(effectiveCoordinateSpace.rawValue))")
             try await runMultiTouch(
                 width: width,
                 height: height,
+                calibration: calibration,
                 duration: gestureDuration,
                 logger: logger
             )
             logger.info().log("Gesture completed successfully")
-            return ExecutionResult()
+            return ExecutionResult(commandAdvisory: calibration?.advisory)
         }
 
         // Directional presets name a visual direction, so their math
@@ -250,7 +271,13 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
         try await HIDInteractor.performHIDEvent(finalEvent, for: device.resolved, logger: logger)
     }
 
-    private func runMultiTouch(width: Double, height: Double, duration: Double, logger: SimUseLogger) async throws {
+    private func runMultiTouch(
+        width: Double,
+        height: Double,
+        calibration: OrientationCalibration?,
+        duration: Double,
+        logger: SimUseLogger
+    ) async throws {
         let presetStrokes = preset.strokes(
             screenWidth: width,
             screenHeight: height,
@@ -280,21 +307,25 @@ public struct IOSSimGestureCommand: SimUseExecutableCommand {
 
         logger.info().log("Multi-touch preset \(preset.rawValue) — finger1 (\(f1.startX),\(f1.startY))→(\(f1.endX),\(f1.endY)) finger2 (\(f2.startX),\(f2.startY))→(\(f2.endX),\(f2.endY)) steps=\(steps) step-ms=\(resolvedStepMs)")
 
+        let trajectory: MultiTouchDispatcher.Trajectory = { t in
+            let p1 = f1.point(at: t)
+            let p2 = f2.point(at: t)
+            return ((x: p1.x, y: p1.y), (x: p2.x, y: p2.y))
+        }
+        let dispatched = calibration.map { MultiTouchDispatcher.hidTrajectory($0, trajectory) } ?? trajectory
+        let start = dispatched(0)
+
         let session = try await HIDInteractor.makeSession(for: device.resolved, logger: logger)
         if let preDelay, preDelay > 0 {
             try await Task.sleep(nanoseconds: UInt64(preDelay * 1_000_000_000))
         }
         try await MultiTouchDispatcher.run(
             session: session,
-            startP1: (x: f1.startX, y: f1.startY),
-            startP2: (x: f2.startX, y: f2.startY),
+            startP1: start.0,
+            startP2: start.1,
             steps: steps,
             stepMs: resolvedStepMs,
-            interpolate: { t in
-                let p1 = f1.point(at: t)
-                let p2 = f2.point(at: t)
-                return ((x: p1.x, y: p1.y), (x: p2.x, y: p2.y))
-            },
+            interpolate: dispatched,
             logger: logger
         )
         if let postDelay, postDelay > 0 {

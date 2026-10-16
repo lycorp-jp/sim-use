@@ -53,10 +53,10 @@ struct Gesture: SimUseExecutableCommand {
     @Argument(help: "The gesture preset to perform.")
     var preset: GesturePreset
 
-    @Option(name: .customLong("screen-width"), help: "Canvas width for the preset math. iOS single-finger presets: visual space, auto-detected by default (390 fallback); iOS pinch/rotate presets: device-native portrait, fixed 390 default. Android: real display pixels, auto-detected for all presets.")
+    @Option(name: .customLong("screen-width"), help: "Canvas width for the preset math. iOS single-finger presets: visual space, auto-detected by default (390 fallback); iOS pinch/rotate presets: the same visual canvas by default, device-native portrait with a fixed 390 default under --coordinate-space native. Android: real display pixels, auto-detected for all presets.")
     var screenWidth: Double?
 
-    @Option(name: .customLong("screen-height"), help: "Canvas height for the preset math. iOS single-finger presets: visual space, auto-detected by default (844 fallback); iOS pinch/rotate presets: device-native portrait, fixed 844 default. Android: real display pixels, auto-detected for all presets.")
+    @Option(name: .customLong("screen-height"), help: "Canvas height for the preset math. iOS single-finger presets: visual space, auto-detected by default (844 fallback); iOS pinch/rotate presets: the same visual canvas by default, device-native portrait with a fixed 844 default under --coordinate-space native. Android: real display pixels, auto-detected for all presets.")
     var screenHeight: Double?
 
     @Option(name: .customLong("duration"), help: "Duration of the gesture in seconds. Defaults to the preset baseline (0.3s edge / 0.5s scroll+pinch+rotate), except rotate presets auto-extend to |angle|/180s for sweeps > 90° so angular velocity stays near 180°/sec (recogniser sweet spot). Pass explicitly to override.")
@@ -88,6 +88,9 @@ struct Gesture: SimUseExecutableCommand {
 
     @Option(name: .customLong("pre-delay"), help: "Delay before starting the gesture in seconds.")
     var preDelay: Double?
+
+    @Option(name: .customLong("coordinate-space"), help: "Pinch / rotate presets only. iOS: the space of --center-x/--center-y, --radius and the canvas — 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated) or 'native' (the device's native portrait points, legacy 390x844 canvas). Android coordinates are always display space — the flag is accepted and ignored there. Directional presets reject it.")
+    var coordinateSpace: CoordinateSpace?
 
     @Option(name: .customLong("post-delay"), help: "Delay after completing the gesture in seconds.")
     var postDelay: Double?
@@ -121,7 +124,8 @@ struct Gesture: SimUseExecutableCommand {
             steps: steps,
             stepMs: stepMs,
             preDelay: preDelay,
-            postDelay: postDelay
+            postDelay: postDelay,
+            coordinateSpace: coordinateSpace
         )
     }
 
@@ -165,6 +169,7 @@ struct Gesture: SimUseExecutableCommand {
         sub.stepMs = stepMs
         sub.preDelay = preDelay
         sub.postDelay = postDelay
+        sub.coordinateSpace = coordinateSpace
         sub.device = device
         sub.json = json
         return sub

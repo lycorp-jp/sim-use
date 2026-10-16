@@ -21,8 +21,8 @@ struct Swipe: SimUseExecutableCommand {
 
     @OptionGroup var coordinates: SwipeCoordinateOptions
 
-    @Option(name: .customLong("coordinate-space"), help: "iOS only: 'native' (device-native portrait, the default) or 'ui' (visual space as printed by describe-ui; orientation-calibrated per command). Android coordinates are always display space, which already rotates with the UI — the flag is accepted and ignored there.")
-    var coordinateSpace: CoordinateSpace = .native
+    @Option(name: .customLong("coordinate-space"), help: "iOS only: 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated per command) or 'native' (the device's native portrait points, no calibration). Android coordinates are always display space, which already rotates with the UI — the flag is accepted and ignored there.")
+    var coordinateSpace: CoordinateSpace = .ui
 
     @Option(name: .customLong("duration"), help: "Duration of the swipe in seconds.")
     var duration: Double?

@@ -329,8 +329,14 @@ public enum GesturePreset: String, CaseIterable, ExpressibleByArgument, Sendable
         steps: Int,
         stepMs: Int?,
         preDelay: Double?,
-        postDelay: Double?
+        postDelay: Double?,
+        coordinateSpace: CoordinateSpace? = nil
     ) throws {
+        // Directional presets name a visual direction and take no
+        // coordinates; only pinch / rotate have a centre to place.
+        if let coordinateSpace, !preset.isMultiTouch {
+            throw ValidationError("--coordinate-space \(coordinateSpace.rawValue) applies to pinch and rotate presets only; \(preset.rawValue) always follows the visual direction.")
+        }
         // Upper bounds are generous enough to cover modern phones,
         // foldables, and tablets on both platforms (Galaxy Tab S9 Ultra
         // is 1848×2960, iPad Pro 12.9 is 2048×2732). On Android we

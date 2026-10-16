@@ -58,8 +58,8 @@ struct Touch: SimUseExecutableCommand {
     @Option(name: .customLong("delay"), help: "Delay between touch down and up events in seconds (if both are specified).")
     var delay: Double?
 
-    @Option(name: .customLong("coordinate-space"), help: "iOS only: 'native' (device-native portrait, the default) or 'ui' (visual space as printed by describe-ui; orientation-calibrated; atomic --down --up form only). Android coordinates are always display space, which already rotates with the UI — the flag is accepted and ignored there.")
-    var coordinateSpace: CoordinateSpace = .native
+    @Option(name: .customLong("coordinate-space"), help: "iOS only: 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated) or 'native' (the device's native portrait points, no calibration). Android coordinates are always display space, which already rotates with the UI — the flag is accepted and ignored there.")
+    var coordinateSpace: CoordinateSpace = .ui
 
     @OptionGroup var device: DeviceOptions
 

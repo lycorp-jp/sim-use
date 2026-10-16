@@ -368,6 +368,7 @@ public struct AccessibilityFetcher {
         for simulatorUDID: String,
         logger: SimUseLogger
     ) async throws -> OrientationCalibration {
+        let perf = PerfLog.start()
         let simulatorSet = try await getSimulatorSet(
             deviceSetPath: nil,
             logger: logger,
@@ -376,8 +377,10 @@ public struct AccessibilityFetcher {
         guard let target = simulatorSet.allSimulators.first(where: { $0.udid == simulatorUDID }) else {
             throw CLIError(errorDescription: "Simulator with UDID \(simulatorUDID) not found in set.")
         }
+        perf.stage("calibration: sim lookup")
         let native = NativePortraitSize(screenInfo: target.screenInfo)
         let info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
+        perf.stage("calibration: tree fetch XPC")
         let rootFrame = rawDisplayFrame(in: rawRoots(of: info))
         // The same session and topology signals as the full fetch: a scene
         // that just changed (a session started or ended) re-checks the
@@ -389,11 +392,15 @@ public struct AccessibilityFetcher {
             deviceSizedRoot: sceneEvidence == nil && rootFrame != nil && native != nil,
             rootSize: rootFrame.map { SimulatorDisplayTopologyMonitor.RootSize(width: Double($0.width), height: Double($0.height)) }
         )
+        perf.stage("calibration: routing check")
         let displayId = routing.accessibilityDisplayID
         let probe: CollapsedChildrenRecovery.PointProbe = { point in
+            let start = DispatchTime.now()
             let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false, displayId: displayId)
+            perf.recordProbe(durationMs: Double(DispatchTime.now().uptimeNanoseconds &- start.uptimeNanoseconds) / 1_000_000, phase: "calibration")
             return raw as? [String: Any]
         }
+        defer { perf.finish() }
         if let fixed = routing.fixedCalibration(sceneSize: rootFrame?.size) {
             let roots = rawRoots(of: info)
             return await OrientationCalibrator.resolveSceneOffset(

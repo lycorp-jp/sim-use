@@ -151,6 +151,9 @@ public enum OrientationCalibrator {
     /// their frames would contain several candidates' projections and
     /// prove nothing.
     public nonisolated static let maxDiscriminatorAreaRatio = 0.4
+    /// Calibration needs a handful of discriminators; trees and snapshots
+    /// can hold thousands of elements.
+    nonisolated static let discriminatorPoolLimit = 40
     /// Containment slack for probe results, mirroring the quadtree's
     /// tolerance for AX frame rounding.
     public nonisolated static let containmentSlack = 2.0
@@ -310,7 +313,7 @@ public enum OrientationCalibrator {
             probesUsed: probesUsed,
             advisory: CommandAdvisory(
                 kind: .orientationCalibrationFallback,
-                message: "Screen orientation could not be confirmed (\(probesUsed) probe(s)); assuming \(guess.rawValue). If the screen changed or the device rotated, re-run describe-ui, or pass explicit -x/-y coordinates."
+                message: "Screen orientation could not be confirmed (\(probesUsed) probe(s)); assuming \(guess.rawValue). If the screen changed or the device rotated, re-run describe-ui, or pass -x/-y with --coordinate-space native (the display's native portrait points)."
             )
         ))
     }
@@ -394,7 +397,7 @@ public enum OrientationCalibrator {
             probesUsed: probesUsed,
             advisory: CommandAdvisory(
                 kind: .orientationCalibrationFallback,
-                message: "The app's \(Int(sceneSize.width))x\(Int(sceneSize.height)) scene is smaller than the \(Int(display.width))x\(Int(display.height)) display and its position could not be confirmed; taps assume it starts at the display origin and may miss. Re-run describe-ui, or pass explicit -x/-y coordinates."
+                message: "The app's \(Int(sceneSize.width))x\(Int(sceneSize.height)) scene is smaller than the \(Int(display.width))x\(Int(display.height)) display and its position could not be confirmed; taps assume it starts at the display origin and may miss. Re-run describe-ui, or pass -x/-y with --coordinate-space native (the display's native portrait points)."
             )
         )
     }
@@ -448,24 +451,112 @@ public enum OrientationCalibrator {
         logger: SimUseLogger,
         maxProbes: Int = defaultMaxProbes
     ) async -> OrientationCalibration {
+        await calibrate(
+            udid: udid,
+            snapshot: payload,
+            discriminators: [snapshotRect(entry)] + payload.entries.filter { $0 != entry }.map(snapshotRect),
+            logger: logger,
+            maxProbes: maxProbes
+        )
+    }
+
+    /// The snapshot calibration for UI-space coordinates that name no
+    /// entry (explicit `-x/-y`, gesture presets), or nil when it cannot be
+    /// trusted. The snapshot path reads no tree, so the routing display
+    /// comes from the daemon's cache and the screen may have changed since
+    /// the snapshot: a Resize Mode session that started, a rotation,
+    /// another screen. The calibration is used only when it settles by
+    /// probes alone — no CoreDevice fallback — and probes under it still
+    /// find the snapshot's elements in place (`confirms`). Otherwise the
+    /// caller reads the tree, which re-checks the routing display.
+    public static func confirmedCalibration(
+        udid: String,
+        snapshot payload: OutlineCache.Payload,
+        logger: SimUseLogger,
+        maxProbes: Int = defaultMaxProbes
+    ) async -> OrientationCalibration? {
+        guard let session = try? await AXProbeSession.make(udid: udid, logger: logger) else { return nil }
+        let center = CGPoint(x: Double(payload.screen.width) / 2, y: Double(payload.screen.height) / 2)
+        let discriminators = Array(payload.entries.map(snapshotRect).sorted {
+            hypot($0.midX - center.x, $0.midY - center.y) > hypot($1.midX - center.x, $1.midY - center.y)
+        }.prefix(discriminatorPoolLimit))
+        let scene = CGSize(width: payload.screen.width, height: payload.screen.height)
+        let calibration: OrientationCalibration
+        if let fixed = session.fixedCalibration(sceneSize: scene) {
+            calibration = await resolveSceneOffset(
+                fixed, sceneSize: scene, discriminators: discriminators,
+                probe: session.probe, logger: logger
+            )
+        } else {
+            calibration = await calibrate(
+                native: session.native,
+                uiScreenSize: nil,
+                hint: (width: Double(payload.screen.width), height: Double(payload.screen.height)),
+                discriminators: discriminators,
+                probe: session.probe,
+                maxProbes: maxProbes,
+                logger: logger
+            )
+        }
+        guard calibration.advisory == nil, calibration.native != nil else { return nil }
+        let confirmed = await confirms(
+            calibration, discriminators: discriminators,
+            sceneArea: Double(scene.width * scene.height), probe: session.probe
+        )
+        guard confirmed else {
+            logger.info().log("OrientationCalibrator: the describe-ui snapshot's elements are not in place under \(calibration.orientation.rawValue)")
+            return nil
+        }
+        return calibration
+    }
+
+    /// Whether hit-tests under `calibration` find the snapshot's elements
+    /// where the snapshot put them: a probe at an element's centre must hit
+    /// something inside that element's frame. Needs two such hits (one
+    /// when only one element can be probed) within four probes; large
+    /// elements prove nothing and are skipped.
+    static func confirms(
+        _ calibration: OrientationCalibration,
+        discriminators: [CGRect],
+        sceneArea: Double,
+        probe: HitTestProbe,
+        required: Int = 2,
+        maxProbes: Int = 4
+    ) async -> Bool {
+        let usable = discriminators.filter {
+            $0.width > 0 && $0.height > 0 && $0.width * $0.height <= maxDiscriminatorAreaRatio * sceneArea
+        }
+        let needed = min(required, usable.count)
+        guard needed > 0 else { return false }
+        var hits = 0
+        for rect in usable.prefix(maxProbes) {
+            guard let hit = try? await probe(calibration.probeCGPoint(CGPoint(x: rect.midX, y: rect.midY))),
+                  let frame = frameRect(of: hit),
+                  rect.insetBy(dx: -containmentSlack, dy: -containmentSlack).contains(frame)
+            else { continue }
+            hits += 1
+            if hits >= needed { return true }
+        }
+        return false
+    }
+
+    private static func calibrate(
+        udid: String,
+        snapshot payload: OutlineCache.Payload,
+        discriminators: [CGRect],
+        logger: SimUseLogger,
+        maxProbes: Int
+    ) async -> OrientationCalibration {
         guard let session = try? await AXProbeSession.make(udid: udid, logger: logger) else {
             return .identity(advisory: CommandAdvisory(
                 kind: .orientationCalibrationFallback,
                 message: "Simulator unreachable for orientation calibration; assuming portrait orientation."
             ))
         }
-        func rect(_ e: OutlineCache.Payload.Entry) -> CGRect {
-            CGRect(
-                x: Double(e.x) - Double(e.w) / 2,
-                y: Double(e.y) - Double(e.h) / 2,
-                width: Double(e.w),
-                height: Double(e.h)
-            )
-        }
         let scene = CGSize(width: payload.screen.width, height: payload.screen.height)
         if let fixed = session.fixedCalibration(sceneSize: scene) {
             return await resolveSceneOffset(
-                fixed, sceneSize: scene, discriminators: [rect(entry)] + payload.entries.filter { $0 != entry }.map(rect),
+                fixed, sceneSize: scene, discriminators: discriminators,
                 probe: session.probe, logger: logger
             )
         }
@@ -473,11 +564,20 @@ public enum OrientationCalibrator {
             native: session.native,
             uiScreenSize: nil,
             hint: (width: Double(payload.screen.width), height: Double(payload.screen.height)),
-            discriminators: [rect(entry)] + payload.entries.filter { $0 != entry }.map(rect),
+            discriminators: discriminators,
             probe: session.probe,
             maxProbes: maxProbes,
             logger: logger,
             authoritative: session.authoritative
+        )
+    }
+
+    private nonisolated static func snapshotRect(_ e: OutlineCache.Payload.Entry) -> CGRect {
+        CGRect(
+            x: Double(e.x) - Double(e.w) / 2,
+            y: Double(e.y) - Double(e.h) / 2,
+            width: Double(e.w),
+            height: Double(e.h)
         )
     }
 
@@ -559,7 +659,7 @@ public enum OrientationCalibrator {
     static func discriminatorRects(
         from roots: [AccessibilityElement],
         display: AccessibilityElement.Frame?,
-        limit: Int = 40
+        limit: Int = discriminatorPoolLimit
     ) -> [CGRect] {
         let centerX = display.map { $0.x + $0.width / 2 }
         let centerY = display.map { $0.y + $0.height / 2 }

@@ -25,8 +25,16 @@ import SimUseCore
 /// `tap --fingers 2` / `long-press --fingers 2` forms are the
 /// ergonomic path.
 public struct IOSSimMultiTouchCommand: SimUseExecutableCommand {
-    public struct ExecutionResult: Codable {
-        public init() {}
+    public struct ExecutionResult: Codable, CommandAdvisoryProviding {
+        /// Excluded from the encoded `data` payload via `CodingKeys`
+        /// — the envelope hoists it to the top-level `advisory` key.
+        public var commandAdvisory: CommandAdvisory? = nil
+
+        public init(commandAdvisory: CommandAdvisory? = nil) {
+            self.commandAdvisory = commandAdvisory
+        }
+
+        private enum CodingKeys: CodingKey {}
     }
 
     public static let configuration = CommandConfiguration(
@@ -97,6 +105,9 @@ public struct IOSSimMultiTouchCommand: SimUseExecutableCommand {
     @Option(name: .customLong("post-delay"), help: "Delay after the gesture in seconds.")
     public var postDelay: Double?
 
+    @Option(name: .customLong("coordinate-space"), help: "Space the coordinates are given in: 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated so every sample of the trajectory follows the screen) or 'native' (the device's native portrait points, no calibration).")
+    public var coordinateSpace: CoordinateSpace = .ui
+
     @OptionGroup public var device: DeviceOptions
 
     @OptionGroup public var json: JSONOutputOptions
@@ -162,6 +173,17 @@ public struct IOSSimMultiTouchCommand: SimUseExecutableCommand {
         // Resizable app session (issue #143): touch HID cannot reach the app.
         try await RoutingDisplayGuard.assertTouchInputReachesApp(udid: device.resolved, verb: "multi-touch", logger: logger)
 
+        // The trajectory is interpolated in the space the user gave and
+        // every sample crosses into HID space on its own.
+        var calibration: OrientationCalibration? = nil
+        if coordinateSpace == .ui {
+            calibration = await UISpaceCalibrationLoader.load(
+                udid: device.resolved,
+                fallbackMessage: UISpaceCalibrationLoader.explicitCoordinatesFallback,
+                logger: logger
+            )
+        }
+
         let session = try await HIDInteractor.makeSession(for: device.resolved, logger: logger)
 
         if let preDelay, preDelay > 0 {
@@ -174,12 +196,19 @@ public struct IOSSimMultiTouchCommand: SimUseExecutableCommand {
         // semantics). Floor at 1 ms so the dispatcher's minimumStepMs
         // (5 ms) still applies.
         let effectiveStepMs = stepMs ?? max(1, Int((duration * 1000.0 / Double(steps)).rounded()))
+        let trajectory = MultiTouchDispatcher.linear(
+            start: (p1: (x1, y1), p2: (x2, y2)),
+            end: (p1: (x1End, y1End), p2: (x2End, y2End))
+        )
+        let dispatched = calibration.map { MultiTouchDispatcher.hidTrajectory($0, trajectory) } ?? trajectory
+        let start = dispatched(0)
         try await MultiTouchDispatcher.run(
             session: session,
-            start: (p1: (x1, y1), p2: (x2, y2)),
-            end: (p1: (x1End, y1End), p2: (x2End, y2End)),
+            startP1: start.0,
+            startP2: start.1,
             steps: steps,
             stepMs: effectiveStepMs,
+            interpolate: dispatched,
             logger: logger
         )
 
@@ -187,7 +216,7 @@ public struct IOSSimMultiTouchCommand: SimUseExecutableCommand {
             try await Task.sleep(nanoseconds: UInt64(postDelay * 1_000_000_000))
         }
 
-        return ExecutionResult()
+        return ExecutionResult(commandAdvisory: calibration?.advisory)
     }
 }
 
@@ -199,13 +228,16 @@ public struct IOSSimMultiTouchCommand: SimUseExecutableCommand {
 /// dispatch shape.
 enum MultiTouchDispatcher {
 
+    typealias Point = (x: Double, y: Double)
+    typealias Trajectory = (Double) -> (Point, Point)
+
     /// Linear-interpolation entry point. `start` and `end` are
     /// straight-line endpoints; each Move samples the line at
     /// `t = i / steps`.
     static func run(
         session: HIDInteractor.Session,
-        start: (p1: (x: Double, y: Double), p2: (x: Double, y: Double)),
-        end: (p1: (x: Double, y: Double), p2: (x: Double, y: Double)),
+        start: (p1: Point, p2: Point),
+        end: (p1: Point, p2: Point),
         steps: Int,
         stepMs: Int,
         logger: SimUseLogger
@@ -214,19 +246,33 @@ enum MultiTouchDispatcher {
             session: session,
             startP1: start.p1, startP2: start.p2,
             steps: steps, stepMs: stepMs,
-            interpolate: { t in
-                let p1 = (
-                    x: start.p1.x + (end.p1.x - start.p1.x) * t,
-                    y: start.p1.y + (end.p1.y - start.p1.y) * t
-                )
-                let p2 = (
-                    x: start.p2.x + (end.p2.x - start.p2.x) * t,
-                    y: start.p2.y + (end.p2.y - start.p2.y) * t
-                )
-                return (p1, p2)
-            },
+            interpolate: linear(start: start, end: end),
             logger: logger
         )
+    }
+
+    /// Both fingers on straight lines from `start` to `end`.
+    static func linear(start: (p1: Point, p2: Point), end: (p1: Point, p2: Point)) -> Trajectory {
+        { t in
+            let p1 = (
+                x: start.p1.x + (end.p1.x - start.p1.x) * t,
+                y: start.p1.y + (end.p1.y - start.p1.y) * t
+            )
+            let p2 = (
+                x: start.p2.x + (end.p2.x - start.p2.x) * t,
+                y: start.p2.y + (end.p2.y - start.p2.y) * t
+            )
+            return (p1, p2)
+        }
+    }
+
+    /// A UI-space trajectory whose every sample crosses into HID space.
+    /// The calibration is affine, so lines stay lines and arcs stay arcs.
+    static func hidTrajectory(_ calibration: OrientationCalibration, _ trajectory: @escaping Trajectory) -> Trajectory {
+        { t in
+            let (p1, p2) = trajectory(t)
+            return (calibration.hidPoint(x: p1.x, y: p1.y), calibration.hidPoint(x: p2.x, y: p2.y))
+        }
     }
 
     /// Generic entry point. `interpolate(t)` returns the (finger1,

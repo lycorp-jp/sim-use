@@ -45,6 +45,9 @@ public struct AndroidGestureCommand: SimUseExecutableCommand {
     @Option(name: .customLong("radius"), help: "Start radius for pinch / rotate presets (pixels). Default 80.")
     public var radius: Double?
 
+    @Option(name: .customLong("coordinate-space"), help: "Accepted for parity with the iOS surface and ignored: Android coordinates are always display space, which already rotates with the UI. Pinch / rotate presets only.")
+    public var coordinateSpace: CoordinateSpace?
+
     @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data: {}}` envelope on success.")
     public var jsonOutput: Bool = false
 
@@ -73,7 +76,8 @@ public struct AndroidGestureCommand: SimUseExecutableCommand {
             scale: scale, angle: angle,
             centerX: centerX, centerY: centerY, radius: radius,
             steps: 1, stepMs: nil,
-            preDelay: nil, postDelay: nil
+            preDelay: nil, postDelay: nil,
+            coordinateSpace: coordinateSpace
         )
     }
 

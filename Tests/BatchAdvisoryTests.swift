@@ -119,12 +119,12 @@ struct BatchOrientationCalibrationTests {
         )
     }
 
-    @Test("selector steps calibrate once per batch; explicit steps never")
+    @Test("selector steps calibrate once per batch; native explicit steps never")
     func calibratesOncePerBatch() async throws {
         let spy = CalibratorSpy()
         let context = makeContext(tree: try makeAdvisoryTree(), spy: spy)
 
-        _ = try await parseStep(["tap", "-x", "10", "-y", "10"], context: context)
+        _ = try await parseStep(["tap", "-x", "10", "-y", "10", "--coordinate-space", "native"], context: context)
         #expect(spy.calls == 0)
 
         _ = try await parseStep(["tap", "--label", "Small"], context: context)

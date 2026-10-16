@@ -106,6 +106,9 @@ struct Paste: SimUseExecutableCommand {
     @Option(name: .customLong("target-y"), help: "For --via-menu: Y coordinate to long-press.")
     var targetY: Double?
 
+    @Option(name: .customLong("coordinate-space"), help: "iOS only, for --target-x/--target-y: 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated) or 'native' (the device's native portrait points, no calibration).")
+    var coordinateSpace: CoordinateSpace?
+
     @Option(name: .customLong("long-press-duration"), help: "Seconds to hold on the field for the edit menu to appear (default: 0.8).")
     var longPressDuration: Double = 0.8
 
@@ -135,7 +138,8 @@ struct Paste: SimUseExecutableCommand {
             text: text, useStdin: useStdin, inputFile: inputFile,
             viaMenu: viaMenu,
             targetID: targetID,
-            targetX: targetX, targetY: targetY
+            targetX: targetX, targetY: targetY,
+            coordinateSpace: coordinateSpace
         )
     }
 
@@ -190,6 +194,7 @@ struct Paste: SimUseExecutableCommand {
         sub.targetID = targetID
         sub.targetX = targetX
         sub.targetY = targetY
+        sub.coordinateSpace = coordinateSpace
         sub.longPressDuration = longPressDuration
         sub.menuTimeout = menuTimeout
         sub.device = device

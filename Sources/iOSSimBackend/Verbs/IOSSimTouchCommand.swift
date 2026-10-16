@@ -59,8 +59,8 @@ public struct IOSSimTouchCommand: SimUseExecutableCommand {
     @Option(name: .customLong("delay"), help: "Delay between touch down and up events in seconds (if both are specified).")
     public var delay: Double?
 
-    @Option(name: .customLong("coordinate-space"), help: "Space the coordinates are given in: 'native' (device-native portrait, the default) or 'ui' (visual space as printed by describe-ui; orientation-calibrated). 'ui' requires the atomic --down --up form — the split form could straddle a rotation and land the two halves in different spaces.")
-    public var coordinateSpace: CoordinateSpace = .native
+    @Option(name: .customLong("coordinate-space"), help: "Space the coordinates are given in: 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated) or 'native' (the device's native portrait points, no calibration). In the split form each half is calibrated when it is sent.")
+    public var coordinateSpace: CoordinateSpace = .ui
 
     @OptionGroup public var device: DeviceOptions
 
@@ -97,7 +97,7 @@ public struct IOSSimTouchCommand: SimUseExecutableCommand {
         touchDown: Bool,
         touchUp: Bool,
         delay: Double?,
-        coordinateSpace: CoordinateSpace = .native
+        coordinateSpace: CoordinateSpace = .ui
     ) throws {
         guard pointX >= 0, pointY >= 0 else {
             throw ValidationError("Coordinates must be non-negative values.")
@@ -105,16 +105,6 @@ public struct IOSSimTouchCommand: SimUseExecutableCommand {
 
         guard touchDown || touchUp else {
             throw ValidationError("At least one of --down or --up must be specified.")
-        }
-
-        // A split touch (--down and --up in separate invocations) can
-        // straddle a rotation: the two halves would calibrate
-        // independently and land in different spaces. Restrict ui
-        // coordinates to the atomic form.
-        if coordinateSpace == .ui {
-            guard touchDown && touchUp else {
-                throw ValidationError("--coordinate-space ui requires the atomic --down --up form. Use native coordinates for split touches.")
-            }
         }
 
         if let delay {
@@ -139,14 +129,15 @@ public struct IOSSimTouchCommand: SimUseExecutableCommand {
 
         logger.info().log("Performing touch events at (\(pointX), \(pointY))")
 
-        // ui space is atomic-form-only (validated above), so a single
-        // calibration covers both halves of the touch.
+        // One calibration covers both halves of the atomic form. A split
+        // half is calibrated when it is sent, so it lands where the point
+        // is on screen at that time.
         var advisory: CommandAdvisory? = nil
         let point: (x: Double, y: Double)
         if coordinateSpace == .ui {
             let calibration = await UISpaceCalibrationLoader.load(
                 udid: device.resolved,
-                fallbackMessage: "Screen orientation could not be determined; --coordinate-space ui coordinates were dispatched as device-native portrait and may be wrong if the device is rotated.",
+                fallbackMessage: UISpaceCalibrationLoader.explicitCoordinatesFallback,
                 logger: logger
             )
             advisory = calibration.advisory
