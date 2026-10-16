@@ -55,11 +55,57 @@ struct HIDRebootRecoveryTests {
         tapCount = UIStateParser.findElementContainingLabel(in: uiState, containing: "Tap Count:")
         #expect(tapCount?.label == "Tap Count: 1", "Tap after reboot should land through the rebuilt HID connection")
 
+        // 4. A Resize Mode session after the reboot, through the same
+        // daemon (R158-04): display UUIDs change per boot, so the session's
+        // display must be found despite the topology cached before the
+        // reboot. Skipped where CoreDevice cannot host a session.
+        if let session = try await startResizeSession(udid: udid) {
+            defer { if session.isRunning { session.terminate() } }
+            // A raw tap alone can ride the "no session" answer step 3 just
+            // cached (documented 5 s window); `ui` sees the new scene.
+            _ = try await TestHelpers.runSimUseCommand("ui", simulatorUDID: udid)
+            try await TestHelpers.runSimUseCommand("tap -x 100 -y 300", simulatorUDID: udid)
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+            uiState = try await TestHelpers.getUIState()
+            let location = UIStateParser.findElementContainingLabel(in: uiState, containing: "Tap Location:")
+            #expect(location?.label == "Tap Location: (100, 300)", "A tap in a post-reboot Resize Mode session should land at the scene point")
+            session.terminate()
+            while session.isRunning { try await Task.sleep(nanoseconds: 50_000_000) }
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+
         // Guard against vacuity: if the daemon died and respawned along
         // the way, step 3 exercised a fresh process instead of the
         // cached-connection path this suite exists to cover.
         let daemonPIDAfter = try await daemonPID(for: udid)
         #expect(daemonPIDBefore == daemonPIDAfter, "The daemon must survive the reboot for this test to be meaningful")
+    }
+
+    /// Starts `devicectl device appResize start` (560x874) and waits for
+    /// CoreDevice to report the session; nil where it cannot host one.
+    private func startResizeSession(udid: String) async throws -> Process? {
+        func active() async -> Bool? {
+            guard let (output, _) = try? await CommandRunner.run(
+                "xcrun devicectl device info appResize --device \(udid) --json-output - --timeout 5 --quiet 2>/dev/null",
+                allowFailure: true
+            ), let json = try? JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any] else { return nil }
+            if json["result"] != nil { return true }
+            if let error = json["error"] as? [String: Any], (error["code"] as? Int) == 24004 { return false }
+            return nil
+        }
+        guard await active() != nil else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments = ["devicectl", "device", "appResize", "start", "--device", udid, "--preferred-size", "560x874"]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        for _ in 0..<20 {
+            if await active() == true { return process }
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
+        process.terminate()
+        throw TestError.unexpectedState("devicectl appResize start did not produce an active session within 10 s")
     }
 
     /// The per-UDID daemon's pid, read from its pidfile under the

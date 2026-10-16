@@ -249,7 +249,7 @@ public actor ResizableAppSessionMonitor {
                 if sceneChanged || (deviceSizedRoot && !entry.deviceSizedRoot) {
                     probeCount += 1
                     let state = probe(udid)
-                    cache[udid] = CacheEntry(state: state, checkedAt: now, evidence: evidence, deviceSizedRoot: true)
+                    cache[udid] = CacheEntry(state: state, checkedAt: now, evidence: evidence, deviceSizedRoot: deviceSizedRoot)
                     return state
                 }
                 return entry.state

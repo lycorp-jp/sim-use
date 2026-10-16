@@ -509,8 +509,14 @@ public struct AccessibilityFetcher {
         let native = NativePortraitSize(screenInfo: target.screenInfo)
         let info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
         let rootFrame = rawDisplayFrame(in: rawRoots(of: info))
+        // The same session and topology signals as the full fetch: a scene
+        // that just changed (a session started or ended) re-checks the
+        // cached routing before this calibration is used (R158-03).
+        let sceneEvidence = Self.resizedSceneEvidence(info: info, native: native)
         let routing = await RoutingDisplayResolver.current(
             udid: simulatorUDID,
+            evidence: sceneEvidence,
+            deviceSizedRoot: sceneEvidence == nil && rootFrame != nil && native != nil,
             rootSize: rootFrame.map { SimulatorDisplayTopologyMonitor.RootSize(width: Double($0.width), height: Double($0.height)) }
         )
         let displayId = routing.accessibilityDisplayID

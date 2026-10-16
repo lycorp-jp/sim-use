@@ -692,3 +692,30 @@ struct ResizableSessionChangedEvidenceTests {
         #expect(await monitor.probeCount == 2)
     }
 }
+
+@Suite("ResizableAppSessionMonitor — the scene re-check records the real root signal (R158-01 follow-up)")
+struct ResizableSessionRecheckFlagTests {
+    final class Answers: @unchecked Sendable {
+        private let lock = NSLock()
+        private var queue: [ResizableAppSessionState]
+        init(_ queue: [ResizableAppSessionState]) { self.queue = queue }
+        func next() -> ResizableAppSessionState {
+            lock.lock(); defer { lock.unlock() }
+            return queue.count > 1 ? queue.removeFirst() : queue[0]
+        }
+    }
+
+    @Test("active without evidence → active with resized evidence → the device-sized root after the session re-checks")
+    func deviceSizedRootAfterSceneRecheck() async {
+        let answers = Answers([.active(sampleSession), .active(sampleSession), .inactive])
+        let frozen = Date(timeIntervalSince1970: 0)
+        let monitor = ResizableAppSessionMonitor(ttl: 60, clock: { frozen }, probe: { _ in answers.next() }, environment: [:])
+        // A raw lookup (no tree) caches active.
+        #expect(await monitor.state(for: "U").session == sampleSession)
+        // The tree shows the 560x874 scene: re-checked, still active.
+        #expect(await monitor.state(for: "U", evidence: .init(width: 560, height: 874), deviceSizedRoot: false).session == sampleSession)
+        // The session ended; the root is the device's own size again.
+        #expect(await monitor.state(for: "U", deviceSizedRoot: true) == .inactive)
+        #expect(await monitor.probeCount == 3)
+    }
+}

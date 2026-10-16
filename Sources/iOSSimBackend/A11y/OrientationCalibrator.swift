@@ -409,13 +409,15 @@ public enum OrientationCalibrator {
         logger: SimUseLogger,
         maxProbes: Int = defaultMaxProbes
     ) async -> OrientationCalibration {
-        guard let session = try? await AXProbeSession.make(udid: udid, logger: logger) else {
+        let display = AXDisplayFrame.frame(in: roots)
+        guard let session = try? await AXProbeSession.make(
+            udid: udid, logger: logger, rootSize: display.map { CGSize(width: $0.width, height: $0.height) }
+        ) else {
             return .identity(advisory: CommandAdvisory(
                 kind: .orientationCalibrationFallback,
                 message: "Simulator unreachable for orientation calibration; assuming portrait orientation."
             ))
         }
-        let display = AXDisplayFrame.frame(in: roots)
         let scene = display.map { CGSize(width: $0.width, height: $0.height) }
         if let fixed = session.fixedCalibration(sceneSize: scene) {
             return await resolveSceneOffset(
@@ -676,7 +678,10 @@ public struct AXProbeSession {
         routing.fixedCalibration(sceneSize: sceneSize)
     }
 
-    public static func make(udid: String, logger: SimUseLogger) async throws -> AXProbeSession {
+    /// `rootSize` is the size of a tree the caller just fetched: like the
+    /// full fetch, a scene that changed re-checks the cached routing first.
+    /// Pass nil for a snapshot read earlier (the tap-alias path).
+    public static func make(udid: String, logger: SimUseLogger, rootSize: CGSize? = nil) async throws -> AXProbeSession {
         let simulatorSet = try await getSimulatorSet(
             deviceSetPath: nil,
             logger: logger,
@@ -685,7 +690,21 @@ public struct AXProbeSession {
         guard let target = simulatorSet.allSimulators.first(where: { $0.udid == udid }) else {
             throw CLIError(errorDescription: "Simulator with UDID \(udid) not found in set.")
         }
-        let routing = await RoutingDisplayResolver.current(udid: udid)
+        let native = NativePortraitSize(screenInfo: target.screenInfo)
+        var evidence: ResizableAppSessionMonitor.SceneEvidence?
+        var deviceSizedRoot = false
+        if let rootSize, let native {
+            let width = Double(rootSize.width), height = Double(rootSize.height)
+            let matchesDevice = (abs(width - native.width) <= 1 && abs(height - native.height) <= 1)
+                || (abs(width - native.height) <= 1 && abs(height - native.width) <= 1)
+            if matchesDevice { deviceSizedRoot = true } else { evidence = .init(width: width, height: height) }
+        }
+        let routing = await RoutingDisplayResolver.current(
+            udid: udid,
+            evidence: evidence,
+            deviceSizedRoot: deviceSizedRoot,
+            rootSize: rootSize.map { SimulatorDisplayTopologyMonitor.RootSize(width: Double($0.width), height: Double($0.height)) }
+        )
         let displayId = routing.accessibilityDisplayID
         let probe: OrientationCalibrator.HitTestProbe = { point in
             let raw: AnyObject = try await target.legacyAccessibilityElement(at: point, nestedFormat: false, displayId: displayId)
@@ -693,7 +712,7 @@ public struct AXProbeSession {
         }
         return AXProbeSession(
             probe: probe,
-            native: NativePortraitSize(screenInfo: target.screenInfo),
+            native: native,
             routing: routing,
             authoritative: CoreDeviceOrientation.provider(udid: udid)
         )

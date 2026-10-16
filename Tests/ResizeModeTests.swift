@@ -195,6 +195,31 @@ struct ResizeModeTests {
         await session.end()
     }
 
+    @Test("the first directional gesture after a session starts, and after it ends, reaches the app (R158-03)")
+    func firstGestureFollowsSession() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "gesture-presets")
+        func detected() async throws -> String? {
+            let ui = try await TestHelpers.getUIState(simulatorUDID: udid)
+            return UIStateParser.findElementContainingLabel(in: ui, containing: "Detected:")?.label
+        }
+        // Warm "no session" in the daemon, then start one with no `ui` in
+        // between: the gesture's own calibration fetch must see the scene.
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+        _ = try await CommandRunner.run("\(simUse) gesture scroll-up --duration 0.4 --udid \(udid)")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        #expect(try await detected() == "Detected: 1", "the first gesture in the session must land")
+
+        // End it, again with no `ui` before the gesture.
+        await session.end()
+        _ = try await CommandRunner.run("\(simUse) gesture scroll-up --duration 0.4 --udid \(udid)")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        #expect(try await detected() == "Detected: 2", "the first gesture after the session must land on the main display")
+    }
+
     @Test("record-video and stream-video are refused during a session, before producing output (R150-06)")
     func videoCaptureRefused() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()

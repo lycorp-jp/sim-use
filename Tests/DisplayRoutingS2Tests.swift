@@ -317,3 +317,59 @@ struct SceneOffsetTests {
         #expect(result.advisory == nil)
     }
 }
+
+// MARK: - Reboot (R158-04)
+
+@Suite("RoutingDisplayResolver — a session display missing from a cached topology")
+struct RoutingDisplayRebootTests {
+    final class Boots: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        let before: SimulatorDisplayTopology
+        let after: SimulatorDisplayTopology
+        init(before: SimulatorDisplayTopology, after: SimulatorDisplayTopology) { self.before = before; self.after = after }
+        func probe() -> SimulatorDisplayTopologyState {
+            lock.lock(); defer { lock.unlock() }
+            count += 1
+            return .available(count == 1 ? before : after)
+        }
+    }
+
+    @Test("after a reboot the permanent single-display answer is refreshed once to find the new Resizable display")
+    func rebootRefreshesForNewSessionDisplay() async throws {
+        let oldBoot = try topology("iphone17")
+        let oldResizable = try #require(oldBoot.displays.first { $0.kind == .virtual })
+        // Same displays, new UUIDs: the next boot.
+        let newResizableID = "11111111-2222-3333-4444-555555555555"
+        let newBoot = SimulatorDisplayTopology(
+            displays: oldBoot.displays.map {
+                SimulatorDisplay(
+                    displayID: $0.displayID, uniqueID: $0.kind == .virtual ? newResizableID : "LCD-NEW", name: $0.name, kind: $0.kind,
+                    isPrimary: $0.isPrimary, isActive: $0.isActive, backlightState: $0.backlightState, rotation: $0.rotation,
+                    pixelWidth: $0.pixelWidth, pixelHeight: $0.pixelHeight, pointScale: $0.pointScale
+                )
+            },
+            deviceOrientation: "portrait"
+        )
+        let boots = Boots(before: oldBoot, after: newBoot)
+        let topologies = SimulatorDisplayTopologyMonitor(probe: { _ in boots.probe() }, environment: [:])
+        // Warmed before the reboot: permanent single-display answer.
+        _ = await topologies.state(for: "U")
+        #expect(oldResizable.uniqueID != newResizableID)
+
+        let session = ResizableAppSession(displayUniqueID: newResizableID, displayName: "Resizable", preferredWidth: 560, preferredHeight: 874)
+        let sessions = ResizableAppSessionMonitor(probe: { _ in .active(session) }, environment: [:])
+        let routing = await RoutingDisplayResolver.current(udid: "U", sessionMonitor: sessions, topologyMonitor: topologies)
+        guard case .resizable(_, let display) = routing else {
+            Issue.record("expected the Resizable display, got \(routing)")
+            return
+        }
+        #expect(display?.uniqueID == newResizableID)
+        #expect(try routing.hidRoute()?.digitizerTarget == 4)
+        #expect(await topologies.probeCount == 2)
+
+        // Found now: no further refresh.
+        _ = await RoutingDisplayResolver.current(udid: "U", sessionMonitor: sessions, topologyMonitor: topologies)
+        #expect(await topologies.probeCount == 2)
+    }
+}

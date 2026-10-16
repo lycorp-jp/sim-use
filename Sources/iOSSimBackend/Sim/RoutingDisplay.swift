@@ -208,7 +208,16 @@ public enum RoutingDisplayResolver {
         topologyMonitor: SimulatorDisplayTopologyMonitor = .shared
     ) async -> RoutingDisplay {
         let session = await sessionMonitor.state(for: udid, evidence: evidence, deviceSizedRoot: deviceSizedRoot)
-        let topology = await topologyMonitor.state(for: udid, rootSize: rootSize)
+        var topology = await topologyMonitor.state(for: udid, rootSize: rootSize)
+        // Display UUIDs change on every boot, and a single-display answer is
+        // kept for the life of the daemon: a session display the cached
+        // topology does not list means the simulator rebooted since. Read
+        // the topology again once (R158-04).
+        if case .active(let resizable) = session,
+           let cached = topology.topology, cached.display(uniqueID: resizable.displayUniqueID) == nil
+        {
+            topology = await topologyMonitor.state(for: udid, fresh: true)
+        }
         return resolve(session: session, topology: topology)
     }
 }
