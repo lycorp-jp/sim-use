@@ -220,6 +220,30 @@ struct ResizeModeTests {
         #expect(try await detected() == "Detected: 2", "the first gesture after the session must land on the main display")
     }
 
+    @Test("the first point query after a session starts, and after it ends, describes the app (R158-05)")
+    func firstPointQueryFollowsSession() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+        func pointQuery() async throws -> (app: String?, display: String?) {
+            let (output, _) = try await CommandRunner.run("\(simUse) ui --point 200,300 --json --no-raw --udid \(udid) 2>/dev/null")
+            let data = try Self.json(output)["data"] as? [String: Any]
+            return (data?["appPackage"] as? String, (data?["display"] as? [String: Any])?["name"] as? String)
+        }
+        // Warm "no session", then make a point query the first command.
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+        let during = try await pointQuery()
+        #expect(during.app == "com.cameroncooke.SimUsePlayground", "the point query must describe the resized app, got \(String(describing: during.app))")
+        #expect(during.display == "Resizable")
+
+        await session.end()
+        let after = try await pointQuery()
+        #expect(after.app == "com.cameroncooke.SimUsePlayground")
+        #expect(after.display == nil)
+    }
+
     @Test("record-video and stream-video are refused during a session, before producing output (R150-06)")
     func videoCaptureRefused() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()

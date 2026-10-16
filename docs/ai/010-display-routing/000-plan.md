@@ -348,6 +348,6 @@ refuse with a message that names the requirement.
 10. devicectl `currentOrientation` also works on single-display devices (E10). It could replace the hit-test calibrator everywhere, which is what the idb migration needs (facebook/idb#980). Out of scope here; record as a follow-up.
 11. Resize Mode on the Duo inner display: refused at `rot90` (E17). Not tested at inner `rot0`.
 12. `gesture rotate-cw` / `rotate-ccw` are not detected by the Playground on the cover, the inner display or a single-display iPhone 17 (pre-existing, display-independent). Not investigated here.
-13. Resolved in review (R158-02): on a multi-display simulator, and off the main display, `describe-ui --point` fetches the tree first and uses the same routing, calibration and scene placement as the full outline. A single-display simulator keeps the one-probe fast path, so a windowed (inset) iPad scene is still queried without an offset there.
+13. Resolved in review (R158-02): on a multi-display simulator, and off the main display, `describe-ui --point` fetches the tree first and uses the same routing, calibration and scene placement as the full outline. Review R158-05 then removed the single-display fast path too: it answered from a cached routing check, so the first point query after a Resize Mode session started hit SpringBoard. Every point query now fetches the tree first (one more tree fetch on an upright single-display simulator), and `OrientationCalibrator.soleOrientation` is gone.
 
 ## Amendments

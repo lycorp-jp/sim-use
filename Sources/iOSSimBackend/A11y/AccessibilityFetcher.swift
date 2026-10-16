@@ -123,28 +123,11 @@ public struct AccessibilityFetcher {
         }
         let authoritative = CoreDeviceOrientation.provider(udid: simulatorUDID)
 
-        if let point {
-            // On a single-display simulator with the app on its only
-            // display, the point query keeps its one-probe fast path. Every
-            // other case needs the tree first: the routing display, its
-            // calibration and the place of an inset scene come from it
-            // (R158-02), exactly as for the full outline below.
-            let cachedRouting = await RoutingDisplayResolver.current(udid: simulatorUDID)
-            let multiDisplay = await SimulatorDisplayTopologyMonitor.shared.state(for: simulatorUDID).topology?.isMultiDisplay ?? false
-            perf.stage("routing display check")
-            if cachedRouting.isMain, !multiDisplay {
-                return try await pointQuery(
-                    target: target,
-                    point: point,
-                    native: native,
-                    probe: makeProbe(displayId: 0),
-                    authoritative: authoritative,
-                    logger: logger,
-                    perf: perf
-                )
-            }
-        }
-
+        // A point query fetches the tree first, like the full outline: the
+        // routing display (a Resize Mode session that just started, an
+        // unfolded iPhone Duo), its calibration and the place of an inset
+        // scene all come from it (R158-02, R158-05). A cached routing
+        // answer alone could describe the main display's SpringBoard.
         var info: AnyObject = try await target.legacyAccessibilityElements(nestedFormat: true)
         perf.stage("tree fetch XPC")
 
@@ -373,120 +356,7 @@ public struct AccessibilityFetcher {
         }
     }
 
-    // MARK: - Point query (UI-space semantics)
-
-    /// `--point` coordinates are UI space — the space every printed frame
-    /// uses. The hit-test XPC consumes points on native-portrait axes,
-    /// so a rotated device needs the query transformed. The first probe doubles as
-    /// calibration evidence: its returned frame settles the orientation
-    /// only when exactly one candidate maps the probe point into it. Any
-    /// tie (a fat frame containing several projections proves nothing)
-    /// falls through to a full tree calibration — giving portrait the tie
-    /// would return the wrong element on rotated devices.
-    ///
-    /// The hit-test consumes UI-METRIC points on native-portrait axes
-    /// (verified live on a display-downscaled iPhone 12 mini — see
-    /// `NativePortraitSize.uiMetric`), so in portrait the identity probe
-    /// queries the exact requested point on every device, downscaled or
-    /// not, and the fast path stays single-probe. Only the HID dispatch
-    /// side of a calibration carries the `UIPointScale`.
-    ///
-    /// One deliberate gap: the fast path's bounds gate below compares
-    /// against the native (pixels/scale) portrait size, because no scale
-    /// is known before a tree is fetched. On a downscaled panel, points
-    /// in the UI-only edge bands (x in 360..<375, y in 780..<812 on the
-    /// mini) skip the identity probe and take the tree-calibration
-    /// fallback — same result, one tree fetch slower. Widening the gate
-    /// would not help: `soleOrientation` clamps its projections to the
-    /// native canvas, so a probe out there could never settle anything.
-    private static func pointQuery(
-        target: FBSimulator,
-        point: AccessibilityPoint,
-        native: NativePortraitSize?,
-        probe: @escaping CollapsedChildrenRecovery.PointProbe,
-        authoritative: @escaping AuthoritativeOrientation,
-        logger: SimUseLogger,
-        perf: PerfLog
-    ) async throws -> FetchResult {
-        func nestedQuery(_ p: CGPoint) async throws -> AnyObject {
-            try await target.legacyAccessibilityElement(at: p, nestedFormat: true)
-        }
-
-        guard let native else {
-            // No screen info — keep the legacy raw-space behavior.
-            let info = try await nestedQuery(point.cgPoint)
-            perf.stage("point XPC")
-            let data = try serializeAccessibilityInfo(info)
-            perf.finish()
-            return FetchResult(data: data, calibration: .identity())
-        }
-
-        var orientation: DisplayOrientation? = nil
-        var identityResult: AnyObject? = nil
-        var calibration: OrientationCalibration? = nil
-
-        if point.x < native.width, point.y < native.height {
-            if let raw = try? await nestedQuery(point.cgPoint) {
-                perf.stage("point XPC")
-                identityResult = raw
-                if let dict = raw as? [String: Any],
-                   let frame = OrientationCalibrator.frameRect(of: dict) {
-                    orientation = OrientationCalibrator.soleOrientation(
-                        mapping: point.cgPoint, into: frame, native: native
-                    )
-                }
-            }
-        }
-        // A UI point outside the native portrait bounds can only exist in
-        // a landscape UI — the identity probe was skipped above and the
-        // tree calibration below settles which landscape.
-
-        if orientation == nil {
-            if let info: AnyObject = try? await target.legacyAccessibilityElements(nestedFormat: true) {
-                perf.stage("tree fetch XPC (point calibration)")
-                let treeCalibration = await calibrate(info: info, native: native, probe: probe, logger: logger, authoritative: authoritative)
-                calibration = treeCalibration
-                orientation = treeCalibration.orientation
-            }
-        }
-
-        let resolved = orientation ?? .portrait
-        // `orientation == nil` here means both the identity probe and the
-        // tree-fetch calibration failed to settle anything — that is a
-        // degraded portrait guess, not a clean single-probe confirmation,
-        // and must say so.
-        let finalCalibration = calibration ?? OrientationCalibration(
-            orientation: resolved,
-            native: native,
-            probesUsed: 1,
-            advisory: orientation == nil
-                ? CommandAdvisory(
-                    kind: .orientationCalibrationFallback,
-                    message: "Orientation could not be confirmed for the point query; assuming portrait. The result may be wrong if the device is rotated."
-                )
-                : nil
-        )
-
-        let info: AnyObject
-        // The hit-test consumes UI-METRIC points on native-portrait
-        // axes, so the portrait probe transform is the identity even on
-        // display-downscaled devices — the identity probe already
-        // queried the right point and its result is reusable. Rotated
-        // devices re-issue through `probeCGPoint` (axes only, never the
-        // HID metric scale).
-        if resolved == .portrait, let identityResult {
-            info = identityResult
-        } else {
-            info = try await nestedQuery(finalCalibration.probeCGPoint(point.cgPoint))
-            perf.stage("point XPC (transformed)")
-        }
-        let data = try serializeAccessibilityInfo(info)
-        perf.stage("serialize")
-        perf.finish()
-        // The calibration advisory reaches callers through
-        // `calibration.advisory`.
-        return FetchResult(data: data, calibration: finalCalibration)
-    }
+    // MARK: - Calibration only
 
     /// Orientation calibration WITHOUT the collapsed-children recovery
     /// walk — for verbs that need the current orientation but not the

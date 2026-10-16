@@ -86,8 +86,7 @@ public struct OrientationCalibration: Sendable {
     /// METRIC (see ``NativePortraitSize/uiMetric(_:)``), so this rotates
     /// on the UI-sized canvas and never applies the HID metric scale.
     /// Portrait is always the identity — even on display-downscaled
-    /// devices — which is what keeps the single-probe fast paths valid
-    /// there.
+    /// devices.
     public func probeCGPoint(_ p: CGPoint) -> CGPoint {
         guard let native else { return p }
         guard orientation != .portrait || sceneOffset != .zero else { return p }
@@ -596,32 +595,6 @@ public enum OrientationCalibrator {
             }
         }
         return false
-    }
-
-    /// The single orientation under which `probePoint` projects into
-    /// `hitFrame` (± `containmentSlack`), or nil when zero or several
-    /// orientations do. An ambiguous hit must not pick a winner: the
-    /// `--point` fast path used to give portrait the tie, so on a
-    /// rotated device a raw hit landing on a large frame confidently
-    /// returned the wrong element as `orientation: portrait` with no
-    /// advisory.
-    ///
-    /// Runs before any `UIPointScale` is known, so the non-portrait
-    /// projections use the native canvas — on a display-downscaled
-    /// device they carry up to ~4% error, which can only make this MORE
-    /// conservative (a missed containment falls through to the full
-    /// tree calibration). The portrait projection is the identity and
-    /// exact everywhere.
-    nonisolated static func soleOrientation(
-        mapping probePoint: CGPoint,
-        into hitFrame: CGRect,
-        native: NativePortraitSize
-    ) -> DisplayOrientation? {
-        let expanded = hitFrame.insetBy(dx: -containmentSlack, dy: -containmentSlack)
-        let contained = DisplayOrientation.allCases.filter {
-            expanded.contains($0.framebufferToUI(probePoint, native: native))
-        }
-        return contained.count == 1 ? contained.first : nil
     }
 
     nonisolated static func frameRect(of node: [String: Any]) -> CGRect? {
