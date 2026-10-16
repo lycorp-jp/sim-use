@@ -19,9 +19,10 @@ import SimUseCore
 ///    button both inside it — or at least two tabs stacked vertically.
 /// 3. The app's wide content stays clear of the bar: at least one wide
 ///    element exists, and nothing except a container (full screen, or a
-///    full-width group) crosses the bar's inner edge. On a regular iPhone
-///    the back button and row icons share the leading strip, but every
-///    row runs across it.
+///    full-width group) crosses the bar's inner edge beside the bar. On a
+///    regular iPhone the back button and row icons share the leading
+///    strip, but every row runs across it. An app's own header above the
+///    bar may start inside the strip (LINE on the cover in landscape-right).
 ///
 /// Work record: docs/ai/010-display-routing/000-plan.md (S4).
 enum OutlineSideBars {
@@ -70,16 +71,17 @@ enum OutlineSideBars {
             case .trailing: return f.x >= screen.width - maxBarWidth
             }
         }
-        let candidates = items.filter { inStrip($0.frame) }
-        let backButtons = candidates.filter { $0.uniqueId == "BackButton" }
-        let tabs = candidates.filter { tab in
-            guard let role = tab.role, anchorRoles.contains(role) else { return false }
-            // A tab with a sibling tab beside it outside the strip is the
-            // edge of a horizontal tab bar.
-            return !items.contains { other in
-                other.role == role && !inStrip(other.frame) && abs(other.frame.y - tab.frame.y) <= 2
+        // A tab with a sibling tab beside it outside the strip is the edge
+        // of a horizontal tab bar or a segmented control, not bar chrome.
+        func inHorizontalTabRow(_ item: Item) -> Bool {
+            guard let role = item.role, anchorRoles.contains(role) else { return false }
+            return items.contains { other in
+                other.role == role && !inStrip(other.frame) && abs(other.frame.y - item.frame.y) <= 2
             }
         }
+        let candidates = items.filter { inStrip($0.frame) && !inHorizontalTabRow($0) }
+        let backButtons = candidates.filter { $0.uniqueId == "BackButton" }
+        let tabs = candidates.filter { $0.role.map(anchorRoles.contains) == true }
         let anchors = backButtons + tabs
         guard let firstAnchor = anchors.first else { return nil }
 
@@ -100,10 +102,14 @@ enum OutlineSideBars {
         case .trailing: boundary = members.map(\.frame.x).min() ?? screen.width
         }
 
-        // Content stays on its own side of the bar.
+        // Content beside the bar stays on its own side.
         let content = items.filter { !isContainer($0, screen: screen) }.map(\.frame)
         guard content.contains(where: { $0.width * 2 >= screen.width }) else { return nil }
-        let crossed = content.contains { $0.x < boundary && $0.x + $0.width > boundary }
+        let barTop = members.map(\.frame.y).min() ?? 0
+        let barBottom = members.map { $0.frame.y + $0.frame.height }.max() ?? screen.height
+        let crossed = content.contains {
+            $0.x < boundary && $0.x + $0.width > boundary && $0.y < barBottom && $0.y + $0.height > barTop
+        }
         guard !crossed else { return nil }
         return Bar(edge: edge, boundary: boundary)
     }
