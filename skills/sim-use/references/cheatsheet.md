@@ -25,9 +25,9 @@ sim-use tap --id Safari                 # by accessibility identifier
 sim-use tap --label "General"           # by exact label
 sim-use tap --label-contains "Order"    # substring match
 sim-use tap --label-regex '^Chat.*\d+$' # ICU regex
-sim-use tap -x 100 -y 200              # absolute coordinates (last resort)
+sim-use tap -x 100 -y 200              # outline coordinates (last resort; any orientation)
 sim-use tap --point 100,200             # same, pair form
-sim-use tap -x 100 -y 200 --coordinate-space ui   # outline (visual-space) coords on a rotated device
+sim-use tap -x 100 -y 200 --coordinate-space native   # device-native portrait points
 ```
 
 ## Disambiguating with --frame

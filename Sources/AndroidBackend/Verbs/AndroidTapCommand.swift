@@ -49,7 +49,7 @@ public struct AndroidTapCommand: SimUseExecutableCommand {
     public var elementType: String?
 
     @Option(name: .customLong("coordinate-space"), help: "Accepted for parity with the iOS surface and ignored: Android coordinates are always display space, which already rotates with the UI.")
-    public var coordinateSpace: CoordinateSpace = .native
+    public var coordinateSpace: CoordinateSpace = .ui
 
     @Option(
         name: .customLong("duration"),

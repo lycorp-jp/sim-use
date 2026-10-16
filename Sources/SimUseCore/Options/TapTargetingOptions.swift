@@ -53,8 +53,12 @@ public struct TapTargetingOptions: ParsableArguments {
     )
     public var frameSpecs: [String] = []
 
-    @Option(name: .customLong("coordinate-space"), help: "iOS only, explicit -x/-y/--point coordinates only: 'native' (device-native portrait, the default and historical contract) or 'ui' (visual space as printed by describe-ui; orientation-calibrated so outline coordinates stay correct on a rotated device). Aliases and selectors are always resolved in ui space and reject this flag. Android coordinates are always display space, which already rotates with the UI — the flag is accepted and ignored there.")
-    public var coordinateSpace: CoordinateSpace = .native
+    @Option(name: .customLong("coordinate-space"), help: "iOS only, explicit -x/-y/--point coordinates only: 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated so outline coordinates stay correct on a rotated device) or 'native' (the device's native portrait points, no calibration). Aliases and selectors are always resolved in ui space and reject this flag. Android coordinates are always display space, which already rotates with the UI — the flag is accepted and ignored there.")
+    public var coordinateSpace: CoordinateSpace?
+
+    /// The space explicit coordinates are given in: `ui` unless
+    /// `--coordinate-space native` opts out.
+    public var effectiveCoordinateSpace: CoordinateSpace { coordinateSpace ?? .ui }
 
     public init() {}
 
@@ -114,11 +118,11 @@ public struct TapTargetingOptions: ParsableArguments {
         }
 
         // Aliases and selectors resolve to ui-space coordinates and are
-        // calibrated on their own; the opt-in only has a meaning for raw
+        // calibrated on their own; the flag only has a meaning for raw
         // -x/-y/--point input, so reject the combination rather than
         // silently ignoring it.
-        if coordinateSpace == .ui, !hasExplicitCoordinates {
-            throw ValidationError("--coordinate-space ui applies to explicit -x/-y/--point coordinates only; aliases and selectors are already resolved in ui space.")
+        if let coordinateSpace, !hasExplicitCoordinates {
+            throw ValidationError("--coordinate-space \(coordinateSpace.rawValue) applies to explicit -x/-y/--point coordinates only; aliases and selectors are already resolved in ui space.")
         }
 
         if !frameSpecs.isEmpty {

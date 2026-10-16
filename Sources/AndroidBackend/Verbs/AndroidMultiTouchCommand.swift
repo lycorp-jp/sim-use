@@ -59,6 +59,9 @@ public struct AndroidMultiTouchCommand: SimUseExecutableCommand {
     @Option(name: .customLong("post-delay"), help: "Delay after the gesture in seconds.")
     public var postDelay: Double?
 
+    @Option(name: .customLong("coordinate-space"), help: "Accepted for parity with the iOS surface and ignored: Android coordinates are always display space, which already rotates with the UI.")
+    public var coordinateSpace: CoordinateSpace = .ui
+
     @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data: {}}` envelope on success.")
     public var jsonOutput: Bool = false
 

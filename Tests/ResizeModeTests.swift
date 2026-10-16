@@ -220,6 +220,54 @@ struct ResizeModeTests {
         #expect(try await detected() == "Detected: 2", "the first gesture after the session must land on the main display")
     }
 
+    @Test("the first gesture after a session is resized uses the new scene size (R161-01)")
+    func firstGestureAfterResize() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "gesture-presets")
+        guard let session = try await Self.startSession(udid: udid, size: "560x1200") else { return }
+        defer { Task { await session.end() } }
+        // A snapshot of the tall scene; then the session shrinks with no
+        // `ui` before the gesture. The old canvas would put the stroke
+        // below the new scene.
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+        _ = try await CommandRunner.run(
+            "xcrun devicectl device appResize set --device \(udid) --preferred-size 560x667 --quiet --timeout 10")
+        try await Task.sleep(nanoseconds: 1_500_000_000)
+        _ = try await CommandRunner.run("\(simUse) gesture scroll-up --duration 0.4 --udid \(udid)")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let ui = try await TestHelpers.getUIState(simulatorUDID: udid)
+        let detected = UIStateParser.findElementContainingLabel(in: ui, containing: "Detected:")?.label
+        #expect(detected == "Detected: 1", "the gesture must land in the resized scene, got \(String(describing: detected))")
+        await session.end()
+    }
+
+    @Test("the first explicit tap after a session starts, and after it ends, reaches the app (S3)")
+    func firstExplicitTapFollowsSession() async throws {
+        let udid = try TestHelpers.requireSimulatorUDID()
+        let simUse = try TestHelpers.getSimUsePath()
+        try await TestHelpers.launchPlaygroundApp(to: "tap-test")
+        // A device-sized snapshot and a warm "no session"; then the
+        // session starts with no `ui` before the tap. UI-space coordinates
+        // calibrate from the snapshot only when probes confirm it.
+        _ = try await CommandRunner.run("\(simUse) ui --udid \(udid)", allowFailure: true)
+        guard let session = try await Self.startSession(udid: udid) else { return }
+        defer { Task { await session.end() } }
+        _ = try await CommandRunner.run("\(simUse) tap --udid \(udid) -x 450 -y 650")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let (during, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        #expect(Self.tapEcho(during).count == "1", "the first tap in the session must land: \(during.prefix(400))")
+        #expect(Self.tapEcho(during).location == "(450, 650)")
+
+        // The snapshot is now the session's; end it with no `ui` before
+        // the next tap.
+        await session.end()
+        _ = try await CommandRunner.run("\(simUse) tap --udid \(udid) -x 200 -y 400")
+        try await Task.sleep(nanoseconds: 800_000_000)
+        let (after, _) = try await CommandRunner.run("\(simUse) ui --udid \(udid)")
+        #expect(Self.tapEcho(after).count == "2", "the first tap after the session must land on the main display: \(after.prefix(400))")
+    }
+
     @Test("the first point query after a session starts, and after it ends, describes the app (R158-05)")
     func firstPointQueryFollowsSession() async throws {
         let udid = try TestHelpers.requireSimulatorUDID()

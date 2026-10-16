@@ -151,6 +151,9 @@ public enum OrientationCalibrator {
     /// their frames would contain several candidates' projections and
     /// prove nothing.
     public nonisolated static let maxDiscriminatorAreaRatio = 0.4
+    /// Calibration needs a handful of discriminators; trees and snapshots
+    /// can hold thousands of elements.
+    nonisolated static let discriminatorPoolLimit = 40
     /// Containment slack for probe results, mirroring the quadtree's
     /// tolerance for AX frame rounding.
     public nonisolated static let containmentSlack = 2.0
@@ -310,7 +313,7 @@ public enum OrientationCalibrator {
             probesUsed: probesUsed,
             advisory: CommandAdvisory(
                 kind: .orientationCalibrationFallback,
-                message: "Screen orientation could not be confirmed (\(probesUsed) probe(s)); assuming \(guess.rawValue). If the screen changed or the device rotated, re-run describe-ui, or pass explicit -x/-y coordinates."
+                message: "Screen orientation could not be confirmed (\(probesUsed) probe(s)); assuming \(guess.rawValue). If the screen changed or the device rotated, re-run describe-ui, or pass -x/-y with --coordinate-space native (the display's native portrait points)."
             )
         ))
     }
@@ -394,7 +397,7 @@ public enum OrientationCalibrator {
             probesUsed: probesUsed,
             advisory: CommandAdvisory(
                 kind: .orientationCalibrationFallback,
-                message: "The app's \(Int(sceneSize.width))x\(Int(sceneSize.height)) scene is smaller than the \(Int(display.width))x\(Int(display.height)) display and its position could not be confirmed; taps assume it starts at the display origin and may miss. Re-run describe-ui, or pass explicit -x/-y coordinates."
+                message: "The app's \(Int(sceneSize.width))x\(Int(sceneSize.height)) scene is smaller than the \(Int(display.width))x\(Int(display.height)) display and its position could not be confirmed; taps assume it starts at the display origin and may miss. Re-run describe-ui, or pass -x/-y with --coordinate-space native (the display's native portrait points)."
             )
         )
     }
@@ -448,24 +451,135 @@ public enum OrientationCalibrator {
         logger: SimUseLogger,
         maxProbes: Int = defaultMaxProbes
     ) async -> OrientationCalibration {
+        await calibrate(
+            udid: udid,
+            snapshot: payload,
+            discriminators: [snapshotRect(entry)] + payload.entries.filter { $0 != entry }.map(snapshotRect),
+            logger: logger,
+            maxProbes: maxProbes
+        )
+    }
+
+    /// The snapshot calibration for UI-space coordinates that name no
+    /// entry (explicit `-x/-y`, gesture presets), or nil when it cannot be
+    /// trusted. The snapshot path reads no tree, so the routing display
+    /// comes from the daemon's cache and the screen may have changed since
+    /// the snapshot: a Resize Mode session that started, a rotation,
+    /// another screen. The calibration is used only when it settles by
+    /// probes alone — no CoreDevice fallback — and probes under it still
+    /// find the snapshot's elements in place (`confirms`). Otherwise the
+    /// caller reads the tree, which re-checks the routing display.
+    public static func confirmedCalibration(
+        udid: String,
+        snapshot payload: OutlineCache.Payload,
+        logger: SimUseLogger,
+        maxProbes: Int = defaultMaxProbes
+    ) async -> OrientationCalibration? {
+        // The live root size refreshes the routing display exactly as a
+        // tree fetch would (a session that started, ended or was resized),
+        // and a snapshot of another scene size cannot describe this screen.
+        let perf = PerfLog.start()
+        defer { perf.finish("snapshot calibration") }
+        guard let (session, rootSize) = try? await AXProbeSession.makeReadingRoot(udid: udid, logger: logger) else { return nil }
+        perf.stage("snapshot: root frame + routing")
+        let scene = CGSize(width: payload.screen.width, height: payload.screen.height)
+        guard snapshotFits(screen: scene, rootSize: rootSize) else {
+            logger.info().log("OrientationCalibrator: the describe-ui snapshot (\(payload.screen.width)x\(payload.screen.height)) does not fit the current \(rootSize.map { "\(Int($0.width))x\(Int($0.height))" } ?? "unknown") scene")
+            return nil
+        }
+        let center = CGPoint(x: Double(payload.screen.width) / 2, y: Double(payload.screen.height) / 2)
+        let discriminators = Array(payload.entries.map(snapshotRect).sorted {
+            hypot($0.midX - center.x, $0.midY - center.y) > hypot($1.midX - center.x, $1.midY - center.y)
+        }.prefix(discriminatorPoolLimit))
+        let calibration: OrientationCalibration
+        if let fixed = session.fixedCalibration(sceneSize: scene) {
+            calibration = await resolveSceneOffset(
+                fixed, sceneSize: scene, discriminators: discriminators,
+                probe: session.probe, logger: logger
+            )
+        } else {
+            calibration = await calibrate(
+                native: session.native,
+                uiScreenSize: nil,
+                hint: (width: Double(payload.screen.width), height: Double(payload.screen.height)),
+                discriminators: discriminators,
+                probe: session.probe,
+                maxProbes: maxProbes,
+                logger: logger
+            )
+        }
+        perf.stage("snapshot: calibrate")
+        guard calibration.advisory == nil, calibration.native != nil else { return nil }
+        let confirmed = await confirms(
+            calibration, discriminators: discriminators,
+            sceneArea: Double(scene.width * scene.height), probe: session.probe
+        )
+        perf.stage("snapshot: confirm")
+        guard confirmed else {
+            logger.info().log("OrientationCalibrator: the describe-ui snapshot's elements are not in place under \(calibration.orientation.rawValue)")
+            return nil
+        }
+        return calibration
+    }
+
+    /// Whether a snapshot's screen size is the current scene's size. Either
+    /// side order fits: a rotation swaps them (the probes then decide the
+    /// orientation), and on a secondary display the root keeps the panel's
+    /// portrait size while the snapshot has the interface's.
+    nonisolated static func snapshotFits(screen: CGSize, rootSize: CGSize?) -> Bool {
+        guard let rootSize else { return false }
+        func close(_ a: CGFloat, _ b: CGFloat) -> Bool { abs(a - b) <= 1 }
+        return (close(screen.width, rootSize.width) && close(screen.height, rootSize.height))
+            || (close(screen.width, rootSize.height) && close(screen.height, rootSize.width))
+    }
+
+    /// Whether hit-tests under `calibration` find the snapshot's elements
+    /// where the snapshot put them: a probe at an element's centre must hit
+    /// something inside that element's frame. Needs two such hits (one
+    /// when only one element can be probed) within four probes; large
+    /// elements prove nothing and are skipped.
+    static func confirms(
+        _ calibration: OrientationCalibration,
+        discriminators: [CGRect],
+        sceneArea: Double,
+        probe: HitTestProbe,
+        required: Int = 2,
+        maxProbes: Int = 4
+    ) async -> Bool {
+        let usable = discriminators.filter {
+            $0.width > 0 && $0.height > 0 && $0.width * $0.height <= maxDiscriminatorAreaRatio * sceneArea
+        }
+        let needed = min(required, usable.count)
+        guard needed > 0 else { return false }
+        var hits = 0
+        for rect in usable.prefix(maxProbes) {
+            guard let hit = try? await probe(calibration.probeCGPoint(CGPoint(x: rect.midX, y: rect.midY))),
+                  let frame = frameRect(of: hit),
+                  rect.insetBy(dx: -containmentSlack, dy: -containmentSlack).contains(frame)
+            else { continue }
+            hits += 1
+            if hits >= needed { return true }
+        }
+        return false
+    }
+
+    private static func calibrate(
+        udid: String,
+        snapshot payload: OutlineCache.Payload,
+        discriminators: [CGRect],
+        logger: SimUseLogger,
+        maxProbes: Int
+    ) async -> OrientationCalibration {
         guard let session = try? await AXProbeSession.make(udid: udid, logger: logger) else {
             return .identity(advisory: CommandAdvisory(
                 kind: .orientationCalibrationFallback,
                 message: "Simulator unreachable for orientation calibration; assuming portrait orientation."
             ))
         }
-        func rect(_ e: OutlineCache.Payload.Entry) -> CGRect {
-            CGRect(
-                x: Double(e.x) - Double(e.w) / 2,
-                y: Double(e.y) - Double(e.h) / 2,
-                width: Double(e.w),
-                height: Double(e.h)
-            )
-        }
         let scene = CGSize(width: payload.screen.width, height: payload.screen.height)
         if let fixed = session.fixedCalibration(sceneSize: scene) {
             return await resolveSceneOffset(
-                fixed, sceneSize: scene, discriminators: [rect(entry)] + payload.entries.filter { $0 != entry }.map(rect),
+                fixed, sceneSize: scene, discriminators: discriminators,
                 probe: session.probe, logger: logger
             )
         }
@@ -473,11 +587,20 @@ public enum OrientationCalibrator {
             native: session.native,
             uiScreenSize: nil,
             hint: (width: Double(payload.screen.width), height: Double(payload.screen.height)),
-            discriminators: [rect(entry)] + payload.entries.filter { $0 != entry }.map(rect),
+            discriminators: discriminators,
             probe: session.probe,
             maxProbes: maxProbes,
             logger: logger,
             authoritative: session.authoritative
+        )
+    }
+
+    private nonisolated static func snapshotRect(_ e: OutlineCache.Payload.Entry) -> CGRect {
+        CGRect(
+            x: Double(e.x) - Double(e.w) / 2,
+            y: Double(e.y) - Double(e.h) / 2,
+            width: Double(e.w),
+            height: Double(e.h)
         )
     }
 
@@ -559,7 +682,7 @@ public enum OrientationCalibrator {
     static func discriminatorRects(
         from roots: [AccessibilityElement],
         display: AccessibilityElement.Frame?,
-        limit: Int = 40
+        limit: Int = discriminatorPoolLimit
     ) -> [CGRect] {
         let centerX = display.map { $0.x + $0.width / 2 }
         let centerY = display.map { $0.y + $0.height / 2 }
@@ -655,6 +778,19 @@ public struct AXProbeSession {
     /// full fetch, a scene that changed re-checks the cached routing first.
     /// Pass nil for a snapshot read earlier (the tap-alias path).
     public static func make(udid: String, logger: SimUseLogger, rootSize: CGSize? = nil) async throws -> AXProbeSession {
+        try await make(target: target(udid: udid, logger: logger), udid: udid, logger: logger, rootSize: rootSize)
+    }
+
+    /// A session whose routing display is checked against the live root
+    /// size (read without a tree fetch), plus that size; nil when the
+    /// root cannot be read.
+    static func makeReadingRoot(udid: String, logger: SimUseLogger) async throws -> (AXProbeSession, CGSize?) {
+        let target = try await target(udid: udid, logger: logger)
+        let rootSize = (try? await target.frontmostApplicationFrame()).map(\.size)
+        return (try await make(target: target, udid: udid, logger: logger, rootSize: rootSize), rootSize)
+    }
+
+    private static func target(udid: String, logger: SimUseLogger) async throws -> FBSimulator {
         let simulatorSet = try await getSimulatorSet(
             deviceSetPath: nil,
             logger: logger,
@@ -663,6 +799,10 @@ public struct AXProbeSession {
         guard let target = simulatorSet.allSimulators.first(where: { $0.udid == udid }) else {
             throw CLIError(errorDescription: "Simulator with UDID \(udid) not found in set.")
         }
+        return target
+    }
+
+    private static func make(target: FBSimulator, udid: String, logger: SimUseLogger, rootSize: CGSize?) async throws -> AXProbeSession {
         let native = NativePortraitSize(screenInfo: target.screenInfo)
         var evidence: ResizableAppSessionMonitor.SceneEvidence?
         var deviceSizedRoot = false

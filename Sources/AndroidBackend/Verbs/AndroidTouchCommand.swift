@@ -34,7 +34,7 @@ public struct AndroidTouchCommand: SimUseExecutableCommand {
     public var delay: Double?
 
     @Option(name: .customLong("coordinate-space"), help: "Accepted for parity with the iOS surface and ignored: Android coordinates are always display space, which already rotates with the UI.")
-    public var coordinateSpace: CoordinateSpace = .native
+    public var coordinateSpace: CoordinateSpace = .ui
 
     @Flag(name: .customLong("json"), help: "Emit the unified `{ok, data: {}}` envelope on success.")
     public var jsonOutput: Bool = false

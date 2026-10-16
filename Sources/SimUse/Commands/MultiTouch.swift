@@ -93,6 +93,9 @@ struct MultiTouch: SimUseExecutableCommand {
     @Option(name: .customLong("post-delay"), help: "Delay after the gesture in seconds.")
     var postDelay: Double?
 
+    @Option(name: .customLong("coordinate-space"), help: "iOS only: 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated) or 'native' (the device's native portrait points, no calibration). Android coordinates are always display space, which already rotates with the UI — the flag is accepted and ignored there.")
+    var coordinateSpace: CoordinateSpace = .ui
+
     @OptionGroup var device: DeviceOptions
 
     @OptionGroup var json: JSONOutputOptions
@@ -160,6 +163,7 @@ struct MultiTouch: SimUseExecutableCommand {
         sub.stepMs = stepMs
         sub.preDelay = preDelay
         sub.postDelay = postDelay
+        sub.coordinateSpace = coordinateSpace
         sub.device = device
         sub.json = json
         return sub

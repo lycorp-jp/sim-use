@@ -67,6 +67,12 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
     @Option(name: .customLong("target-y"), help: "For --via-menu: Y coordinate to long-press.")
     public var targetY: Double?
 
+    @Option(name: .customLong("coordinate-space"), help: "For --target-x/--target-y: 'ui' (the default; visual space as printed by describe-ui, orientation-calibrated) or 'native' (the device's native portrait points, no calibration).")
+    public var coordinateSpace: CoordinateSpace?
+
+    /// The space `--target-x/-y` are given in.
+    public var effectiveCoordinateSpace: CoordinateSpace { coordinateSpace ?? .ui }
+
     @Option(name: .customLong("long-press-duration"), help: "Seconds to hold on the field for the edit menu to appear (default: 0.8).")
     public var longPressDuration: Double = 0.8
 
@@ -117,7 +123,8 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
             text: text, useStdin: useStdin, inputFile: inputFile,
             viaMenu: viaMenu,
             targetID: targetID,
-            targetX: targetX, targetY: targetY
+            targetX: targetX, targetY: targetY,
+            coordinateSpace: coordinateSpace
         )
     }
 
@@ -130,7 +137,8 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
         viaMenu: Bool,
         targetID: String?,
         targetX: Double?,
-        targetY: Double?
+        targetY: Double?,
+        coordinateSpace: CoordinateSpace? = nil
     ) throws {
         let sourceCount = [text != nil, useStdin, inputFile != nil].filter { $0 }.count
         if sourceCount > 1 {
@@ -157,6 +165,9 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
             }
         } else if targetID != nil || targetX != nil || targetY != nil {
             throw ValidationError("--target-id / --target-x / --target-y are only valid with --via-menu.")
+        }
+        if let coordinateSpace, targetX == nil {
+            throw ValidationError("--coordinate-space \(coordinateSpace.rawValue) applies to --target-x/--target-y only; --target-id is already resolved in ui space.")
         }
     }
 
@@ -232,13 +243,19 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
     // MARK: - Edit-menu paste path
 
     /// Returns the long-press point in HID (framebuffer) space plus the
-    /// orientation calibration when one was computed. Explicit
-    /// `--target-x/y` stays raw by the same contract as `tap -x/-y`;
-    /// `--id` resolves through the AX tree (UI space) and must be
+    /// orientation calibration when one was computed. `--target-x/y`
+    /// follow `tap -x/-y`: UI space unless `--coordinate-space native`;
+    /// `--target-id` resolves through the AX tree (UI space) and must be
     /// transformed (issue #34).
     private func resolveTargetPoint(logger: SimUseLogger) async throws -> ((x: Double, y: Double), OrientationCalibration?) {
         if let x = targetX, let y = targetY {
-            return ((x, y), nil)
+            guard effectiveCoordinateSpace == .ui else { return ((x, y), nil) }
+            let calibration = await UISpaceCalibrationLoader.load(
+                udid: device.resolved,
+                fallbackMessage: UISpaceCalibrationLoader.explicitCoordinatesFallback,
+                logger: logger
+            )
+            return (calibration.hidPoint(x: x, y: y), calibration)
         }
         guard let targetID else {
             throw CLIError(errorDescription: "Internal: --via-menu reached execute without a target.")
@@ -312,9 +329,9 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
                 let x = frame.x + frame.width / 2.0
                 let y = frame.y + frame.height / 2.0
                 // Menu-item centers come from the AX tree (UI space).
-                // Reuse the target resolution's calibration; the
-                // explicit --target-x/y path never calibrated, so probe
-                // now against the tree that contains the match.
+                // Reuse the target resolution's calibration; a native
+                // --target-x/y did not calibrate, so probe now against
+                // the tree that contains the match.
                 let effective: OrientationCalibration
                 if let calibration {
                     effective = calibration

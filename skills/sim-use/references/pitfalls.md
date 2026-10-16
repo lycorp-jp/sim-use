@@ -30,9 +30,9 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 
 **Recipes:**
 1. Normally nothing to do — selectors work in any orientation, and outline/tap coordinates always read in UI space (what you see).
-2. The calibration-fallback advisory means the mapping could not be verified (empty or symmetric screen) and portrait was assumed; re-run `ui` and retry, or use explicit `-x/-y`/`--point`.
+2. The calibration-fallback advisory means the mapping could not be verified (empty or symmetric screen) and portrait was assumed; re-run `ui` and retry, or pass `-x/-y` with `--coordinate-space native` (device-native portrait points).
 3. A "snapshot was captured at WxH…" advisory means the device rotated after the last `ui`; re-run `ui` to refresh the `@N` table.
-4. Explicit `-x/-y`/`--point` (and `--target-x/y`) are never transformed — they are device-native portrait coordinates by contract.
+4. Explicit `-x/-y`/`--point`, `swipe`/`touch`/`multi-touch` coordinates and the pinch/rotate centre take outline (UI-space) numbers and go through the same calibration. `--coordinate-space native` turns it off: the numbers are then device-native portrait points.
 5. `batch` calibrates once per run. If a step rotates the device (or navigates to a screen that forces a different orientation), later selector steps may mis-target — split the flow into separate batches around the rotation.
 
 ## iOS: Resize Mode (resizable app session)
@@ -57,7 +57,7 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 1. Check the posture: `sim-use ios fold --device <UDID>` names the active display and its orientation.
 2. Fold and unfold with `sim-use ios fold closed|open --device <UDID>`; rotate with `sim-use ios rotate <orientation>` (interface names, as the `ui` header prints them). Both clear the `ui` snapshot — re-run `ui` before `tap @N`.
 3. On the cover display of an iOS 27.1 SDK app the back button sits in the vertical bar on the right and has **no label**: tap it with `#BackButton`, not by the previous screen's title.
-4. Explicit `-x/-y` are the inner panel's unrotated points by default; add `--coordinate-space ui` when the numbers come from `ui`.
+4. Explicit `-x/-y` take the numbers `ui` prints on either display; `--coordinate-space native` means the inner panel's unrotated points.
 5. To record video, fold the device so the app is on the cover display.
 
 ## System layer detection

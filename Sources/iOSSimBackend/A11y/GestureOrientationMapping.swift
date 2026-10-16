@@ -48,17 +48,30 @@ public enum GestureOrientationMapping {
 }
 
 /// Shared calibration loader for standalone verbs whose coordinates
-/// run in ui space (directional gesture presets; `--coordinate-space
-/// ui` on swipe/touch). Degrades to an identity dispatch with an
-/// explicit advisory when the simulator cannot be calibrated at all —
-/// never silently.
+/// run in ui space (directional gesture presets, explicit coordinates).
+/// The latest `describe-ui` snapshot calibrates first — a few hit-test
+/// probes, no tree fetch. A full tree fetch (~70 ms on a simple screen,
+/// more on a heavy one) runs when there is no snapshot or probes cannot
+/// confirm it (`OrientationCalibrator.confirmedCalibration`). Degrades to
+/// an identity dispatch with an explicit advisory when the simulator
+/// cannot be calibrated at all — never silently.
 @MainActor
 public enum UISpaceCalibrationLoader {
+    /// The advisory for explicit UI-space coordinates that could not be
+    /// calibrated.
+    public static let explicitCoordinatesFallback = "Screen orientation could not be determined; the coordinates were dispatched as native portrait points and may be wrong if the device is rotated. Run `ui` and try again, or pass --coordinate-space native for native points."
+
     public static func load(
         udid: String,
         fallbackMessage: String,
         logger: SimUseLogger
     ) async -> OrientationCalibration {
+        if let snapshot = try? OutlineCache.read(udid: udid), !snapshot.entries.isEmpty {
+            if let calibration = await OrientationCalibrator.confirmedCalibration(udid: udid, snapshot: snapshot, logger: logger) {
+                return calibration
+            }
+            logger.info().log("The describe-ui snapshot could not be confirmed; fetching the tree")
+        }
         do {
             return try await AccessibilityFetcher.fetchOrientationCalibration(for: udid, logger: logger)
         } catch {

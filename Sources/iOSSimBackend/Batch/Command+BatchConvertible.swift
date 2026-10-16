@@ -36,15 +36,15 @@ private func buildDelayedEvent(
 extension IOSSimTapCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
         // Dispatch coordinates: framebuffer space for AX-resolved
-        // selectors (issue #34), raw for explicit --point/-x/-y unless
-        // `--coordinate-space ui` opts them into the batch-wide
-        // calibration (issue #142).
+        // selectors (issue #34) and for explicit --point/-x/-y through the
+        // batch-wide calibration, unless `--coordinate-space native` keeps
+        // them raw.
         let resolvedPoint: (x: Double, y: Double)
 
         if let explicit = try TapCoordinateResolver.resolve(x: targeting.pointX, y: targeting.pointY, point: targeting.point) {
-            if targeting.coordinateSpace == .ui {
+            if targeting.effectiveCoordinateSpace == .ui {
                 let calibration = await context.uiSpaceCalibration(
-                    fallbackMessage: "Screen orientation could not be determined; --coordinate-space ui coordinates were dispatched as device-native portrait and may be wrong if the device is rotated.",
+                    fallbackMessage: UISpaceCalibrationLoader.explicitCoordinatesFallback,
                     logger: logger
                 )
                 resolvedPoint = calibration.hidPoint(x: explicit.x, y: explicit.y)
@@ -123,7 +123,7 @@ extension IOSSimSwipeCommand: BatchConvertible {
         let coords: (startX: Double, startY: Double, endX: Double, endY: Double)
         if coordinateSpace == .ui {
             let calibration = await context.uiSpaceCalibration(
-                fallbackMessage: "Screen orientation could not be determined; --coordinate-space ui coordinates were dispatched as device-native portrait and may be wrong if the device is rotated.",
+                fallbackMessage: UISpaceCalibrationLoader.explicitCoordinatesFallback,
                 logger: logger
             )
             let start = calibration.hidPoint(x: userCoords.startX, y: userCoords.startY)
@@ -147,31 +147,33 @@ extension IOSSimSwipeCommand: BatchConvertible {
 
 extension IOSSimGestureCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
+        if preset.isMultiTouch {
+            // The same two-finger trajectory as the standalone verb, on the
+            // batch-wide calibration unless `--coordinate-space native`.
+            let calibration: OrientationCalibration? = effectiveCoordinateSpace == .ui
+                ? await context.uiSpaceCalibration(
+                    fallbackMessage: "Screen orientation could not be determined; '\(preset.rawValue)' was laid out in device-native portrait axes and may land in the wrong place if the device is rotated.",
+                    logger: logger
+                )
+                : nil
+            let event = try multiTouchEvent(calibration: calibration, logger: logger)
+            return [.hidBarrier(buildDelayedEvent(preDelay: preDelay, mainEvent: event, postDelay: postDelay))]
+        }
+
+        // Directional presets ride the batch-wide calibration (issue #66) —
+        // computed lazily once per run and shared with tap selector steps.
+        // An unreachable AX tree degrades to an identity dispatch with a
+        // recorded advisory instead of failing the whole batch.
         let gestureDuration = duration ?? preset.defaultDuration
         let gestureDelta = delta ?? preset.defaultDelta
-
-        let coords: (startX: Double, startY: Double, endX: Double, endY: Double)
-        if preset.isMultiTouch {
-            // Multi-touch presets keep the legacy raw dispatch (see the
-            // standalone path for the scope rationale).
-            let width = screenWidth ?? GestureOrientationMapping.legacyWidth
-            let height = screenHeight ?? GestureOrientationMapping.legacyHeight
-            coords = preset.coordinates(screenWidth: width, screenHeight: height)
-        } else {
-            // Directional presets ride the batch-wide calibration
-            // (issue #66) — computed lazily once per run and shared
-            // with tap selector steps. An unreachable AX tree degrades
-            // to an identity dispatch with a recorded advisory instead
-            // of failing the whole batch.
-            let calibration = await context.uiSpaceCalibration(
-                fallbackMessage: "Screen orientation could not be determined; '\(preset.rawValue)' was dispatched in device-native portrait axes and may point the wrong way if the device is rotated.",
-                logger: logger
-            )
-            let visual = GestureOrientationMapping.visualSize(
-                explicitWidth: screenWidth, explicitHeight: screenHeight, calibration: calibration)
-            let stroke = preset.strokes(screenWidth: visual.width, screenHeight: visual.height)[0]
-            coords = GestureOrientationMapping.hidStroke(stroke, calibration: calibration)
-        }
+        let calibration = await context.uiSpaceCalibration(
+            fallbackMessage: "Screen orientation could not be determined; '\(preset.rawValue)' was dispatched in device-native portrait axes and may point the wrong way if the device is rotated.",
+            logger: logger
+        )
+        let visual = GestureOrientationMapping.visualSize(
+            explicitWidth: screenWidth, explicitHeight: screenHeight, calibration: calibration)
+        let stroke = preset.strokes(screenWidth: visual.width, screenHeight: visual.height)[0]
+        let coords = GestureOrientationMapping.hidStroke(stroke, calibration: calibration)
 
         let gestureEvent = FBSimulatorHIDEvent.swipe(
             coords.startX,
@@ -188,12 +190,11 @@ extension IOSSimGestureCommand: BatchConvertible {
 
 extension IOSSimTouchCommand: BatchConvertible {
     public func toBatchPrimitives(context: BatchContext, logger: SimUseLogger) async throws -> [BatchPrimitive] {
-        // ui space is atomic-form-only (rejected in validate for split
-        // steps), so one batch-wide calibration covers both halves.
+        // One batch-wide calibration covers both halves of the touch.
         let point: (x: Double, y: Double)
         if coordinateSpace == .ui {
             let calibration = await context.uiSpaceCalibration(
-                fallbackMessage: "Screen orientation could not be determined; --coordinate-space ui coordinates were dispatched as device-native portrait and may be wrong if the device is rotated.",
+                fallbackMessage: UISpaceCalibrationLoader.explicitCoordinatesFallback,
                 logger: logger
             )
             point = calibration.hidPoint(x: pointX, y: pointY)

@@ -54,6 +54,16 @@ extension FBSimulator {
         return response.elements as AnyObject
     }
 
+    /// The frontmost application's frame, without serializing its tree —
+    /// the root size the routing checks need, for a few milliseconds
+    /// instead of a tree fetch. Follows the frontmost app like
+    /// `legacyAccessibilityElements`.
+    func frontmostApplicationFrame() async throws -> CGRect {
+        let element = try await accessibilityElementForFrontmostApplication(displayId: 0)
+        defer { element.close() }
+        return try element.frame()
+    }
+
     /// The accessibility element at `point`, in the same single-dictionary
     /// shape the pre-Swiftification `accessibilityElement(at:nestedFormat:)`
     /// returned. `point` is in the unrotated points of display `displayId`
