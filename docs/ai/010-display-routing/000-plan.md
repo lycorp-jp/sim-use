@@ -107,6 +107,19 @@ installed in the simulator. The one-off probe in E7 was for evidence only.
 | E37 | Playground `gesture-presets`, alternating pinches | Only the first pinch after a launch is recognized, in either space (`native` too); the E2E relaunches before each pinch |
 | E38 | `ui` with Control Center open (iPhone 17 / iOS 27.0, Duo / iOS 27.1, released 0.15.0 too) | The process dies with SIGBUS on a stack guard page in the AX serializer on a cooperative thread, 37 frames deep. Not related to this work: issue #160 |
 
+### Found while building S4 (2026-10-17)
+
+Playground `chrome-test` (NavigationStack, leading and trailing toolbar items, bottom toolbar, TabView), iPhone Duo / iOS 27.1. Fixtures in `Tests/Fixtures/outline-side-bars/`.
+
+| # | Check | Result |
+| --- | --- | --- |
+| E39 | iOS 27.1 SDK build, cover, portrait (466x678) | Vertical bar x≈384–466: `#BackButton` (no label) (399,179), trailing `+` (404,240), tabs (396,494/544/594). The leading toolbar item `Edit` stays in the title row; the bottom toolbar item `Share` stays bottom centre. Before S4 the bar items were spread over Content and Bottom between the rows |
+| E40 | Same, cover landscape-left / landscape-right | landscape-left: the bar is on the trailing edge, back button (611,29) inside the top band. landscape-right: the bar is on the **leading** edge (x≈0–84), content starts at x=84 |
+| E41 | Same, inner display | Portrait (669x951): horizontal navigation bar and bottom tab bar, status items in the tree. Landscape-left and landscape-right: the bar is on the trailing edge (x≈881) |
+| E42 | Settings (UIKit, system) on the cover, General | Time (400,83), Wi-Fi (409,123) and `#BackButton` (399,179) in the bar; the navigation bar leaves a full-width `Group` (0,24 466x58) behind |
+| E43 | iOS 27.0 SDK build | Horizontal bars on the cover (inset 386x678) and on the inner display (871x669); the tab bar is a declared `Group "Tab Bar"` |
+| E44 | LINE 26.17.0 built with Xcode 27.1 (early-bird branch) on the cover | Fills the 466x678 display (the 27.0 SDK build was a 386x678 inset scene). Welcome and login use custom chrome (`返回` button top left), so no bar; the main tabs need a signed-in account, which this simulator does not have |
+
 ### Resizable display (Resize Mode)
 
 Sessions: Duo folded, Settings, 560x874 and then 375x667 (`appResize set
@@ -213,7 +226,7 @@ takes the screen size from the AX root frame and assigns `Top` / `Content` /
 `Bottom` by `yBandInset = 120`. Two changes:
 
 1. **Screen size:** on a non-main routing display, use the routing geometry `pointSize` (the scene size for a session), not the AX root frame (669x951 vs the real 951x669).
-2. **Side rail:** add `Trailing` (and `Leading` for symmetry) regions. They are **evidence-gated**: they turn on only when an anchor element is outside the top and bottom bands and inside a side strip. Anchors are the `BackButton` identifier (role description `back button`, not localized) and the status-bar cluster. Elements inside the detected strip go to the rail region. Without the evidence the output does not change.
+2. **Side rail:** add `Trailing` and `Leading` regions. They are **evidence-gated** (`Sources/iOSSimBackend/Normalizer/OutlineSideBars.swift`): an anchor (`BackButton` identifier, or a tab role `RadioButton`/`Tab`) in a 120 pt edge strip, at least two elements of its column stacked vertically, and the app's wide content clear of the bar's inner edge. The S4 evidence (E40) showed that the first idea — an anchor outside the top band — fails: in cover landscape-left the back button is in the top band. The bar's entries are listed after the bands. Without the evidence the output does not change.
 
 The iOS host AX gives no stable navigation-bar role. On the cover display the
 navigation bar is `AXGroup` with a localized role description (`导航栏`), so
@@ -287,7 +300,7 @@ Acceptance:
 
 - Duo cover display: `#BackButton` and the status bar are in `Trailing`; content rows stay in `Content`. Inner display (landscape and portrait): bands match the 951x669 / 669x951 UI. Tab bar position verified on both displays and placed in a sensible region.
 - Golden fixtures for single-display trees (iPhone portrait, landscape, iPad) are unchanged.
-- LINE app (simulator build) on both Duo displays: main tabs, a chat, back navigation driven only through `ui` + `tap @N`.
+- LINE app (simulator build) on both Duo displays: main tabs, a chat, back navigation driven only through `ui` + `tap @N`. **Not met:** the main tabs need a signed-in account (E44); welcome → login → back was driven on both displays with the 27.0 and the 27.1 SDK builds instead.
 
 ### S5 — Video on the routing display
 
@@ -342,6 +355,8 @@ refuse with a message that names the requirement.
 | S3: the snapshot path reads the frontmost app's root frame (`FBAccessibilityElement.frame()`, no tree) and requires the snapshot to fit it (R161-01) | Element confirmation only; tree every time | A resized Resize Mode session (560x1200 → 560x667) kept its top controls, so element probes confirmed the old 1200 pt canvas and a gesture started below the scene. The root size also feeds the routing checks exactly as a tree fetch does |
 | S3: split `touch --down` / `--up` take UI coordinates, each half calibrated | Keep `ui` atomic-only (split form would need `native`) | With `ui` as the default, the old rule would reject every split touch. Each half maps the point through the orientation at its own time, which is where the user sees it |
 | S3: `gesture` pinch/rotate centre and canvas in UI space, every sample mapped | Keep native portrait for multi-touch presets | The calibration is affine, so mapping each interpolated sample keeps lines and arcs; the directional presets already use the UI canvas (#66) |
+| S4: side-bar regions from geometry and anchors, not from device or SDK | Device table ("Duo cover = trailing"); trait/SDK checks; AX roles only | The bar edge depends on the display and the orientation (E40, E41); the host cannot read the app's SDK or traits. Anchors are `BackButton` and tab roles (`RadioButton`/`Tab`), members are the anchor's column, and the app's wide content must stay clear of the bar's inner edge — rows on a regular iPhone cross the leading strip, so its back button never qualifies. Full-width grouping elements (the left-behind navigation bar group, E42) are containers, not crossing content |
+| S4: bar entries listed after the bands, aliases renumbered in print order | Keep reading order (bar items between rows) | An agent reads the bar as one unit; aliases stay monotonic in the text |
 | Posture shown only on a non-main routing display | Always; never | Owner decision 2026-10-16: single-display output stays identical |
 | Device Hub closed: make it work if possible, else refuse with the requirement | Must work | Owner decision 2026-10-16 |
 
@@ -358,8 +373,8 @@ refuse with a message that names the requirement.
 1. **Hub closed / Simulator.app.** A fresh headless `simctl boot` (Device Hub running, but not showing the device) already had `dtuhidd` in its process tree, and `devicectl` worked. Not tested with Device Hub quit. With no dtuhidd, sim-use selects the Indigo transport (`defaultHIDTransport`). Can Indigo route to a non-main display? Not tested.
 2. Resolved by E27: the selected Xcode's devicectl (27.0 or 27.1) reads the Duo.
 3. Resolved by E21 (path-dependent). Not known: the rule behind it (angle delta, speed, or both), and whether a fully dark display (`off` on both) can happen with Always-On disabled.
-4. Tab bar placement on the cover and inner displays. Not observed yet (no tab-bar app in this runtime).
-5. Do traditional iPhones expose status-bar elements in the app AX tree? This decides if the status-bar anchor is safe for gating.
+4. Resolved in S4 (E39–E43): with the iOS 27.1 SDK the tab bar is in the vertical bar on the cover (all orientations) and on the inner display in landscape; horizontal at the bottom on the inner display in portrait and with the iOS 27.0 SDK everywhere.
+5. Answered in S4: iPhone 17 (`设置`) and the Duo inner display in portrait expose the time and Wi-Fi in the app tree; the cover vertical bar does in Settings but not in the SwiftUI Playground. Status items are not anchors; they join the bar's column when present (E42).
 6. E7 is one device and one runtime. E14 is two devices and two scene sizes; the "scene at canvas origin" rule is not proven for all sizes.
 7. A fold once sent the foreground app (Settings) to SpringBoard on the cover display; another fold kept it. Not understood.
 8. Rotation on the Duo **cover** display: E2 was measured only with the inner display active.

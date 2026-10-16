@@ -492,7 +492,7 @@ sim-use ui --point 100,200 --device $UDID      # specific point (same UI space a
 
 The `--json` envelope carries the raw accessibility tree under `data.raw` by default; `--no-raw` drops it while keeping `outline` / `entries` / `lists` intact — prefer it in agent loops where the raw tree is only debugging ballast.
 
-The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `Group` regions) and `@N` / `#N` / `#N@M` / `#<id>` alias addressing. When the device is rotated, the `App:` header carries an orientation tag (e.g. `(landscape-right)`) and the `--json` envelope an `orientation` field.
+The outline uses region banding (`[Top]` / `[Content]` / `[Bottom]` / declared `Group` regions; on an iPhone Duo, `[Trailing  x>=N]` / `[Leading  x<=N]` for the vertical bar of an iOS 27.1 SDK app) and `@N` / `#N` / `#N@M` / `#<id>` alias addressing. When the device is rotated, the `App:` header carries an orientation tag (e.g. `(landscape-right)`) and the `--json` envelope an `orientation` field.
 
 A list cluster detector runs on every snapshot and attaches `#N` aliases to detected list cells — outline lines render as `@N #M` (dominant list) or `@N #M@S` (scope `S>1`). The `--json` envelope adds a `lists` array (one summary per cluster, ordered by detector score, dominant first) and per-cell membership under `entries[*].aliases.list`.
 
