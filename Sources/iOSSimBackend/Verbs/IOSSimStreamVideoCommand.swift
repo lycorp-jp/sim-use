@@ -149,11 +149,18 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         guard !trimmedUDID.isEmpty else {
             throw CLIError(errorDescription: "Simulator UDID cannot be empty. Use --udid to specify a simulator.")
         }
-        // Resizable app session (issue #143): every format below — the
-        // native FBVideoStream paths and the screenshot loop alike — reads
-        // the main framebuffer, which shows only the wallpaper during a
-        // session. Refuse before a single byte reaches stdout.
-        try await RoutingDisplayGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "stream-video", logger: logger)
+        // Off the main display (an unfolded iPhone Duo, a Resize Mode
+        // session) the native formats read the framebuffer of the display
+        // that hosts the app (docs/ai/010-display-routing, S5). The
+        // screenshot loop reads the main display only: refuse it there
+        // before a single byte reaches stdout.
+        let source: CaptureSource?
+        if format.isNativeStream {
+            source = try await RoutingDisplayGuard.captureSource(udid: trimmedUDID, verb: "stream-video", logger: logger)
+        } else {
+            source = nil
+            try await RoutingDisplayGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "stream-video --format \(format.rawValue)", logger: logger)
+        }
 
         let simulatorSet = try await getSimulatorSet(deviceSetPath: nil, logger: logger, reporter: EmptyEventReporter.shared)
         guard let targetSimulator = simulatorSet.allSimulators.first(where: { $0.udid == trimmedUDID }) else {
@@ -172,7 +179,10 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         defer { signalObserver.invalidate() }
 
         if format.isNativeStream {
-            try await streamNative(from: targetSimulator, format: format, cancellationFlag: cancellationFlag)
+            try await streamNative(from: targetSimulator, source: source, format: format, cancellationFlag: cancellationFlag)
+            if let notice = await RoutingDisplayGuard.captureMovedNotice(udid: trimmedUDID, verb: "stream-video", started: source) {
+                FileHandle.standardError.write(Data(notice.utf8))
+            }
             // The native paths copy encoded bytes through FBVideoStream and
             // do not track frame counts; return a zero-summary so
             // `format(_:)` emits nothing.
@@ -278,6 +288,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
     /// stream in an orderly way instead of killing the process with SIGPIPE.
     private func streamNative(
         from simulator: FBSimulator,
+        source: CaptureSource?,
         format: OutputFormat,
         cancellationFlag: CancellationFlag
     ) async throws {
@@ -285,7 +296,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
         switch format {
         case .h264:
             configuration = .h264Capture(fps: effectiveFPS, quality: quality, scale: scale, transport: .mpegts)
-            FileHandle.standardError.write(Data("Starting h264 video stream from simulator \(simulator.udid)...\n".utf8))
+            FileHandle.standardError.write(Data("Starting h264 video stream from simulator \(simulator.udid)\(source.map { " (display '\($0.displayName)')" } ?? "")...\n".utf8))
             FileHandle.standardError.write(Data("Format: h264, FPS: \(effectiveFPS), Quality: \(quality), Scale: \(scale)\n".utf8))
             FileHandle.standardError.write(Data("Note: H.264 in MPEG-TS (carries PTS, so players pace correctly). Preview it live:\n".utf8))
             FileHandle.standardError.write(Data("  sim-use ios stream-video --format h264 --udid <UDID> | ffplay -f mpegts -probesize 32768 -i -\n".utf8))
@@ -297,7 +308,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
                 scaleFactor: scale,
                 keyFrameRate: nil
             )
-            FileHandle.standardError.write(Data("Starting BGRA video stream from simulator \(simulator.udid)...\n".utf8))
+            FileHandle.standardError.write(Data("Starting BGRA video stream from simulator \(simulator.udid)\(source.map { " (display '\($0.displayName)')" } ?? "")...\n".utf8))
             FileHandle.standardError.write(Data("Format: bgra, Quality: \(quality), Scale: \(scale)\n".utf8))
             FileHandle.standardError.write(Data("Note: This is raw pixel data. Use ffmpeg to convert:\n".utf8))
             FileHandle.standardError.write(Data("  sim-use ios stream-video --format bgra --udid <UDID> | ffmpeg -f rawvideo -pixel_format bgra -video_size WIDTHxHEIGHT -i - output.mp4\n".utf8))
@@ -314,7 +325,7 @@ public struct IOSSimStreamVideoCommand: SimUseExecutableCommand {
             }
             // The stream comes back already running — attach failures throw
             // here instead of surfacing asynchronously.
-            let videoStream = try await simulator.createStream(configuration: configuration, to: stdoutConsumer)
+            let videoStream = try await simulator.createStream(configuration: configuration, source: source, to: stdoutConsumer)
             FileHandle.standardError.write(Data("\(label) stream is now running...\n".utf8))
 
             // Mid-stream termination surfaces through awaitCompletion();

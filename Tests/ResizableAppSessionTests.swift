@@ -416,7 +416,7 @@ struct ResizableAppSessionGuardTests {
         )
     }
 
-    @Test("an active session refuses main-display video capture with the capture error (R150-06)")
+    @Test("an active session refuses main-display-only capture with the capture error (R150-06)")
     func activeSessionRefusesCapture() async {
         do {
             try await RoutingDisplayGuard.assertCaptureReachesApp(
@@ -431,8 +431,9 @@ struct ResizableAppSessionGuardTests {
             #expect(message.contains("Nothing was captured."))
             #expect(message.contains("#143"))
             let hint = error.hint ?? ""
-            #expect(hint.contains("xcrun simctl io UDID-1 recordVideo --display=0933D2CA-38DF-4B17-9934-7CDC624B355C"))
-            #expect(hint.contains("`screenshot`, which is redirected"))
+            // record-video and the native stream formats capture the session (S5).
+            #expect(hint.contains("`stream-video --format h264`"))
+            #expect(hint.contains("`record-video`"))
         } catch {
             Issue.record("unexpected error \(error)")
         }

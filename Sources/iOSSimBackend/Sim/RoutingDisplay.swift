@@ -153,12 +153,52 @@ extension RoutingDisplay {
         }
     }
 
+    /// What a video capture reads off the main display: the framebuffer
+    /// port of that display, named by its unrotated pixel size, and the part
+    /// that shows the app. Nil on the main display (the historical path).
+    /// The inner iPhone Duo panel is captured whole, in its native portrait
+    /// orientation like the main display; a Resize Mode scene sits at the
+    /// origin of the `Resizable` canvas (E14), so the capture is cut to it.
+    public func captureSource() throws -> CaptureSource? {
+        switch self {
+        case .main:
+            return nil
+        case .secondary(let display):
+            return CaptureSource(display: display, crop: nil)
+        case .resizable(let session, let display):
+            guard let display else {
+                throw CLIError(errorDescription: "A resizable app session is active, but CoreDevice did not list its '\(session.displayName)' display (\(session.displayUniqueID)), so it cannot be captured. Re-run the command; if it persists, end the session.")
+            }
+            let scale = display.pointScale
+            return CaptureSource(
+                display: display,
+                crop: CGRect(x: 0, y: 0, width: session.preferredWidth * scale, height: session.preferredHeight * scale)
+            )
+        }
+    }
+
     private static func route(for display: SimulatorDisplay) -> FBSimulatorHIDDisplayRoute {
         FBSimulatorHIDDisplayRoute(
             digitizerTarget: UInt64(display.displayID),
             screenSize: CGSize(width: display.pixelWidth, height: display.pixelHeight),
             screenScale: Float(display.pointScale)
         )
+    }
+}
+
+/// The framebuffer a capture of a non-main display reads.
+public struct CaptureSource: Equatable, Sendable {
+    public let pixelWidth: Int
+    public let pixelHeight: Int
+    /// Pixels, top-left origin; nil captures the whole display.
+    public let crop: CGRect?
+    public let displayName: String
+
+    init(display: SimulatorDisplay, crop: CGRect?) {
+        self.pixelWidth = Int(display.pixelWidth.rounded())
+        self.pixelHeight = Int(display.pixelHeight.rounded())
+        self.crop = crop
+        self.displayName = display.name
     }
 }
 
@@ -248,13 +288,45 @@ public struct SecondaryDisplayCaptureError: RoutingDisplayRefusal, Equatable {
     }
 
     public var hint: String? {
-        "Use `screenshot`, which captures '\(display.name)' automatically, or record it with " +
-            "`xcrun simctl io \(udid) recordVideo --display=\(display.uniqueID) <file.mov>`. " +
+        "Use `stream-video --format h264` or `--format bgra`, or `record-video`, which capture '\(display.name)'. " +
             "Set \(SimulatorDisplayTopologyMonitor.disableEnvironmentKey)=0 to skip this check."
     }
 }
 
 public enum RoutingDisplayGuard {
+    /// What a video capture reads (docs/ai/010-display-routing, S5): nil on
+    /// the main display, else the framebuffer of the display that hosts
+    /// the app.
+    public static func captureSource(
+        udid: String,
+        verb: String,
+        logger: SimUseLogger,
+        sessionMonitor: ResizableAppSessionMonitor = .shared,
+        topologyMonitor: SimulatorDisplayTopologyMonitor = .shared
+    ) async throws -> CaptureSource? {
+        let routing = await RoutingDisplayResolver.current(udid: udid, sessionMonitor: sessionMonitor, topologyMonitor: topologyMonitor)
+        guard let source = try routing.captureSource() else { return nil }
+        logger.info().log("\(verb) captures display '\(source.displayName)' (\(source.pixelWidth)x\(source.pixelHeight) px\(source.crop.map { ", cut to \(Int($0.width))x\(Int($0.height))" } ?? ""))")
+        return source
+    }
+
+    /// A note for the end of a capture whose app moved to another display
+    /// while it ran (a fold, a Resize Mode session that started or ended):
+    /// the capture keeps the display it started on. Nil when it did not move.
+    public static func captureMovedNotice(
+        udid: String,
+        verb: String,
+        started: CaptureSource?,
+        sessionMonitor: ResizableAppSessionMonitor = .shared,
+        topologyMonitor: SimulatorDisplayTopologyMonitor = .shared
+    ) async -> String? {
+        let now = try? await RoutingDisplayResolver.current(udid: udid, sessionMonitor: sessionMonitor, topologyMonitor: topologyMonitor).captureSource()
+        guard now != started else { return nil }
+        let before = started?.displayName ?? "the main display"
+        let after = now.map { "display '\($0.displayName)'" } ?? "the main display"
+        return "[i] The app moved to \(after) while `\(verb)` ran; the video shows \(started == nil ? before : "display '\(before)'") only, as it was when the capture started.\n"
+    }
+
     /// Call after global setup in every verb that dispatches touch HID.
     /// Touch input reaches the display that hosts the app, so this only
     /// fails when that display cannot be addressed: a Resize Mode session

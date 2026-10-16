@@ -282,8 +282,51 @@ struct RoutingDisplayGuardTests {
             Issue.record("expected SecondaryDisplayCaptureError")
         } catch let error as SecondaryDisplayCaptureError {
             #expect(error.localizedDescription.contains("Nothing was captured."))
-            #expect(error.hint?.contains("--display=37AFD618-C3EB-415F-AC4B-ABA9E4D465CF") == true)
+            #expect(error.hint?.contains("`record-video`") == true)
         }
+    }
+
+    @Test("video capture reads the display that hosts the app (S5)")
+    func captureSource() async throws {
+        let open = SimulatorDisplayTopologyState.available(try topology("duo-open"))
+        let source = try await RoutingDisplayGuard.captureSource(
+            udid: "U", verb: "record-video", logger: quietLogger,
+            sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologyMonitor(open)
+        )
+        #expect(source?.displayName == "LCD-1")
+        #expect(source?.pixelWidth == 2007 && source?.pixelHeight == 2853)
+        for name in ["duo-folded", "iphone17"] {
+            #expect(try await RoutingDisplayGuard.captureSource(
+                udid: "U", verb: "record-video", logger: quietLogger,
+                sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologyMonitor(.available(try topology(name)))
+            ) == nil)
+        }
+    }
+
+    @Test("a capture whose app moved to another display ends with a notice (S5)")
+    func captureMovedNotice() async throws {
+        let open = SimulatorDisplayTopologyState.available(try topology("duo-open"))
+        let folded = SimulatorDisplayTopologyState.available(try topology("duo-folded"))
+        let innerDisplay = try #require(try topology("duo-open").activeIntegrated)
+        let inner = try #require(try RoutingDisplay.secondary(innerDisplay).captureSource())
+        // Started on the inner display, folded since.
+        let notice = await RoutingDisplayGuard.captureMovedNotice(
+            udid: "U", verb: "record-video", started: inner,
+            sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologyMonitor(folded)
+        )
+        #expect(notice?.contains("moved to the main display") == true)
+        #expect(notice?.contains("display 'LCD-1' only") == true)
+        // Started folded, unfolded since.
+        let unfolded = await RoutingDisplayGuard.captureMovedNotice(
+            udid: "U", verb: "stream-video", started: nil,
+            sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologyMonitor(open)
+        )
+        #expect(unfolded?.contains("moved to display 'LCD-1'") == true)
+        // Still where it started.
+        #expect(await RoutingDisplayGuard.captureMovedNotice(
+            udid: "U", verb: "record-video", started: inner,
+            sessionMonitor: sessionMonitor(.inactive), topologyMonitor: topologyMonitor(open)
+        ) == nil)
     }
 
     @Test("folded Duo and a single-display iPhone proceed")
