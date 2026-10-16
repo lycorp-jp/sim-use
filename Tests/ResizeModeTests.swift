@@ -236,10 +236,11 @@ struct ResizeModeTests {
         let x = Int(frame.1)! + Int(frame.3)! / 2, y = Int(frame.2)! + Int(frame.4)! / 2
         let text = "s6b\(Int.random(in: 100...999))"
         let batch = try await CommandRunner.run(
-            // Two keyboard chunks and a second touch (outside the field: a
+            // Two keyboard chunks and a second touch above the field: a
             // second tap on it soon after the first is a double tap that
-            // selects the text).
-            "\(simUse) ios batch --udid \(udid) --step 'tap -x \(x) -y \(y)' --step 'type \(text)' --step 'type x' --step 'tap -x 280 -y 700'",
+            // selects the text, and below it the software keyboard (Device
+            // Hub open) would type the key under the touch.
+            "\(simUse) ios batch --udid \(udid) --step 'tap -x \(x) -y \(y)' --step 'type \(text)' --step 'type x' --step 'tap -x \(x) -y \(Int(frame.2)! - 30)'",
             allowFailure: true, timeout: 60)
         #expect(batch.exitCode == 0, "batch failed: \(batch.output.suffix(400))")
         try await Task.sleep(nanoseconds: 800_000_000)

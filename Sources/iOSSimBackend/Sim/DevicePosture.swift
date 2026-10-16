@@ -137,6 +137,15 @@ public enum FoldExpectation: Equatable, Sendable {
         case .observeOnly: return true
         }
     }
+
+    /// True when a hinge report left no trace: the expectation is unmet
+    /// and the display that was active before still is. A report can be
+    /// lost on the way to the guest (plan E53); sending the same angle
+    /// again is harmless.
+    func reportHadNoEffect(before: SimulatorDisplayTopology, after: SimulatorDisplayTopology) -> Bool {
+        guard self != .observeOnly, !isMet(by: after) else { return false }
+        return before.activeIntegrated?.uniqueID == after.activeIntegrated?.uniqueID
+    }
 }
 
 // MARK: - Rotate
@@ -227,11 +236,50 @@ public enum RotationPlanner {
         QuarterTurn.deviceOrientation(QuarterTurn.of(deviceOrientation: device.rawValue)! - transportOffset)
     }
 
+    /// True when a read-back is the answer to a rotation: two reads agree
+    /// on the device orientation and the routing display's rotation, and
+    /// either both reached the target or `grace` has passed. Anything
+    /// short of the target needs the grace, because the first reads can
+    /// still show the state from before, and the interface can follow the
+    /// device orientation late (plan open question 18).
+    static func readBackSettled(
+        previous: SimulatorDisplayTopology?,
+        current: SimulatorDisplayTopology,
+        wanted: DeviceOrientationValue,
+        target: DisplayOrientation,
+        elapsed: TimeInterval,
+        grace: TimeInterval
+    ) -> Bool {
+        guard let previous, let reported = current.deviceOrientation,
+              previous.deviceOrientation == reported,
+              previous.routingRotation == current.routingRotation
+        else { return false }
+        let reachedTarget = reported == wanted.rawValue && current.routingRotation?.interfaceOrientation == target
+        return reachedTarget || elapsed >= grace
+    }
+
+    /// True when a rotation left no trace: the device orientation and the
+    /// routing display's rotation read back as before, short of the
+    /// target. A lost report and a refused orientation look the same, and
+    /// one more send of the same value is harmless for both.
+    static func reportHadNoEffect(before: SimulatorDisplayTopology?, after: SimulatorDisplayTopology, target: DisplayOrientation) -> Bool {
+        guard let before, after.routingRotation?.interfaceOrientation != target else { return false }
+        return before.deviceOrientation == after.deviceOrientation && before.routingRotation == after.routingRotation
+    }
+
     /// The offset a read-back reveals: `reported` came back for `sent`.
     static func learnedTransportOffset(sent: DeviceOrientationValue, reported: String) -> Int? {
         guard let reportedTurns = QuarterTurn.of(deviceOrientation: reported),
               let sentTurns = QuarterTurn.of(deviceOrientation: sent.rawValue)
         else { return nil }
         return ((reportedTurns - sentTurns) % 4 + 4) % 4
+    }
+}
+
+extension SimulatorDisplayTopology {
+    /// The rotation of the display a rotation is confirmed on: the active
+    /// integrated display, else the primary one.
+    var routingRotation: SimulatorDisplayRotation? {
+        (activeIntegrated ?? primary)?.rotation
     }
 }
