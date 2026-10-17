@@ -1,0 +1,418 @@
+{
+ "raw": [
+  {
+   "AXFrame": "{{0, 0}, {678, 466}}",
+   "AXLabel": "SimUsePlayground",
+   "AXUniqueId": null,
+   "AXValue": null,
+   "children": [
+    {
+     "AXFrame": "{{84.000000000000014, 31}, {165.33333333333337, 34}}",
+     "AXLabel": "Chrome Test",
+     "AXUniqueId": null,
+     "AXValue": null,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 34,
+      "width": 165.33333333333337,
+      "x": 84.00000000000001,
+      "y": 31
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXStaticText",
+     "role_description": "text",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "StaticText",
+      "Scrollable"
+     ],
+     "type": "StaticText"
+    },
+    {
+     "AXFrame": "{{600.66666666666663, 30}, {53.333333333333371, 36}}",
+     "AXLabel": "Edit",
+     "AXUniqueId": "chrome-edit",
+     "AXValue": null,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 36,
+      "width": 53.33333333333337,
+      "x": 600.6666666666666,
+      "y": 30
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXButton",
+     "role_description": "button",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Button",
+      "Scrollable"
+     ],
+     "type": "Button"
+    },
+    {
+     "AXFrame": "{{0, 0}, {678, 466}}",
+     "AXLabel": null,
+     "AXUniqueId": null,
+     "AXValue": null,
+     "children": [
+      {
+       "AXFrame": "{{84, 82}, {574, 52.333333333333343}}",
+       "AXLabel": "Last action: none",
+       "AXUniqueId": "chrome-last-action",
+       "AXValue": "none",
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.33333333333334,
+        "width": 574,
+        "x": 84,
+        "y": 82
+       },
+       "help": null,
+       "pid": 13583,
+       "role": "AXStaticText",
+       "role_description": "text",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "StaticText",
+        "Scrollable"
+       ],
+       "type": "StaticText"
+      },
+      {
+       "AXFrame": "{{84, 152}, {574, 40.333333333333343}}",
+       "AXLabel": "Home",
+       "AXUniqueId": null,
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 40.33333333333334,
+        "width": 574,
+        "x": 84,
+        "y": 152
+       },
+       "help": null,
+       "pid": 13583,
+       "role": "AXHeading",
+       "role_description": "heading",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Scrollable",
+        "StaticText",
+        "Header"
+       ],
+       "type": "Heading"
+      },
+      {
+       "AXFrame": "{{84, 192.33333333333331}, {574, 52.333333333333343}}",
+       "AXLabel": "Inbox",
+       "AXUniqueId": "chrome-row-inbox",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.33333333333334,
+        "width": 574,
+        "x": 84,
+        "y": 192.33333333333331
+       },
+       "help": null,
+       "pid": 13583,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Button",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{84, 244.66666666666666}, {574, 52.333333333333343}}",
+       "AXLabel": "Drafts",
+       "AXUniqueId": "chrome-row-drafts",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.33333333333334,
+        "width": 574,
+        "x": 84,
+        "y": 244.66666666666666
+       },
+       "help": null,
+       "pid": 13583,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Button",
+        "Scrollable"
+       ],
+       "type": "Button"
+      },
+      {
+       "AXFrame": "{{84, 297}, {574, 52.333333333333314}}",
+       "AXLabel": "Archive",
+       "AXUniqueId": "chrome-row-archive",
+       "AXValue": null,
+       "children": [],
+       "content_required": false,
+       "custom_actions": [],
+       "enabled": true,
+       "frame": {
+        "height": 52.333333333333314,
+        "width": 574,
+        "x": 84,
+        "y": 297
+       },
+       "help": null,
+       "pid": 13583,
+       "role": "AXButton",
+       "role_description": "button",
+       "subrole": null,
+       "title": null,
+       "traits": [
+        "Button",
+        "Scrollable"
+       ],
+       "type": "Button"
+      }
+     ],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 466,
+      "width": 678,
+      "x": 0,
+      "y": 0
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXGroup",
+     "role_description": "Group",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Scrollable"
+     ],
+     "type": "Group"
+    },
+    {
+     "AXFrame": "{{26, 282}, {44, 58}}",
+     "AXLabel": "Home",
+     "AXUniqueId": null,
+     "AXValue": 1,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 58,
+      "width": 44,
+      "x": 26,
+      "y": 282
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXRadioButton",
+     "role_description": "tab",
+     "subrole": "AXTabButton",
+     "title": null,
+     "traits": [
+      "Button",
+      "TabButton",
+      "Selected",
+      "Scrollable"
+     ],
+     "type": "RadioButton"
+    },
+    {
+     "AXFrame": "{{26, 332}, {44, 58}}",
+     "AXLabel": "Search",
+     "AXUniqueId": null,
+     "AXValue": 0,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 58,
+      "width": 44,
+      "x": 26,
+      "y": 332
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXRadioButton",
+     "role_description": "tab",
+     "subrole": "AXTabButton",
+     "title": null,
+     "traits": [
+      "Button",
+      "TabButton",
+      "Scrollable"
+     ],
+     "type": "RadioButton"
+    },
+    {
+     "AXFrame": "{{26, 382}, {44, 58}}",
+     "AXLabel": "Settings",
+     "AXUniqueId": null,
+     "AXValue": 0,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 58,
+      "width": 44,
+      "x": 26,
+      "y": 382
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXRadioButton",
+     "role_description": "tab",
+     "subrole": "AXTabButton",
+     "title": null,
+     "traits": [
+      "Button",
+      "TabButton",
+      "Scrollable"
+     ],
+     "type": "RadioButton"
+    },
+    {
+     "AXFrame": "{{29, 87}, {38, 38}}",
+     "AXLabel": "",
+     "AXUniqueId": "BackButton",
+     "AXValue": null,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 38,
+      "width": 38,
+      "x": 29,
+      "y": 87
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXGenericElement",
+     "role_description": "back button",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "BackButton",
+      "Scrollable"
+     ],
+     "type": "GenericElement"
+    },
+    {
+     "AXFrame": "{{34.333333333333336, 148}, {27.333333333333329, 36}}",
+     "AXLabel": "Add",
+     "AXUniqueId": "chrome-add",
+     "AXValue": null,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 36,
+      "width": 27.33333333333333,
+      "x": 34.333333333333336,
+      "y": 148
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXButton",
+     "role_description": "button",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Button",
+      "Scrollable"
+     ],
+     "type": "Button"
+    },
+    {
+     "AXFrame": "{{338, 400}, {66, 36}}",
+     "AXLabel": "Share",
+     "AXUniqueId": "chrome-share",
+     "AXValue": null,
+     "children": [],
+     "content_required": false,
+     "custom_actions": [],
+     "enabled": true,
+     "frame": {
+      "height": 36,
+      "width": 66,
+      "x": 338,
+      "y": 400
+     },
+     "help": null,
+     "pid": 13583,
+     "role": "AXButton",
+     "role_description": "button",
+     "subrole": null,
+     "title": null,
+     "traits": [
+      "Button",
+      "Scrollable"
+     ],
+     "type": "Button"
+    }
+   ],
+   "content_required": false,
+   "custom_actions": [],
+   "enabled": true,
+   "frame": {
+    "height": 466,
+    "width": 678,
+    "x": 0,
+    "y": 0
+   },
+   "help": null,
+   "pid": 13583,
+   "role": "AXApplication",
+   "role_description": "application",
+   "subrole": null,
+   "title": null,
+   "traits": [
+    "None"
+   ],
+   "type": "Application"
+  }
+ ],
+ "screen": {
+  "height": 466,
+  "width": 678
+ }
+}

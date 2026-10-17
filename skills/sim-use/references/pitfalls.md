@@ -56,7 +56,7 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 **Recipes:**
 1. Check the posture: `sim-use ios fold --device <UDID>` names the active display and its orientation.
 2. Fold and unfold with `sim-use ios fold closed|open --device <UDID>`; rotate with `sim-use ios rotate <orientation>` (interface names, as the `ui` header prints them). Both clear the `ui` snapshot — re-run `ui` before `tap @N`.
-3. On the cover display of an iOS 27.1 SDK app the back button sits in the vertical bar on the right and has **no label**: tap it with `#BackButton`, not by the previous screen's title.
+3. An iOS 27.1 SDK app puts its back button, trailing toolbar items, tab bar and status bar in a **vertical bar** on the cover display (and on the inner display in landscape). The outline lists it last, as `[Trailing  x>=N]` — `[Leading  x<=N]` when the cover is in landscape-right; its `@N` aliases tap as usual. The back button there has **no label**: tap it with `#BackButton`, not by the previous screen's title.
 4. Explicit `-x/-y` take the numbers `ui` prints on either display; `--coordinate-space native` means the inner panel's unrotated points.
 5. To record video, fold the device so the app is on the cover display.
 
