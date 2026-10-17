@@ -255,6 +255,22 @@ struct OutlineSideBarTests {
         #expect(outline.entries.allSatisfy { !["Leading", "Trailing"].contains($0.region.kind) })
     }
 
+    @Test("a back button above a leading avatar is not a bar when the wide content is only below (S4-004)")
+    func wideContentOnlyBelow() throws {
+        // A regular iPhone profile form: the avatar stacks under the back
+        // button in the leading strip, and every wide field is below both.
+        let children = [
+            element("Button", "Back", 16, 62, 44, 44, id: "BackButton"),
+            element("Heading", "Profile", 150, 74, 100, 22),
+            element("Image", "Avatar", 16, 160, 64, 64),
+            element("TextField", "Name", 16, 260, 370, 44),
+            element("TextField", "Status", 16, 324, 370, 44),
+        ].joined(separator: ",")
+        let outline = OutlineFormatter.render(tree: try tree(children))
+        #expect(outline.sideKinds.isEmpty)
+        #expect(outline.regionKind(id: "BackButton") == "Top")
+    }
+
     @Test("a single tab with unrelated items above it is not a bar")
     func singleTabAnchor() throws {
         let children = [
