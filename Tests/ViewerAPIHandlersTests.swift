@@ -150,6 +150,27 @@ struct ViewerAPIHandlersTests {
         #expect(error.contains("4"))
     }
 
+    // MARK: - Output written just before exit is never lost
+
+    /// The child writes and exits at once, so its exit can be reported
+    /// before the pipe readers have run. Under load (the full suite, CI)
+    /// that lost stderr / stdout now and then.
+    @Test("output written right before exit is always collected")
+    func outputBeforeExitIsCollected() async throws {
+        let (handlers, cleanup) = try makeHandlers(stdout: #"{"ok":false,"error":"E","hint":"H"}"#, stderr: "boom", exitCode: 1)
+        defer { cleanup() }
+        for _ in 0..<150 {
+            let body = try jsonBody(await handlers.tap(try tapRequest()))
+            #expect(body["hint"] as? String == "H")
+        }
+        let (stderrOnly, cleanupErr) = try makeHandlers(stdout: "", stderr: "boom", exitCode: 3)
+        defer { cleanupErr() }
+        for _ in 0..<150 {
+            let body = try jsonBody(await stderrOnly.devices(getRequest()))
+            #expect((body["error"] as? String)?.contains("boom") == true)
+        }
+    }
+
     // MARK: - False-success regression: JSON object without `ok`
 
     @Test("tap: non-zero exit with an ok-less JSON object is not a success")

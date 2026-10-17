@@ -373,6 +373,11 @@ snapshot: run `ui` again before `tap @N`. A fold also wakes a locked device
 to its lock screen. Single-display simulators rotate through a GSEvent
 sent to SpringBoard; the iPhone Duo rotates and folds through the
 vendor-defined HID reports that Device Hub's posture controls send.
+Device Hub does not need to be running: the reports go to the simulator's
+`dtuhidd`, which starts on demand. With Device Hub closed, sim-use also
+starts `dtuhidd` itself when touch input must reach the inner display or a
+Resize Mode scene, and rebuilds its HID connection once `dtuhidd` runs (an
+active `dtuhidd` disables the legacy keyboard path).
 
 ### Screenshot
 

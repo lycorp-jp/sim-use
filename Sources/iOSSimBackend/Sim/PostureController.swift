@@ -30,6 +30,10 @@ public enum PostureController {
     /// How long a rotation read-back other than the wanted one must wait
     /// before it counts as the answer.
     static let unexpectedReportGrace: TimeInterval = 1.5
+    /// How long a fold waits for the active display to change before it
+    /// sends the hinge report again. A fold switches displays in 1–2.5 s
+    /// (plan E1).
+    static let hingeResendAfter: TimeInterval = 3
 
     // MARK: Fold
 
@@ -51,14 +55,27 @@ public enum PostureController {
         OutlineCache.invalidate(udid: udid)
 
         let expectation = target.expectation
-        let settled = await waitForTopology(udid: udid, timeout: timeout, monitor: topologyMonitor) { previous, current in
-            guard expectation.isMet(by: current) else { return false }
-            // Without an expectation, wait for two equal reads so a
-            // display switch still in flight is not reported.
-            if expectation == .observeOnly {
-                return previous?.activeIntegrated?.uniqueID == current.activeIntegrated?.uniqueID
+        func waitForFold(_ timeout: TimeInterval) async -> (topology: SimulatorDisplayTopology?, met: Bool) {
+            await waitForTopology(udid: udid, timeout: timeout, monitor: topologyMonitor) { previous, current in
+                guard expectation.isMet(by: current) else { return false }
+                // Without an expectation, wait for two equal reads so a
+                // display switch still in flight is not reported.
+                if expectation == .observeOnly {
+                    return previous?.activeIntegrated?.uniqueID == current.activeIntegrated?.uniqueID
+                }
+                return true
             }
-            return true
+        }
+        let firstWait = expectation == .observeOnly ? timeout : min(hingeResendAfter, timeout)
+        var settled = await waitForFold(firstWait)
+        if !settled.met, let after = settled.topology, expectation.reportHadNoEffect(before: topology, after: after) {
+            // A report can be lost on the way to the guest (plan E53).
+            // The wait starts again for the second report.
+            logger.info().log("Hinge report \(ResizableAppSession.format(target.degrees))° had no effect after \(ResizableAppSession.format(firstWait)) s; sending it again")
+            try await VendorDefinedHID.send(.hinge(degrees: target.degrees), to: session.simulator, logger: logger)
+            settled = await waitForFold(timeout)
+        } else if !settled.met, firstWait < timeout {
+            settled = await waitForFold(timeout - firstWait)
         }
         let final = settled.topology ?? topology
         let confirmed = settled.met
@@ -99,13 +116,14 @@ public enum PostureController {
         try await send(sent, multiDisplay: multiDisplay, session: session, logger: logger)
         OutlineCache.invalidate(udid: udid)
 
-        var after = await waitForRotation(udid: udid, wanted: wanted, timeout: timeout, monitor: topologyMonitor)
+        var after = await waitForRotation(udid: udid, wanted: wanted, target: target, timeout: timeout, monitor: topologyMonitor)
         // The transport offset of a secondary display is a guess. When the
         // device turned, but to the wrong side, the read-back gives the
         // real offset and one corrected send lands. A report that did not
-        // change at all teaches nothing: the frontmost app or the display
-        // does not accept the orientation (an iPhone-size screen refuses
-        // portrait-upside-down; a portrait-only app keeps portrait).
+        // change anything teaches no offset: it was lost, or the frontmost
+        // app or the display does not accept the orientation (an
+        // iPhone-size screen refuses portrait-upside-down; a portrait-only
+        // app keeps portrait).
         if let reported = after?.deviceOrientation, reported != wanted.rawValue,
            reported != before?.deviceOrientation,
            let learned = RotationPlanner.learnedTransportOffset(sent: sent, reported: reported), learned != offset
@@ -114,7 +132,14 @@ public enum PostureController {
             offset = learned
             sent = RotationPlanner.sendValue(for: wanted, transportOffset: offset)
             try await send(sent, multiDisplay: multiDisplay, session: session, logger: logger)
-            after = await waitForRotation(udid: udid, wanted: wanted, timeout: timeout, monitor: topologyMonitor)
+            after = await waitForRotation(udid: udid, wanted: wanted, target: target, timeout: timeout, monitor: topologyMonitor)
+        } else if let read = after, RotationPlanner.reportHadNoEffect(before: before, after: read, target: target) {
+            // Nothing moved: the report was lost on the way to the guest
+            // (plan E53), or the orientation is refused. A refusal reads
+            // back the same after the second send.
+            logger.info().log("Orientation report \(sent.rawValue) had no effect; sending it again")
+            try await send(sent, multiDisplay: multiDisplay, session: session, logger: logger)
+            after = await waitForRotation(udid: udid, wanted: wanted, target: target, timeout: timeout, monitor: topologyMonitor)
         }
         _ = await postureChanged(udid: udid, topologyMonitor: topologyMonitor, sessionMonitor: sessionMonitor)
 
@@ -220,28 +245,23 @@ public enum PostureController {
         return (last, false)
     }
 
-    /// Waits for the device to report `wanted` and the active display's
-    /// rotation to hold for two reads. Returns the last read when the
-    /// device settles elsewhere (so the caller can learn from it), nil when
-    /// CoreDevice cannot answer.
+    /// Waits for the device to report `wanted` and the routing display to
+    /// show `target`, held for two reads (`RotationPlanner.readBackSettled`).
+    /// Returns the last read when the rotation settles elsewhere (so the
+    /// caller can learn from it), nil when CoreDevice cannot answer.
     static func waitForRotation(
         udid: String,
         wanted: DeviceOrientationValue,
+        target: DisplayOrientation,
         timeout: TimeInterval,
         monitor: SimulatorDisplayTopologyMonitor
     ) async -> SimulatorDisplayTopology? {
         let start = Date()
         let result = await waitForTopology(udid: udid, timeout: timeout, monitor: monitor) { previous, current in
-            // Settled when two reads agree on the reported orientation and
-            // on the rotation. A report other than `wanted` that holds is
-            // an answer too — a wrong transport offset, or a device that
-            // refused — but only after `unexpectedReportGrace`, because the
-            // first reads can still show the orientation from before.
-            guard let previous, let reported = current.deviceOrientation,
-                  previous.deviceOrientation == reported,
-                  (previous.activeIntegrated ?? previous.primary)?.rotation == (current.activeIntegrated ?? current.primary)?.rotation
-            else { return false }
-            return reported == wanted.rawValue || Date().timeIntervalSince(start) >= unexpectedReportGrace
+            RotationPlanner.readBackSettled(
+                previous: previous, current: current, wanted: wanted, target: target,
+                elapsed: Date().timeIntervalSince(start), grace: unexpectedReportGrace
+            )
         }
         return result.topology
     }

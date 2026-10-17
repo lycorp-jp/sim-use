@@ -112,6 +112,26 @@ public enum VendorDefinedHID {
         try? await Task.sleep(nanoseconds: settleNanos)
     }
 
+    /// Starts the simulator's dtuhidd, if it is not running, by sending a
+    /// barrier to its XPC service: launchd starts the daemon on demand, as
+    /// for a fold report. No report is sent.
+    public static func startDtuhidd(on simulator: FBSimulator, logger: SimUseLogger) async throws {
+        let connection = try connect(to: simulator)
+        defer { xpc_connection_cancel(connection) }
+        let barrier = xpc_dictionary_create(nil, nil, 0)
+        xpc_dictionary_set_bool(barrier, "isBarrier", true)
+        let reply: xpc_object_t = await withCheckedContinuation { continuation in
+            xpc_connection_send_message_with_reply(connection, barrier, nil) { reply in
+                continuation.resume(returning: reply)
+            }
+        }
+        if xpc_get_type(reply) == XPC_TYPE_ERROR {
+            let description = xpc_dictionary_get_string(reply, XPC_ERROR_KEY_DESCRIPTION).map { String(cString: $0) } ?? "unknown error"
+            throw CLIError(errorDescription: "dtuhidd in simulator \(simulator.udid) did not answer: \(description)")
+        }
+        logger.info().log("dtuhidd answered in \(simulator.udid)")
+    }
+
     // MARK: Connection
 
     private typealias EndpointFromMachPortFn = @convention(c) (mach_port_t, UInt64, UInt64) -> xpc_object_t?

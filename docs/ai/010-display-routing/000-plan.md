@@ -2,9 +2,9 @@
 
 | | |
 | --- | --- |
-| **Status** | In progress (S1 #157; S2 in review) |
+| **Status** | Implemented in the stack #157, #158, #161, #163, #164, #165 (awaiting merge) |
 | **Anchor date** | 2026-10-16 |
-| **Primary PRs** | — |
+| **Primary PRs** | #157 (S1), #158 (S2), #161 (S3), #163 (S4), #164 (S5), #165 (S6) |
 | **Related** | [009-resizable-app-session](../009-resizable-app-session/000-investigation.md) (#143; this plan replaces its tier-1 guard with real routing), [002-ios-orientation-self-calibration](../002-ios-orientation-self-calibration/000-design.md), [001 dtuhidd short-lived clients](../001-daemon-and-hid-lifecycle/001-dtuhidd-short-lived-clients.md), facebook/idb#965, facebook/idb#980 |
 
 ## Background
@@ -119,6 +119,7 @@ Playground `chrome-test` (NavigationStack, leading and trailing toolbar items, b
 | E42 | Settings (UIKit, system) on the cover, General | Time (400,83), Wi-Fi (409,123) and `#BackButton` (399,179) in the bar; the navigation bar leaves a full-width `Group` (0,24 466x58) behind |
 | E43 | iOS 27.0 SDK build | Horizontal bars on the cover (inset 386x678) and on the inner display (871x669); the tab bar is a declared `Group "Tab Bar"` |
 | E44 | LINE 26.17.0 built with Xcode 27.1 (early-bird branch) on the cover | Fills the 466x678 display (the 27.0 SDK build was a 386x678 inset scene). Welcome and login use custom chrome (`返回` button top left), so no bar; the main tabs need a signed-in account, which this simulator does not have |
+| E57 | Same build, signed in with a test account (2026-10-17; login through the LINE repo's `line_login` task — its password step pastes, which Device Hub breaks (#153), so the password was typed) | Main tabs are `RadioButton`s with ids `#homeTab` … `#miniTab`. Cover portrait and landscape-left: `[Trailing  x>=396]` / `x>=598` with the clock and Wi-Fi; inner landscape-left and landscape-right: `[Trailing  x>=881]`; inner portrait: bottom tab bar in `[Bottom]`, no side region. Cover landscape-right: `[Leading  x<=70]` on the home tab, but **none on the chat tab**: LINE's own header has a two-segment control (`聊天` / `好友`) at x 42, above the bar; it joined the bar column (bar edge x 107) and the list rows then crossed it. Chat screens use LINE's own navigation bar (`#backButton`, top left) and hide the tab bar, so they have no side region |
 
 ### Found while building S5 (2026-10-17)
 
@@ -127,6 +128,25 @@ Playground `chrome-test` (NavigationStack, leading and trailing toolbar items, b
 | E45 | `xcrun simctl io <duo> enumerate` | The cover (1398x2034) and inner (2007x2853) ports are **both display class 0**; the `Resizable` port is class 1 with a 7680x4320 IOSurface. idb's `FBFramebuffer.mainScreenSurface` returns the first class-0 port, so it can never read the inner panel |
 | E46 | `simctl io recordVideo --display=<devicectl uniqueId>` | Inner display with the UI in landscape-left: a 2006x2852 movie, panel-native portrait (not rotated like `simctl … screenshot`). Resize Mode 560x874: 1680x2622 — simctl cuts the scene from the canvas. `recordVideo` writes only to a file, so it cannot carry `stream-video` |
 | E47 | sim-use after S5 | Inner display: `record-video` 2008x2854 (H.264 even padding), 149 frames in ~5 s, a tap during the recording visible. Resize Mode 560x874: `record-video` and `stream-video --format h264` both 1680x2622, the scene with no canvas. Fold during an inner recording: the video stays 2008x2854 and stderr ends with the moved-display notice |
+
+### Found while building S6 (2026-10-17, Device Hub quit)
+
+| # | Check | Result |
+| --- | --- | --- |
+| E48 | Quit Device Hub | Both booted simulators shut down. `simctl boot` (Xcode 27.1) of the Duo, and of iPhone 17 / iOS 27.0: no `dtuhidd` under `launchd_sim`; `devicectl` works |
+| E49 | `ios fold` with no `dtuhidd` | Works. The XPC report to `com.apple.coredevice.feature.remote.hid.vendordefined` makes launchd start `dtuhidd` under the simulator's `launchd_sim`; it stays running. `devicectl device appResize start` does **not** start it |
+| E50 | Cold boot, tap on the cover, unfold, tap on the inner display (before S6) | The first tap made an Indigo connection (no `dtuhidd`); the inner tap failed with `The legacy Indigo HID transport reaches only the main display`. A Resize Mode tap failed the same way |
+| E51 | Same, tap the cover text field, fold open and closed, `type` (before S6) | `type` reported success, the field stayed empty; a daemon restart (new connection, DTUHID) typed correctly. The fold had started `dtuhidd`, which suppresses the legacy keyboard service under the cached Indigo connection |
+| E52 | After S6, Device Hub quit | Inner taps 1 → 2 → 3 at the exact locations; typing after fold/unfold works; a Resize Mode tap on a cold iPhone 17 starts `dtuhidd` and lands at `(450, 650)`. Fold, rotate, AX routing, screenshot and video need no change |
+
+### Found in the Device-Hub-open regression of S6 (2026-10-17)
+
+| # | Check | Result |
+| --- | --- | --- |
+| E53 | `ios rotate` loop on the unfolded Duo with the vendor report connection closed 0 ms after the barrier reply (temporary build) | 12 of 16 reports were lost: the device orientation stayed as before and the command reported `The interface stayed …`, the same output as a refusal. With 100, 250, 400, 700 and 850 ms: 12/12 each. So a report is lost when the connection closes before the guest takes it; the 1 s settle normally leaves a wide margin |
+| E54 | Refused orientation (`portrait-upside-down` on the cover display) | The device orientation does not change either: CoreDevice keeps `portrait`. A lost report and a refusal read back the same |
+| E55 | Temporary build that skips the first vendor report of a daemon | `ios rotate portrait` and `ios fold closed` each logged `had no effect; sending it again` and then confirmed (6.6 s and 7.2 s) |
+| E56 | Sequence inner `landscape-left` → `fold closed` → cover `portrait` → refused `portrait-upside-down` → `portrait` → `fold open` → `rotate portrait`, 57 runs with the resend | Failed 2 times. Traced failure: the topology before was correct (`landscapeRight`, `LCD-1 rot90`, offset 1, sent `landscapeLeft`, the same as every success); the first report and the resend 3 s later both had no effect. Device orientation after `fold open` is `landscapeRight` at once (8 reads in 2.5 s, 3 runs). Not reproduced with `SIM_USE_DEBUG=1` (14 runs), with CPU load, after 20–60 s idle, or without the unfold |
 
 ### Resizable display (Resize Mode)
 
@@ -169,7 +189,7 @@ Sessions: Duo folded, Settings, 560x874 and then 375x667 (`appResize set
 
 - An in-simulator helper process (upstream `SimulatorFrameworkBridge`, `axbridge`).
 - Physical Duo devices (`ios-device` backend).
-- Android `fold` / `rotate`. A follow-up issue is filed after this stack; the verb arguments stay portable.
+- Android `fold` / `rotate`. Follow-up issue #166; the verb arguments stay portable.
 
 ## Design
 
@@ -308,7 +328,7 @@ Acceptance:
 
 - Duo cover display: `#BackButton` and the status bar are in `Trailing`; content rows stay in `Content`. Inner display (landscape and portrait): bands match the 951x669 / 669x951 UI. Tab bar position verified on both displays and placed in a sensible region.
 - Golden fixtures for single-display trees (iPhone portrait, landscape, iPad) are unchanged. Done: `Tests/Fixtures/outline-side-bars/` pins iPhone 17 (Playground chrome portrait/landscape, Settings) and iPad Pro 13-inch / iOS 26.5 (Playground chrome portrait/landscape, Settings sidebar, Settings › About with its back button) with no side region; with no bar the formatter takes the S3 path unchanged.
-- LINE app (simulator build) on both Duo displays: main tabs, a chat, back navigation driven only through `ui` + `tap @N`. **Not met:** the main tabs need a signed-in account (E44); welcome → login → back was driven on both displays with the 27.0 and the 27.1 SDK builds instead.
+- LINE app (simulator build) on both Duo displays: main tabs, a chat, back navigation driven only through `ui` + `tap @N`. **Met (2026-10-17, E57):** signed in, the 27.1 SDK build went home tab → chat tab → a chat → back on the cover (portrait, landscape-right) and the inner display (landscape-left, portrait); the regions of every orientation are in E57. The cover landscape-right chat tab needed the segmented-control fix below. Before that, welcome → login → back was driven on both displays with the 27.0 and the 27.1 SDK builds (E44).
 
 ### S5 — Video on the routing display
 
@@ -328,6 +348,8 @@ Result: met — E47; the fold keeps the starting display and ends with a notice 
 Scope: with Device Hub quit, check `fold`, `rotate`, touch and AX routing.
 Make it work if dtuhidd can be started on demand or Indigo can route; else
 refuse with a message that names the requirement.
+
+Result: works (E48–E52). dtuhidd can be started on demand; Indigo cannot route.
 
 ### After the stack
 
@@ -366,6 +388,7 @@ refuse with a message that names the requirement.
 | S3: split `touch --down` / `--up` take UI coordinates, each half calibrated | Keep `ui` atomic-only (split form would need `native`) | With `ui` as the default, the old rule would reject every split touch. Each half maps the point through the orientation at its own time, which is where the user sees it |
 | S3: `gesture` pinch/rotate centre and canvas in UI space, every sample mapped | Keep native portrait for multi-touch presets | The calibration is affine, so mapping each interpolated sample keeps lines and arcs; the directional presets already use the UI canvas (#66) |
 | S4: side-bar regions from geometry and anchors, not from device or SDK | Device table ("Duo cover = trailing"); trait/SDK checks; AX roles only | The bar edge depends on the display and the orientation (E40, E41); the host cannot read the app's SDK or traits. Anchors are `BackButton` and tab roles (`RadioButton`/`Tab`) — a tab with a sibling tab beside it outside the strip is a horizontal tab bar and does not count (review S4-001). The vertical evidence is the back button plus one more stacked member of its column reaching below the top band (a regular iPhone stacks its status clock above the back button inside the top band, S4-003), or two stacked tabs; any disjoint pair counts, so a rail wrapper does not hide the stack (S4-002). The app's wide content must stay clear of the bar's inner edge — rows on a regular iPhone cross the leading strip, so its back button never qualifies. Full-width grouping elements (the left-behind navigation bar group, E42) are containers, not crossing content |
+| S4: a tab in a horizontal row never joins the bar column; wide content must exist beside the bar (in its vertical range); nothing may cross the bar's edge except an app header that is above the bar and inside the top band | Exclude tab roles from the column; drop the crossing rule; limit the crossing rule to the bar's vertical range | E57: LINE's header above the bar starts inside the strip. Excluding all tabs would drop the bar's own tabs; without the crossing rule a back button over row icons on a regular iPhone would become a bar. Limiting the crossing rule to the bar's range let a profile form (back button, avatar below it, fields below both — with or without a name label beside the avatar) pass as a bar (review S4-004, two rounds) |
 | S4: bar entries listed after the bands, aliases renumbered in print order | Keep reading order (bar items between rows) | An agent reads the bar as one unit; aliases stay monotonic in the text |
 | S5: capture through idb, framebuffer port chosen by pixel size, source crop for the Resize Mode scene (`patches/idb/display-video.patch`) | `simctl io recordVideo --display` for `record-video` | simctl writes only files (no `stream-video`) and has no `--fps`/`--scale`. Two integrated ports share display class 0 (E45), so the port is named by its unrotated size, which CoreDevice reports per display. The crop runs once per frame before the encoder, so every format sees the scene size |
 | S5: the Resize Mode crop comes from the app's actual scene (frontmost application frame), rounded up to even pixels (review S5-001) | The session's requested size | An app can snap away from the request: Settings › General asked for 402x874 shows 437x874, and a 1206 px crop cut off 105 px |
@@ -373,6 +396,9 @@ refuse with a message that names the requirement.
 | S5: the end-of-capture check invalidates the session cache and refreshes a multi-display topology (review S5-003) | Reuse the 5 s / 2 s caches | A capture shorter than the cache window otherwise ends with no notice |
 | S5: videos keep the panel's native portrait orientation | Rotate to the interface orientation | The main display has always recorded its framebuffer unrotated (`simctl recordVideo` does the same, E46); one rule for every display. Rotating every display is a separate change |
 | S5: a display change during a capture keeps the starting display and ends with a stderr notice | Follow the new display; stop the capture | A new display changes the frame size mid-file; stopping loses the take. The notice names both displays; `--json` is unchanged (no new advisory kind) |
+| S6: Device Hub closed — work, not refuse | Refuse routed input without dtuhidd | dtuhidd starts on demand through its XPC service (E49), which sim-use already uses for fold/rotate. A cached auto-selected Indigo connection is rebuilt once dtuhidd runs (keyboard, E51); routed touch starts dtuhidd itself (Resize Mode never does, E49). Only if dtuhidd still does not start does the command fail, naming Device Hub |
+| Fold / rotate send the report once more when it had no effect (same active display; same device orientation and rotation) | Longer settle after the barrier; retry the whole command; no resend | A report can be lost (E53) and the resend recovers it (E55). The report is idempotent, so a refusal only reads back the same (E54); the cost is one more wait on a refusal (`portrait-upside-down` on the cover: 7.4 s). A longer settle bets on one margin and slows every call |
+| Rotate is confirmed at once only when the device orientation **and** the interface reached the target | Device orientation alone | With the device alone, a read taken while the interface still followed was the final answer (open question 18). Same latency on the success path: 3.4–3.9 s per `ios rotate` before and after, 12 runs each |
 | Posture shown only on a non-main routing display | Always; never | Owner decision 2026-10-16: single-display output stays identical |
 | Device Hub closed: make it work if possible, else refuse with the requirement | Must work | Owner decision 2026-10-16 |
 
@@ -386,7 +412,7 @@ refuse with a message that names the requirement.
 
 ## Open questions
 
-1. **Hub closed / Simulator.app.** A fresh headless `simctl boot` (Device Hub running, but not showing the device) already had `dtuhidd` in its process tree, and `devicectl` worked. Not tested with Device Hub quit. With no dtuhidd, sim-use selects the Indigo transport (`defaultHIDTransport`). Can Indigo route to a non-main display? Not tested.
+1. Resolved by S6 (E48–E52) for Device Hub closed; Simulator.app (Xcode 26.x) with an iPhone Duo was not tried. **Hub closed / Simulator.app.** A fresh headless `simctl boot` (Device Hub running, but not showing the device) already had `dtuhidd` in its process tree, and `devicectl` worked. Not tested with Device Hub quit. With no dtuhidd, sim-use selects the Indigo transport (`defaultHIDTransport`). Can Indigo route to a non-main display? Not tested.
 2. Resolved by E27: the selected Xcode's devicectl (27.0 or 27.1) reads the Duo.
 3. Resolved by E21 (path-dependent). Not known: the rule behind it (angle delta, speed, or both), and whether a fully dark display (`off` on both) can happen with Always-On disabled.
 4. Resolved in S4 (E39–E43): with the iOS 27.1 SDK the tab bar is in the vertical bar on the cover (all orientations) and on the inner display in landscape; horizontal at the bottom on the inner display in portrait and with the iOS 27.0 SDK everywhere.
@@ -404,5 +430,7 @@ refuse with a message that names the requirement.
 15. S3: `paste --via-menu --target-x/-y` uses the same `hidPoint` mapping as `tap`, but it was not verified live: with Device Hub open the pasteboard write is replaced (#153), and `--via-menu` already fails on iOS 26.5/27.0 with `--target-id` too.
 16. S3: software-keyboard elements have framebuffer-anchored frames in a rotated tree; they are discriminators in both the tree and the snapshot calibration (known issue, see #34 follow-ups).
 17. S3: `tap @N` calibrates from the snapshot without the in-place confirmation that UI-space coordinates now use, so the first alias tap after a Resize Mode session starts or ends may still follow a stale routing cache. Not changed here.
+18. S6: one `make e2e-ios-duo` run with Device Hub closed failed twice on timing: `ios fold closed` did not see the cover become active within 6 s, and an `ios rotate landscape-left` read back the device turned but the interface still landscape-right. Both suites then passed in four reruns and a second full run (7/7). **Partly resolved (2026-10-17):** the Device-Hub-open regression failed `FoldTests` once more (`ios rotate portrait` right after `fold open`). A vendor report can be lost (E53), so fold and rotate now send it once more when it had no effect (E55), and rotate no longer takes a turned device with an unturned interface as the answer. Still open: right after an unfold, the guest sometimes ignores orientation reports for more than 3 s (E56, 2 of 57 runs); the cause and the length of that window are not known.
 
 ## Amendments
+- Updated 2026-10-17: all six slices done; action log in [001-action.md](001-action.md)

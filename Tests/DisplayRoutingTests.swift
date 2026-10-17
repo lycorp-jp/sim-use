@@ -477,6 +477,29 @@ struct FoldTargetTests {
         #expect(!FoldExpectation.secondaryActive.isMet(by: folded))
     }
 
+    @Test("a hinge report had no effect when the same display stays active and the expectation is unmet")
+    func hingeNoEffect() throws {
+        let folded = try topology("duo-folded")
+        let open = try topology("duo-open")
+        #expect(FoldExpectation.secondaryActive.reportHadNoEffect(before: folded, after: folded))
+        #expect(!FoldExpectation.secondaryActive.reportHadNoEffect(before: folded, after: open))
+        #expect(FoldExpectation.primaryActive.reportHadNoEffect(before: open, after: open))
+        // In flight: no display active yet is a change.
+        let switching = SimulatorDisplayTopology(
+            displays: open.displays.map { display in
+                SimulatorDisplay(
+                    displayID: display.displayID, uniqueID: display.uniqueID, name: display.name, kind: display.kind,
+                    isPrimary: display.isPrimary, isActive: false, backlightState: display.backlightState,
+                    rotation: display.rotation, pixelWidth: display.pixelWidth, pixelHeight: display.pixelHeight, pointScale: display.pointScale
+                )
+            },
+            deviceOrientation: open.deviceOrientation
+        )
+        #expect(!FoldExpectation.primaryActive.reportHadNoEffect(before: open, after: switching))
+        // An intermediate angle has no expectation to miss.
+        #expect(!FoldExpectation.observeOnly.reportHadNoEffect(before: open, after: open))
+    }
+
     @Test("the posture summary names the active display and the other integrated displays")
     func postureSummary() throws {
         let report = PostureReport(topology: try topology("duo-open"), session: nil)
@@ -529,6 +552,62 @@ struct RotationPlannerTests {
     func unlearnable() {
         #expect(RotationPlanner.learnedTransportOffset(sent: .portrait, reported: "faceUp") == nil)
         #expect(RotationPlanner.learnedTransportOffset(sent: .portrait, reported: "unknown") == nil)
+    }
+
+    /// `duo-open` with the device orientation and the active display's
+    /// rotation replaced: a read-back at another moment of a rotation.
+    private func reading(device: String, active rotation: SimulatorDisplayRotation) throws -> SimulatorDisplayTopology {
+        let open = try topology("duo-open")
+        return SimulatorDisplayTopology(
+            displays: open.displays.map { display in
+                guard display.isActive, display.kind == .integrated else { return display }
+                return SimulatorDisplay(
+                    displayID: display.displayID, uniqueID: display.uniqueID, name: display.name, kind: display.kind,
+                    isPrimary: display.isPrimary, isActive: display.isActive, backlightState: display.backlightState,
+                    rotation: rotation, pixelWidth: display.pixelWidth, pixelHeight: display.pixelHeight, pointScale: display.pointScale
+                )
+            },
+            deviceOrientation: device
+        )
+    }
+
+    @Test("a read-back settles at once only when both the device and the interface reached the target")
+    func settlesOnTarget() throws {
+        // Unfolded Duo, landscape-left → portrait: the device must report
+        // portrait and the inner display rot0.
+        let done = try reading(device: "portrait", active: .rot0)
+        #expect(RotationPlanner.readBackSettled(previous: done, current: done, wanted: .portrait, target: .portrait, elapsed: 0.3, grace: 1.5))
+        #expect(!RotationPlanner.readBackSettled(previous: nil, current: done, wanted: .portrait, target: .portrait, elapsed: 0.3, grace: 1.5))
+        let moving = try reading(device: "portrait", active: .rot90)
+        #expect(!RotationPlanner.readBackSettled(previous: moving, current: done, wanted: .portrait, target: .portrait, elapsed: 3, grace: 1.5))
+    }
+
+    /// Plan open question 18: the device turned, the interface not yet.
+    @Test("a device that turned while the interface did not is not an answer before the grace")
+    func interfaceLagWaits() throws {
+        let lagging = try reading(device: "portrait", active: .rot90)
+        #expect(!RotationPlanner.readBackSettled(previous: lagging, current: lagging, wanted: .portrait, target: .portrait, elapsed: 0.6, grace: 1.5))
+        #expect(RotationPlanner.readBackSettled(previous: lagging, current: lagging, wanted: .portrait, target: .portrait, elapsed: 1.6, grace: 1.5))
+    }
+
+    @Test("an unchanged read-back is the answer only after the grace")
+    func unchangedWaits() throws {
+        let unchanged = try topology("duo-open")
+        #expect(!RotationPlanner.readBackSettled(previous: unchanged, current: unchanged, wanted: .portrait, target: .portrait, elapsed: 0.6, grace: 1.5))
+        #expect(RotationPlanner.readBackSettled(previous: unchanged, current: unchanged, wanted: .portrait, target: .portrait, elapsed: 1.6, grace: 1.5))
+    }
+
+    /// A lost orientation report and a refused one read back the same:
+    /// nothing moved. Both justify one more send.
+    @Test("a report had no effect when neither the device nor the active display moved")
+    func noEffect() throws {
+        let before = try topology("duo-open")
+        #expect(RotationPlanner.reportHadNoEffect(before: before, after: before, target: .portrait))
+        #expect(!RotationPlanner.reportHadNoEffect(before: before, after: try reading(device: "portrait", active: .rot90), target: .portrait))
+        #expect(!RotationPlanner.reportHadNoEffect(before: before, after: try reading(device: "landscapeRight", active: .rot0), target: .portrait))
+        // Already at the target: nothing to resend.
+        #expect(!RotationPlanner.reportHadNoEffect(before: before, after: before, target: .landscapeLeft))
+        #expect(!RotationPlanner.reportHadNoEffect(before: nil, after: before, target: .portrait))
     }
 
     @Test("Purple numbers landscape in interface style, so device left and right swap")
