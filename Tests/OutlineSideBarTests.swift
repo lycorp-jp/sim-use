@@ -271,6 +271,25 @@ struct OutlineSideBarTests {
         #expect(outline.regionKind(id: "BackButton") == "Top")
     }
 
+    @Test("a profile header beside the avatar does not make a bar while the fields below cross it (S4-004)",
+          arguments: [false, true])
+    func profileHeaderBesideAvatar(mirrored: Bool) throws {
+        // The S4-004 form with a wide name label beside the avatar; the
+        // mirrored variant puts the back button and avatar on the right.
+        func x(_ value: Int, _ width: Int) -> Int { mirrored ? 402 - value - width : value }
+        let children = [
+            element("Button", "Back", x(16, 44), 62, 44, 44, id: "BackButton"),
+            element("Heading", "Profile", 150, 74, 100, 22),
+            element("Image", "Avatar", x(16, 64), 160, 64, 64),
+            element("StaticText", "Display name", x(96, 290), 170, 290, 28),
+            element("TextField", "Name", x(16, 370), 260, 370, 44),
+            element("TextField", "Status", x(16, 370), 324, 370, 44),
+        ].joined(separator: ",")
+        let outline = OutlineFormatter.render(tree: try tree(children))
+        #expect(outline.sideKinds.isEmpty)
+        #expect(outline.regionKind(id: "BackButton") == "Top")
+    }
+
     @Test("a single tab with unrelated items above it is not a bar")
     func singleTabAnchor() throws {
         let children = [
