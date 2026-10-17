@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
 import FBSimulatorControl
+import SimUseCore
 
 /// Legacy-shaped wrappers over the typed `FBAccessibilityElement` API.
 ///
@@ -38,7 +39,12 @@ extension FBSimulator {
         includeRemoteContent: Bool = false,
         remoteSamplingRegion: CGRect? = nil
     ) async throws -> AnyObject {
-        let element = try await accessibilityElementForFrontmostApplication()
+        let element: FBAccessibilityElement
+        do {
+            element = try await accessibilityElementForFrontmostApplication()
+        } catch {
+            throw FrontmostAccessibilityError.mapping(error, udid: udid)
+        }
         defer { element.close() }
         let options = LegacyAccessibilityRequestBuilder.options(
             nestedFormat: nestedFormat,
@@ -57,6 +63,46 @@ extension FBSimulator {
         defer { element.close() }
         let response = try element.serialize(with: FBAccessibilityRequestOptions(nestedFormat: nestedFormat))
         return response.elements as AnyObject
+    }
+}
+
+/// Replaces idb's `noTranslationObject` on the frontmost-tree fetch. idb's
+/// text blames an invalid point or a fullscreen dialog, which applies only
+/// to point queries. On the frontmost path, with SpringBoard alive (idb
+/// re-labels a dead SpringBoard itself), the usual cause is a stale
+/// CoreSimulatorBridge: point queries still resolve, the frontmost query
+/// returns nil on every screen, and only a bridge restart recovers it.
+///
+/// The description keeps idb's leading sentence on purpose:
+/// `DaemonErrorKind.classify` matches it to retry once after a fresh boot,
+/// when the same nil is genuinely transient.
+public struct FrontmostAccessibilityError: LocalizedError, HintProviding, Equatable {
+    public let udid: String
+
+    public init(udid: String) {
+        self.udid = udid
+    }
+
+    public var errorDescription: String? {
+        "No translation object returned for simulator \(udid) for the frontmost application. " +
+            "The simulator's accessibility bridge reported no frontmost application; no screen point was involved."
+    }
+
+    public var hint: String? {
+        "If the simulator booted only a moment ago, wait a few seconds and retry. " +
+            "If the error continues while the simulator responds normally (`screenshot` works, `ui --point` returns elements), " +
+            "the simulator's accessibility bridge is stale. Restart it with " +
+            "`xcrun simctl spawn \(udid) launchctl stop com.apple.CoreSimulator.bridge` " +
+            "(launchd starts it again at once), then retry. " +
+            "Other tools that use this simulator lose accessibility for a moment during the restart."
+    }
+
+    /// `noTranslationObject` becomes this error; every other error passes through.
+    static func mapping(_ error: Error, udid: String) -> Error {
+        if case FBAccessibilityError.noTranslationObject = error {
+            return FrontmostAccessibilityError(udid: udid)
+        }
+        return error
     }
 }
 
