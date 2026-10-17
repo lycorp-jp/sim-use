@@ -115,9 +115,12 @@ struct DaemonClientEnsureCompatibleDaemonTests {
         let pidBefore = paths.readPidfile()
         #expect(pidBefore != nil)
 
+        // In-process daemon: a long probe timeout, so a busy main queue
+        // is not mistaken for a missing daemon (DaemonConnectionGateTests).
         let restarted = await DaemonClient.ensureCompatibleDaemon(
             paths: paths,
-            currentVersion: "bench-match"
+            currentVersion: "bench-match",
+            probeTimeout: 30
         )
         #expect(restarted == false)
         #expect(paths.readPidfile() == pidBefore)
@@ -143,13 +146,14 @@ struct DaemonClientEnsureCompatibleDaemonTests {
 
         let restarted = await DaemonClient.ensureCompatibleDaemon(
             paths: paths,
-            currentVersion: "bench-new"
+            currentVersion: "bench-new",
+            probeTimeout: 30
         )
         #expect(restarted == true)
 
         // Give the DaemonServer's main-actor shutdown path a tick to
         // finalise cleanup before asserting filesystem state.
-        for _ in 0..<25 {
+        for _ in 0..<500 {
             if !FileManager.default.fileExists(atPath: paths.socketURL.path),
                paths.readPidfile() == nil {
                 break

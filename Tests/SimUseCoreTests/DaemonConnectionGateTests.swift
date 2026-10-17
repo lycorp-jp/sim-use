@@ -129,7 +129,8 @@ struct DaemonConnectionGateTests {
         let restarted = await DaemonClient.ensureCompatibleDaemon(
             paths: paths,
             currentVersion: "gate-test",
-            currentConnectionIdentity: "adb=tcp:192.0.2.20:5037"
+            currentConnectionIdentity: "adb=tcp:192.0.2.20:5037",
+            probeTimeout: Self.probeTimeout
         )
 
         #expect(restarted)
@@ -149,7 +150,8 @@ struct DaemonConnectionGateTests {
         let restarted = await DaemonClient.ensureCompatibleDaemon(
             paths: paths,
             currentVersion: "gate-test",
-            currentConnectionIdentity: identity
+            currentConnectionIdentity: identity,
+            probeTimeout: Self.probeTimeout
         )
 
         #expect(!restarted)
@@ -167,7 +169,8 @@ struct DaemonConnectionGateTests {
             paths: paths,
             currentVersion: "gate-test",
             currentConnectionIdentity: "adb=tcp:192.0.2.20:5037",
-            environment: ["SIM_USE_DAEMON_VERSION_CHECK": "0"]
+            environment: ["SIM_USE_DAEMON_VERSION_CHECK": "0"],
+            probeTimeout: Self.probeTimeout
         )
 
         #expect(restarted)
@@ -176,6 +179,12 @@ struct DaemonConnectionGateTests {
     }
 
     // MARK: - Fixtures
+
+    /// These daemons run in the test process, and their accept source is
+    /// on the main queue, which parallel suites keep busy for seconds on a
+    /// loaded runner. With the 2 s production probe timeout the `_ping`
+    /// timed out there, and the gate kept the daemon (CI, 2026-10-17).
+    static let probeTimeout: TimeInterval = 30
 
     enum FixtureError: Error { case daemonNeverReady }
 
@@ -205,7 +214,7 @@ struct DaemonConnectionGateTests {
     }
 
     private func waitForShutdown(_ paths: DaemonPaths) async {
-        for _ in 0..<50 {
+        for _ in 0..<500 {
             if !FileManager.default.fileExists(atPath: paths.socketURL.path), paths.readPidfile() == nil { return }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }

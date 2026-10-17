@@ -256,7 +256,8 @@ public enum DaemonClient {
         paths: DaemonPaths,
         currentVersion: String,
         currentConnectionIdentity: String? = nil,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        probeTimeout: TimeInterval = 2.0
     ) async -> Bool {
         let checkVersion = environment["SIM_USE_DAEMON_VERSION_CHECK"] != "0"
         guard checkVersion || currentConnectionIdentity != nil else {
@@ -268,7 +269,7 @@ public enum DaemonClient {
             let responseData = try sendToExistingDaemon(
                 socketPath: paths.socketURL.path,
                 command: DaemonProtocol.ManagementCommand.ping.rawValue,
-                readTimeout: 2.0
+                readTimeout: probeTimeout
             )
             let ping = try JSONDecoder()
                 .decode(DaemonClientSuccessPayload<DaemonPingData>.self, from: responseData)
