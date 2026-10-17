@@ -65,6 +65,6 @@ if [[ -n "$playground_xcode_version" && "$(printf '%s\n%s\n' "27.1" "$playground
 fi
 
 if [[ $# -eq 0 ]]; then
-    set -- FoldTests RotateTests ResizeModeTests ScreenshotTests UICoordinateDefaultTests SideBarOutlineTests
+    set -- FoldTests RotateTests ResizeModeTests ScreenshotTests UICoordinateDefaultTests SideBarOutlineTests RoutedVideoTests
 fi
 exec ./scripts/test-runner.sh "$@"

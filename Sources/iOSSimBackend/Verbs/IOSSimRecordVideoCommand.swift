@@ -87,11 +87,6 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         guard !trimmedUDID.isEmpty else {
             throw CLIError(errorDescription: "Simulator UDID cannot be empty. Use --udid to specify a simulator.")
         }
-        // Resizable app session (issue #143): both capture paths below read
-        // the main framebuffer, which shows only the wallpaper during a
-        // session. Refuse before any output file is created.
-        try await RoutingDisplayGuard.assertCaptureReachesApp(udid: trimmedUDID, verb: "record-video", logger: logger)
-
         let simulatorSet = try await getSimulatorSet(deviceSetPath: nil, logger: logger, reporter: EmptyEventReporter.shared)
         guard let targetSimulator = simulatorSet.allSimulators.first(where: { $0.udid == trimmedUDID }) else {
             throw CLIError(errorDescription: "Simulator with UDID \(trimmedUDID) not found.")
@@ -102,12 +97,20 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
             throw CLIError(errorDescription: "Simulator \(trimmedUDID) is not booted. Current state: \(stateDescription)")
         }
 
+        // Off the main display (an unfolded iPhone Duo, a Resize Mode
+        // session) the recording reads the framebuffer of the display that
+        // hosts the app (docs/ai/010-display-routing, S5). Resolved before
+        // any output file is created.
+        let sceneSize: () async -> CGSize? = { (try? await targetSimulator.frontmostApplicationFrame())?.size }
+        let source = try await RoutingDisplayGuard.captureSource(udid: trimmedUDID, verb: "record-video", logger: logger, sceneSize: sceneSize)
+
         // GIF is transcoded from a finished MP4 (see GIFTranscoder); the
         // capture loop itself always writes H.264, to plan.recordTarget.
         let plan = try RecordingOutputPlan(format: format, output: output, fps: fps, scale: scale, gifMarkers: gifMarkers)
         let options = plan.options
         let recordTarget = plan.recordTarget
-        FileHandle.standardError.write(Data("Recording simulator \(targetSimulator.udid) to \(plan.outputURL.path)\n".utf8))
+        let displayNote = source.map { " (display '\($0.displayName)')" } ?? ""
+        FileHandle.standardError.write(Data("Recording simulator \(targetSimulator.udid)\(displayNote) to \(plan.outputURL.path)\n".utf8))
         FileHandle.standardError.write(Data("Press Ctrl+C to stop recording\n".utf8))
 
         let cancellationFlag = CancellationFlag()
@@ -121,6 +124,7 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         do {
             try await recordVideoViaNativeRecording(
                 simulator: targetSimulator,
+                source: source,
                 outputURL: recordTarget,
                 fps: options.fps ?? 30,
                 quality: quality,
@@ -154,6 +158,9 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         // a handler that has nothing left to cancel (invalidate is
         // idempotent; the defer covers the error paths above).
         signalObserver.invalidate()
+        if let notice = await RoutingDisplayGuard.captureMovedNotice(udid: trimmedUDID, verb: "record-video", started: source, sceneSize: sceneSize) {
+            FileHandle.standardError.write(Data(notice.utf8))
+        }
         try await plan.finalizeRecording()
         return ExecutionResult(path: plan.outputURL.path)
     }
@@ -162,6 +169,7 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
 
     private func recordVideoViaNativeRecording(
         simulator: FBSimulator,
+        source: CaptureSource?,
         outputURL: URL,
         fps: Int,
         quality: Int,
@@ -184,9 +192,12 @@ public struct IOSSimRecordVideoCommand: SimUseExecutableCommand {
         do {
             stream = try await simulator.createStream(
                 configuration: config,
+                source: source,
                 to: AnnexBPipelineConsumer(pipeline: pipeline)
             )
         } catch {
+            // The screenshot fallback reads the main display only.
+            guard source == nil else { throw error }
             throw RecordingUnavailableError(underlying: error.localizedDescription)
         }
 

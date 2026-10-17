@@ -299,8 +299,7 @@ public struct ResizableAppSessionCaptureError: RoutingDisplayRefusal, Equatable 
     }
 
     public var hint: String? {
-        "Use `screenshot`, which is redirected to the '\(session.displayName)' display automatically, or record that display with " +
-            "`xcrun simctl io \(udid) recordVideo --display=\(session.displayUniqueID) <file.mov>`. " +
+        "Use `stream-video --format h264` or `--format bgra`, or `record-video`, which capture the '\(session.displayName)' display. " +
             "End the session — stop the `xcrun devicectl device appResize start` process, or rotate the device — to use `\(verb)` normally. " +
             "Set \(ResizableAppSessionMonitor.disableEnvironmentKey)=0 to skip this check."
     }

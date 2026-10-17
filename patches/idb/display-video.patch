@@ -1,0 +1,225 @@
+diff --git a/FBSimulatorControl/Commands/FBSimulatorVideoRecordingCommands.swift b/FBSimulatorControl/Commands/FBSimulatorVideoRecordingCommands.swift
+index 5c581c5c8..99e09ea16 100644
+--- a/FBSimulatorControl/Commands/FBSimulatorVideoRecordingCommands.swift
++++ b/FBSimulatorControl/Commands/FBSimulatorVideoRecordingCommands.swift
+@@ -98,6 +98,18 @@ public final class FBSimulatorVideoRecordingCommands: NSObject, FBiOSTargetComma
+     let framebuffer = try await simulator.connectToFramebuffer()
+     return try await FBSimulatorVideoStream.start(framebuffer: framebuffer, configuration: configuration, to: consumer, logger: logger!)
+   }
++
++  fileprivate func createStreamAsync(configuration: FBVideoStreamConfiguration, displayPixelWidth: Int, displayPixelHeight: Int, sourceCrop: CGRect?, to consumer: any FBDataConsumer) async throws -> any FBVideoStream {
++    guard let simulator = self.simulator else {
++      throw FBSimulatorVideoRecordingCommandError.simulatorDeallocated
++    }
++    let logger = simulator.logger!
++    let framebuffer = try FBFramebuffer.surface(for: simulator, pixelWidth: displayPixelWidth, pixelHeight: displayPixelHeight, logger: logger)
++    let stream = FBSimulatorVideoStream.make(framebuffer: framebuffer, configuration: configuration, logger: logger)
++    stream.sourceCrop = sourceCrop
++    try await stream.startStreaming(consumer)
++    return stream
++  }
+ }
+ 
+ // MARK: - FBSimulator+VideoRecordingCommands
+@@ -120,4 +132,16 @@ extension FBSimulator: VideoStreamCommands {
+   public func createStream(configuration: FBVideoStreamConfiguration, to consumer: any FBDataConsumer) async throws -> any FBVideoStream {
+     try await videoRecordingCommands().createStreamAsync(configuration: configuration, to: consumer)
+   }
++
++  /// A stream of the display port of `displayPixelWidth` x `displayPixelHeight` pixels (unrotated),
++  /// optionally cut to `sourceCrop` (pixels, top-left origin) — for a display other than the main
++  /// one: the iPhone Duo inner panel, or the scene on the Resize Mode canvas.
++  public func createStream(configuration: FBVideoStreamConfiguration, displayPixelWidth: Int, displayPixelHeight: Int, sourceCrop: CGRect?, to consumer: any FBDataConsumer) async throws -> any FBVideoStream {
++    try await videoRecordingCommands().createStreamAsync(
++      configuration: configuration,
++      displayPixelWidth: displayPixelWidth,
++      displayPixelHeight: displayPixelHeight,
++      sourceCrop: sourceCrop,
++      to: consumer)
++  }
+ }
+diff --git a/FBSimulatorControl/Framebuffer/FBFramebuffer.swift b/FBSimulatorControl/Framebuffer/FBFramebuffer.swift
+index ea8359d91..f9f3fd2f1 100644
+--- a/FBSimulatorControl/Framebuffer/FBFramebuffer.swift
++++ b/FBSimulatorControl/Framebuffer/FBFramebuffer.swift
+@@ -91,6 +91,35 @@ public final class FBFramebuffer: NSObject, @unchecked Sendable {
+     throw FBSimulatorError.describe("Could not find the Main Screen Surface for Clients \(FBCollectionInformation.oneLineDescription(from: ports)) in \(ioClient)").build()
+   }
+ 
++  /// The display port whose default size is `pixelWidth` x `pixelHeight` (unrotated pixels). A
++  /// simulator with more than one display — the iPhone Duo cover and inner panels are both display
++  /// class 0, the Resize Mode canvas is class 1 — needs the port named by its size; the main-screen
++  /// lookup above returns the first class-0 port only.
++  @objc(surfaceForSimulator:pixelWidth:pixelHeight:logger:error:)
++  public class func surface(for simulator: FBSimulator, pixelWidth: Int, pixelHeight: Int, logger: any FBControlCoreLogger) throws -> FBFramebuffer {
++    let ioClient = simulator.device.io!
++    guard let ports = ioClient.ioPorts() as [Any]? else {
++      throw FBSimulatorError.describe("No IO ports available on \(ioClient)").build()
++    }
++    for port in ports {
++      guard let portInterface = port as? SimDeviceIOPortInterface else {
++        continue
++      }
++      let descriptor = portInterface.descriptor as AnyObject
++      guard descriptor.conforms(to: SimDisplayRenderable.self),
++        descriptor.conforms(to: SimDisplayIOSurfaceRenderable.self),
++        descriptor.responds(to: NSSelectorFromString("state"))
++      else {
++        continue
++      }
++      let state = descriptor.perform(NSSelectorFromString("state"))?.takeUnretainedValue() as! SimDisplayDescriptorState
++      if Int(state.defaultWidthForDisplay) == pixelWidth && Int(state.defaultHeightForDisplay) == pixelHeight {
++        return FBFramebuffer(surface: descriptor, logger: logger)
++      }
++    }
++    throw FBSimulatorError.describe("No display port of \(pixelWidth)x\(pixelHeight) pixels among \(FBCollectionInformation.oneLineDescription(from: ports)) in \(ioClient)").build()
++  }
++
+   private init(surface: AnyObject, logger: any FBControlCoreLogger) {
+     self.consumers = NSMapTable(keyOptions: .weakMemory, valueOptions: .copyIn)
+     self.logger = logger
+diff --git a/FBSimulatorControl/Framebuffer/FBSimulatorVideoStream.swift b/FBSimulatorControl/Framebuffer/FBSimulatorVideoStream.swift
+index 46749ef0d..8abb8946d 100644
+--- a/FBSimulatorControl/Framebuffer/FBSimulatorVideoStream.swift
++++ b/FBSimulatorControl/Framebuffer/FBSimulatorVideoStream.swift
+@@ -347,8 +347,23 @@ final class FBSimulatorVideoStreamFramePusher_Bitmap: FBSimulatorVideoStreamFram
+ 
+     guard let baseAddress = CVPixelBufferGetBaseAddress(bufferToWrite) else { return }
+     let size = CVPixelBufferGetDataSize(bufferToWrite)
+-
+-    if consumer is FBDataConsumerSync {
++    let height = CVPixelBufferGetHeight(bufferToWrite)
++    let bytesPerRow = CVPixelBufferGetBytesPerRow(bufferToWrite)
++    let packedBytesPerRow = CVPixelBufferGetWidth(bufferToWrite) * 4
++
++    // Consumers read packed BGRA rows (`ffmpeg -f rawvideo -video_size WxH`). A buffer whose rows
++    // carry alignment padding — a cropped or scaled pool buffer, or a surface whose width is not a
++    // multiple of 16 pixels — is repacked row by row; the padding is not part of the image.
++    if bytesPerRow != packedBytesPerRow {
++      var data = Data(count: packedBytesPerRow * height)
++      data.withUnsafeMutableBytes { (destination: UnsafeMutableRawBufferPointer) in
++        guard let destinationBase = destination.baseAddress else { return }
++        for row in 0..<height {
++          memcpy(destinationBase + row * packedBytesPerRow, baseAddress + row * bytesPerRow, packedBytesPerRow)
++        }
++      }
++      consumer.consumeData(data)
++    } else if consumer is FBDataConsumerSync {
+       let data = Data(bytesNoCopy: baseAddress, count: size, deallocator: .none)
+       consumer.consumeData(data)
+     } else {
+@@ -821,6 +836,13 @@ public class FBSimulatorVideoStream: NSObject, FBFramebufferConsumer, FBVideoStr
+   /// writer's chapter track. Resolved in `mountSurface`, cleared in `stopStreaming`.
+   var timedMetadataConsumer: (any FBTimedMetadataConsumer)?
+ 
++  /// The part of the surface to stream, in pixels with a top-left origin; nil streams the whole
++  /// surface. Set before `startStreaming`. The Resize Mode display is a large canvas with the
++  /// resized scene at its origin, so a capture of the scene crops the canvas.
++  public var sourceCrop: CGRect?
++  /// BGRA buffers of the crop size, created in `mountSurface` when `sourceCrop` is set.
++  var cropBufferPool: CVPixelBufferPool?
++
+   // Overlay compositing
+   var overlayBuffer: CVPixelBuffer?
+   var compositorCIContext: CIContext?
+@@ -1028,7 +1050,7 @@ public class FBSimulatorVideoStream: NSObject, FBFramebufferConsumer, FBVideoStr
+     if status != kCVReturnSuccess {
+       throw FBSimulatorVideoStreamError.failedToCreatePixelBufferFromSurface(status: status)
+     }
+-    guard let buffer = unmanagedBuffer?.takeRetainedValue() else {
++    guard let sourceBuffer = unmanagedBuffer?.takeRetainedValue() else {
+       throw FBSimulatorVideoStreamError.failedToCreatePixelBufferFromSurfaceNil
+     }
+ 
+@@ -1036,12 +1058,41 @@ public class FBSimulatorVideoStream: NSObject, FBFramebufferConsumer, FBVideoStr
+       throw FBSimulatorVideoStreamError.mountSurfaceWithoutConsumer
+     }
+ 
++    // Metal-backed CIContext for GPU cropping and compositing — created once, reused across frames.
++    if compositorCIContext == nil {
++      if let device = MTLCreateSystemDefaultDevice() {
++        compositorCIContext = CIContext(mtlDevice: device, options: [.cacheIntermediates: false])
++      } else {
++        compositorCIContext = CIContext(options: [.cacheIntermediates: false])
++      }
++    }
++
++    // With a source crop, everything downstream (attributes, frame pusher, compositing) sees
++    // frames of the crop size; `pixelBuffer` keeps the whole surface and `pushFrame` crops it.
++    cropBufferPool = nil
++    if let crop = sourceCrop {
++      // Even sizes for H.264, rounded up so the crop keeps every pixel it names.
++      let width = Int((crop.width / 2).rounded(.up)) * 2
++      let height = Int((crop.height / 2).rounded(.up)) * 2
++      let attrs: [String: Any] = [
++        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
++        kCVPixelBufferWidthKey as String: width,
++        kCVPixelBufferHeightKey as String: height,
++        kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any](),
++      ]
++      var pool: CVPixelBufferPool?
++      CVPixelBufferPoolCreate(nil, nil, attrs as CFDictionary, &pool)
++      cropBufferPool = pool
++      logger.info().log("Cropping the \(CVPixelBufferGetWidth(sourceBuffer))x\(CVPixelBufferGetHeight(sourceBuffer)) surface to \(width)x\(height) at (\(Int(crop.minX)),\(Int(crop.minY)))")
++    }
++    let buffer = croppedFrame(sourceBuffer) ?? sourceBuffer
++
+     // Get the Attributes
+     let attributes = bitmapStreamPixelBufferAttributes(from: buffer)
+     logger.log("Mounting Surface with Attributes: \(FBCollectionInformation.oneLineDescription(from: attributes))")
+ 
+     // Swap the pixel buffers.
+-    self.pixelBuffer = buffer
++    self.pixelBuffer = sourceBuffer
+     self.pixelBufferAttributes = attributes
+ 
+     let framePusher = try Self.framePusher(
+@@ -1064,15 +1115,7 @@ public class FBSimulatorVideoStream: NSObject, FBFramebufferConsumer, FBVideoStr
+         ?? FBTransportTimedMetadataConsumer(consumer: consumer, timedMetadataWriter: transportTimedMetadataWriter)
+     }
+ 
+-    // Set up overlay compositing infrastructure.
+-    // Metal-backed CIContext for GPU compositing — created once, reused across frames.
+-    if compositorCIContext == nil {
+-      if let device = MTLCreateSystemDefaultDevice() {
+-        compositorCIContext = CIContext(mtlDevice: device, options: [.cacheIntermediates: false])
+-      } else {
+-        compositorCIContext = CIContext(options: [.cacheIntermediates: false])
+-      }
+-    }
++    // Set up overlay compositing infrastructure (the CIContext is created above).
+     // IOSurface-backed BGRA pixel buffer pool for composited output (ARC-managed).
+     // Include edge insets in the pool dimensions so the composited frame has room for overlay content.
+     compositedBufferPool = nil
+@@ -1171,11 +1214,30 @@ public class FBSimulatorVideoStream: NSObject, FBFramebufferConsumer, FBVideoStr
+     return result
+   }
+ 
++  /// `source` cut to `sourceCrop`, or nil without a crop. Core Image has a bottom-left origin.
++  func croppedFrame(_ source: CVPixelBuffer) -> CVPixelBuffer? {
++    guard let crop = sourceCrop, let cropBufferPool, let compositorCIContext else {
++      return nil
++    }
++    let sourceHeight = CGFloat(CVPixelBufferGetHeight(source))
++    let rect = CGRect(x: crop.minX, y: sourceHeight - crop.maxY, width: crop.width, height: crop.height)
++    let image = CIImage(cvPixelBuffer: source)
++      .cropped(to: rect)
++      .transformed(by: CGAffineTransform(translationX: -rect.minX, y: -rect.minY))
++    var output: CVPixelBuffer?
++    guard CVPixelBufferPoolCreatePixelBuffer(nil, cropBufferPool, &output) == kCVReturnSuccess, let output else {
++      return nil
++    }
++    compositorCIContext.render(image, to: output)
++    return output
++  }
++
+   func pushFrame(forceKeyFrame: Bool) {
+     // Ensure that we have all preconditions in place before pushing.
+-    guard let pixelBuffer, let consumer, let framePusher else {
++    guard let sourceBuffer = pixelBuffer, let consumer, let framePusher else {
+       return
+     }
++    let pixelBuffer = croppedFrame(sourceBuffer) ?? sourceBuffer
+     if !checkConsumerBufferLimit(consumer, logger) {
+       return
+     }

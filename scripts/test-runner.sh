@@ -390,6 +390,7 @@ run_tests() {
             "RemoteContentRecoveryTests"
             "ResizeModeTests"
             "RotateTests"
+            "RoutedVideoTests"
             "ScreenshotTests"
             "SideBarOutlineTests"
             "StreamVideoDebugTest"
