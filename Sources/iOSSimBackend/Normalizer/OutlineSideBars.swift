@@ -17,12 +17,13 @@ import SimUseCore
 ///    least one more element above or below it, reaching below the top
 ///    band — a regular navigation bar keeps the status clock and the back
 ///    button both inside it — or at least two tabs stacked vertically.
-/// 3. The app's wide content stays clear of the bar: at least one wide
-///    element exists, and nothing except a container (full screen, or a
-///    full-width group) crosses the bar's inner edge beside the bar. On a
-///    regular iPhone the back button and row icons share the leading
-///    strip, but every row runs across it. An app's own header above the
-///    bar may start inside the strip (LINE on the cover in landscape-right).
+/// 3. The app's wide content stays clear of the bar: beside the bar (in
+///    its vertical range) at least one wide element exists, and nothing
+///    except a container (full screen, or a full-width group) crosses the
+///    bar's inner edge. On a regular iPhone the back button and row icons
+///    share the leading strip, but every row runs across it. An app's own
+///    header above the bar may start inside the strip (LINE on the cover
+///    in landscape-right); content only below the column is no evidence.
 ///
 /// Work record: docs/ai/010-display-routing/000-plan.md (S4).
 enum OutlineSideBars {
@@ -102,14 +103,14 @@ enum OutlineSideBars {
         case .trailing: boundary = members.map(\.frame.x).min() ?? screen.width
         }
 
-        // Content beside the bar stays on its own side.
-        let content = items.filter { !isContainer($0, screen: screen) }.map(\.frame)
-        guard content.contains(where: { $0.width * 2 >= screen.width }) else { return nil }
+        // Wide content beside the bar, all of it on its own side.
         let barTop = members.map(\.frame.y).min() ?? 0
         let barBottom = members.map { $0.frame.y + $0.frame.height }.max() ?? screen.height
-        let crossed = content.contains {
-            $0.x < boundary && $0.x + $0.width > boundary && $0.y < barBottom && $0.y + $0.height > barTop
+        let beside = items.filter { !isContainer($0, screen: screen) }.map(\.frame).filter {
+            $0.y < barBottom && $0.y + $0.height > barTop
         }
+        guard beside.contains(where: { $0.width * 2 >= screen.width }) else { return nil }
+        let crossed = beside.contains { $0.x < boundary && $0.x + $0.width > boundary }
         guard !crossed else { return nil }
         return Bar(edge: edge, boundary: boundary)
     }
