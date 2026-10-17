@@ -21,9 +21,10 @@ import SimUseCore
 ///    its vertical range) at least one wide element exists, and nothing
 ///    except a container (full screen, or a full-width group) crosses the
 ///    bar's inner edge. On a regular iPhone the back button and row icons
-///    share the leading strip, but every row runs across it. An app's own
-///    header above the bar may start inside the strip (LINE on the cover
-///    in landscape-right); content only below the column is no evidence.
+///    share the leading strip, but every row runs across it. The one
+///    exception is an app's own header above the bar in the top band,
+///    which may start inside the strip (LINE on the cover in
+///    landscape-right). Content only below the column is no evidence.
 ///
 /// Work record: docs/ai/010-display-routing/000-plan.md (S4).
 enum OutlineSideBars {
@@ -103,14 +104,17 @@ enum OutlineSideBars {
         case .trailing: boundary = members.map(\.frame.x).min() ?? screen.width
         }
 
-        // Wide content beside the bar, all of it on its own side.
+        // Wide content beside the bar, and no content across its edge
+        // except an app header above it in the top band.
         let barTop = members.map(\.frame.y).min() ?? 0
         let barBottom = members.map { $0.frame.y + $0.frame.height }.max() ?? screen.height
-        let beside = items.filter { !isContainer($0, screen: screen) }.map(\.frame).filter {
-            $0.y < barBottom && $0.y + $0.height > barTop
-        }
+        let content = items.filter { !isContainer($0, screen: screen) }.map(\.frame)
+        let beside = content.filter { $0.y < barBottom && $0.y + $0.height > barTop }
         guard beside.contains(where: { $0.width * 2 >= screen.width }) else { return nil }
-        let crossed = beside.contains { $0.x < boundary && $0.x + $0.width > boundary }
+        let headerBottom = min(barTop, OutlineFormatter.yBandInset)
+        let crossed = content.contains {
+            $0.y + $0.height > headerBottom && $0.x < boundary && $0.x + $0.width > boundary
+        }
         guard !crossed else { return nil }
         return Bar(edge: edge, boundary: boundary)
     }
