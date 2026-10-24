@@ -184,17 +184,50 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
         // makeSession (framework load + FBSimulatorControl set
         // construction) on every call, which multiplies per character
         // typed. Only the HID connection inside is cached.
+        //
+        // One stabilization sleep per text, not per key event: every event
+        // is still sent and awaited on its own, only the sleep between
+        // them is gone. SIM_USE_TYPE_KEY_DELAY_MS adds a pause after each
+        // key event for text controls that need one (default 0).
         let session = try await HIDInteractor.makeSession(for: device.resolved, logger: logger)
-        for event in hidEvents {
-            try await HIDInteractor.performHIDEvent(
-                event,
-                in: session,
-                logger: logger
-            )
-        }
+        try await Self.send(hidEvents, keyDelayMs: Self.keyDelayMs, perform: { event in
+            try await HIDInteractor.performHIDEvent(event, in: session, logger: logger, stabilize: false)
+        }, pause: { milliseconds in
+            try await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+        }, stabilize: {
+            try await HIDInteractor.stabilize(logger: logger)
+        })
 
         logger.info().log("Text typing completed successfully")
         return ExecutionResult()
+    }
+
+    /// Optional pause after every key event, via SIM_USE_TYPE_KEY_DELAY_MS
+    /// (default 0, capped like SIM_USE_HID_STABILIZATION_MS).
+    private static var keyDelayMs: UInt64 {
+        if let envValue = ProcessInfo.processInfo.environment["SIM_USE_TYPE_KEY_DELAY_MS"],
+           let milliseconds = UInt64(envValue) {
+            return min(milliseconds, 1000)
+        }
+        return 0
+    }
+
+    /// Sends every key event without its own stabilization sleep (pausing
+    /// `keyDelayMs` after each one when it is non-zero), then sleeps once.
+    static func send(
+        _ events: [FBSimulatorHIDEvent],
+        keyDelayMs: UInt64,
+        perform: (FBSimulatorHIDEvent) async throws -> Void,
+        pause: (UInt64) async throws -> Void,
+        stabilize: () async throws -> Void
+    ) async throws {
+        for event in events {
+            try await perform(event)
+            if keyDelayMs > 0 {
+                try await pause(keyDelayMs)
+            }
+        }
+        try await stabilize()
     }
 
     /// Shared stdin reader. Public so the top-level forwarder can

@@ -133,12 +133,15 @@ public struct HIDInteractor {
         return Session(simulatorUDID: simulatorUDID, simulator: simulator, connection: Connection(hid: hid, transport: transport))
     }
 
-    public static func performHIDEvent(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
+    /// `stabilize: false` skips the post-event stabilization sleep; the
+    /// caller then owes one `stabilize(logger:)` after its last event
+    /// (`type` sleeps once per text instead of once per key event).
+    public static func performHIDEvent(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger, stabilize: Bool = true) async throws {
         if event.containsTouch {
             try await reachRoute(with: session, logger: logger)
         }
         do {
-            try await performHIDEventOnce(event, in: session, logger: logger)
+            try await performHIDEventOnce(event, in: session, logger: logger, stabilize: stabilize)
         } catch {
             // Fail-invalidate + cautious retry-once: see HIDPerformRecovery
             // for the decision rules and why only dead-transport errors
@@ -153,7 +156,7 @@ public struct HIDInteractor {
                 // connection too.
                 session.connection.adopt(freshSession.connection)
                 do {
-                    try await performHIDEventOnce(event, in: freshSession, logger: logger)
+                    try await performHIDEventOnce(event, in: freshSession, logger: logger, stabilize: stabilize)
                 } catch {
                     // Keep the "a failed perform never leaves its
                     // connection cached" invariant on the retry path too.
@@ -164,7 +167,7 @@ public struct HIDInteractor {
         }
     }
 
-    private static func performHIDEventOnce(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
+    private static func performHIDEventOnce(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger, stabilize: Bool) async throws {
         logger.info().log("Performing HID event...")
         try await routeTouches(of: event, in: session, logger: logger)
         let timeoutMs = sendTimeoutMs
@@ -189,6 +192,13 @@ public struct HIDInteractor {
         }
         logger.info().log("HID event performed successfully.")
 
+        if stabilize {
+            try await self.stabilize(logger: logger)
+        }
+    }
+
+    /// The configurable post-event stabilization sleep.
+    public static func stabilize(logger: SimUseLogger) async throws {
         if stabilizationDelayMs > 0 {
             logger.info().log("Applying stabilization delay of \(stabilizationDelayMs)ms...")
             try await Task.sleep(nanoseconds: stabilizationDelayMs * 1_000_000)

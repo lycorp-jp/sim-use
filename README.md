@@ -272,6 +272,8 @@ echo "complex text" | sim-use type --stdin --device $UDID
 sim-use type --file input.txt --device $UDID
 ```
 
+On iOS, keys are sent back to back with one stabilization delay at the end. For a text control that drops characters at that pace, set `SIM_USE_TYPE_KEY_DELAY_MS` (for example `10`) to pause after every key event. The daemon reads it when it starts, so run `sim-use daemon stop --device $UDID` after changing it.
+
 ### Paste (IME-safe Unicode)
 
 `sim-use paste` stages UTF-8 text, verifies exact clipboard readback and taps the native Paste action. On iOS, the standard HID Application key opens the focused field's edit menu without moving its caret or selection. This works with Simulator.app and Device Hub, with or without a connected hardware keyboard. It bypasses IME composition and supports CJK, emoji and diacritics without keyboard-layout substitution. Clipboard staging uses verified simctl when CoreDevice ownership is inactive, otherwise verified CoreDevice.
