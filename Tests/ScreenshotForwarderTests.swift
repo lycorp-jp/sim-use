@@ -41,12 +41,42 @@ struct ScreenshotForwarderTests {
         #expect(subCmd.jsonOutput)
     }
 
-    @Test("Both surfaces opt out of the daemon (capture is fast enough that the spawn cost dwarfs the saving)")
-    func bothBypassDaemon() throws {
-        let topLevel = try Screenshot.parse([])
-        let subCmd = try IOSSimScreenshotCommand.parse([])
-        #expect(topLevel.daemonBypass)
-        #expect(subCmd.daemonBypass)
+    // Captures used to bypass the daemon on the grounds that a spawn costs
+    // more than it saves. Every UDID-scoped verb already keeps the daemon
+    // warm, and there a capture skips rebuilding the simulator set and the
+    // display-routing probes, so iOS simulator captures go through it;
+    // Android and physical iOS stay in-process.
+    @Test("iOS simulator captures use the daemon; Android and physical iOS stay in-process")
+    func daemonRoutingByPlatform() throws {
+        var ios = try Screenshot.parse(["--device", "9CD7C6E7-45B3-4E59-BBF2-4D12A9457CD0"])
+        try ios.resolveDeferredArguments()
+        #expect(ios.daemonBypass == false)
+        #expect(try IOSSimScreenshotCommand.parse([]).daemonBypass == false)
+        var android = try Screenshot.parse(["--device", "emulator-5556"])
+        try android.resolveDeferredArguments()
+        #expect(android.daemonBypass)
+        var physical = try Screenshot.parse([])
+        physical.device.resolved = "00008110-001A2B3C4D5E801E"
+        #expect(physical.daemonBypass)
+    }
+
+    @Test("Captures skip the daemon's per-command liveness probe")
+    func skipsLivenessProbe() throws {
+        #expect(try Screenshot.parse([]).managesLivenessState)
+        #expect(try IOSSimScreenshotCommand.parse([]).managesLivenessState)
+    }
+
+    @Test("The daemon gets an absolute --output anchored at the caller's directory")
+    func daemonOutputAnchoring() {
+        let base = ["screenshot", "--device", "X", "--json"]
+        func args(_ output: String?, _ tail: [String] = []) -> [String] {
+            IOSSimScreenshotCommand.daemonArguments(from: base + tail, output: output, cwd: "/work/dir")
+        }
+        #expect(args(nil) == base + ["--output", "/work/dir"])
+        #expect(args("shot.png", ["--output", "shot.png"]) == base + ["--output", "/work/dir/shot.png"])
+        #expect(args("sub/shot.png", ["--output=sub/shot.png"]) == base + ["--output", "/work/dir/sub/shot.png"])
+        #expect(args("/abs/shot.png", ["--output", "/abs/shot.png"]) == base + ["--output", "/abs/shot.png"])
+        #expect(args("~/shot.png", ["--output", "~/shot.png"]) == base + ["--output", NSHomeDirectory() + "/shot.png"])
     }
 
     // MARK: - Output path resolution

@@ -536,7 +536,7 @@ sim-use daemon stop --all
 SIM_USE_NO_DAEMON=1 sim-use ui --device $UDID
 ```
 
-Daemons self-exit after 600 s of idle and log to `/tmp/sim-use-<uid>/<UDID>.log`. Streaming commands (`screenshot`, `record-video`, `stream-video`) always run in-process regardless.
+Daemons self-exit after 600 s of idle and log to `/tmp/sim-use-<uid>/<UDID>.log`. Streaming commands (`record-video`, `stream-video`) always run in-process regardless. iOS simulator screenshots go through the daemon; Android and physical-device screenshots run in-process.
 
 
 ## Physical iOS devices

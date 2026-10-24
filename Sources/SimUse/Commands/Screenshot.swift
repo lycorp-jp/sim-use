@@ -39,7 +39,19 @@ struct Screenshot: SimUseExecutableCommand {
 
     var simulatorUDIDForDaemon: String? { device.resolved }
 
-    var daemonBypass: Bool { true }
+    /// iOS simulator captures go through the daemon (see
+    /// `IOSSimScreenshotCommand.daemonBypass`); Android, physical iOS and
+    /// unrecognised ids keep their in-process paths unchanged.
+    var daemonBypass: Bool {
+        PlatformRouter.resolve(udid: device.resolved) != .iOSSim
+    }
+
+    func daemonArguments(from arguments: [String]) throws -> [String] {
+        IOSSimScreenshotCommand.daemonArguments(from: arguments, output: output)
+    }
+
+    /// Same liveness-probe skip as `IOSSimScreenshotCommand`.
+    var managesLivenessState: Bool { true }
 
     func format(_ result: ExecutionResult) -> CommandOutput {
         CommandOutput(

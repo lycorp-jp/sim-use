@@ -56,7 +56,8 @@ public protocol SimUseExecutableCommand: AsyncParsableCommand {
     var simulatorUDIDForDaemon: String? { get }
 
     /// True for commands that own the daemon's process-liveness tracker
-    /// (i.e. `app-state`, which reads/resets it directly). Dispatch
+    /// (i.e. `app-state`, which reads/resets it directly) or that send no
+    /// input and should not pay for a probe (`screenshot`). Dispatch
     /// skips its automatic per-command crash evaluation for these so the
     /// tracker isn't double-advanced. Default false.
     var managesLivenessState: Bool { get }

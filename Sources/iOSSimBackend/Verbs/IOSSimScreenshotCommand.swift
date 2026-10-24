@@ -54,7 +54,45 @@ public struct IOSSimScreenshotCommand: SimUseExecutableCommand {
 
     public var simulatorUDIDForDaemon: String? { device.resolved }
 
-    public var daemonBypass: Bool { true }
+    /// Served by the per-UDID daemon, which already holds the simulator
+    /// set and the display-routing caches (`RoutingDisplayResolver`),
+    /// instead of rebuilding them in a fresh process per capture. Unlike
+    /// the streaming video verbs, a screenshot is written to a file and
+    /// only its path crosses the socket. The daemon runs in its own
+    /// working directory, so `daemonArguments` anchors the output path
+    /// at the caller's.
+    public var daemonBypass: Bool { false }
+
+    public func daemonArguments(from arguments: [String]) throws -> [String] {
+        Self.daemonArguments(from: arguments, output: output)
+    }
+
+    /// Skip the daemon's per-command `launchctl list` liveness probe (a
+    /// `simctl spawn` that costs more than the capture itself). A capture
+    /// sends no input, and the tracker diffs against its last baseline, so
+    /// a crash is still reported by the next probing command (`ui`, a tap).
+    public var managesLivenessState: Bool { true }
+
+    /// `arguments` with `--output` replaced by an absolute path resolved
+    /// against `cwd`: the given path (tilde-expanded), or `cwd` itself
+    /// when none was given, which the daemon then treats as a directory
+    /// for the default file name — the same file the caller would get
+    /// in-process. Shared with the top-level forwarder.
+    public static func daemonArguments(
+        from arguments: [String],
+        output: String?,
+        cwd: String = FileManager.default.currentDirectoryPath
+    ) -> [String] {
+        var path = cwd
+        if let given = output?.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty {
+            let expanded = (given as NSString).expandingTildeInPath
+            path = expanded.hasPrefix("/") ? expanded : (cwd as NSString).appendingPathComponent(expanded)
+        }
+        return DaemonInlineInput.insertingOptions(
+            ["--output", path],
+            into: DaemonInlineInput.removingOption("output", from: arguments)
+        )
+    }
 
     public func format(_ result: ExecutionResult) -> CommandOutput {
         CommandOutput(

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Notarized Homebrew packages retain their original Developer ID signature after installation.
 
+### Changed
+
+- iOS: simulator `screenshot` runs in the warm per-device daemon instead of a new process, so repeated captures take about 70 ms instead of 350 ms. Output paths, file names and the PNG content are unchanged; Android and physical-device screenshots still run in-process.
+
 ### Fixed
 
 - Homebrew: preserve the upstream signature for notarized releases instead of replacing it with an ad-hoc signature. Release installation checks now use the same formula generator and verify that Homebrew leaves the signed binary unchanged.
