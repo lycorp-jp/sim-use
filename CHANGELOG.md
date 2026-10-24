@@ -12,6 +12,7 @@ Notarized Homebrew packages retain their original Developer ID signature after i
 ### Fixed
 
 - Homebrew: preserve the upstream signature for notarized releases instead of replacing it with an ad-hoc signature. Release installation checks now use the same formula generator and verify that Homebrew leaves the signed binary unchanged.
+- iOS: a long-running simulator daemon no longer runs out of file descriptors. Each running-process read leaked two pipes, so after about a thousand commands `ui` lost its `appPackage` and `app-state` failed until the daemon restarted.
 
 ## [0.16.0] - 2026-10-21
 

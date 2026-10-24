@@ -139,3 +139,53 @@ struct BundleIdentifierResolverTests {
         #expect(resolved == "")
     }
 }
+
+@Suite("BundleIdentifierResolver — child process hygiene")
+struct BundleIdentifierResolverProcessTests {
+
+    private struct OpenedEnd {
+        let descriptor: Int32
+        let device: dev_t
+        let inode: ino_t
+    }
+
+    // The daemon used to leak both pipes of every launchctl read (2 fds per
+    // read), until spawning failed and every process-list read broke.
+    // Checked per pipe rather than by counting the process's descriptors:
+    // suites running in parallel open and close descriptors of their own.
+    // A descriptor number reused by another pipe has another inode.
+    @Test("Both pipe read ends are closed after the child exits", arguments: [
+        ["/bin/echo", "hello"],
+        ["/bin/sh", "-c", "echo oops >&2; exit 3"],
+    ])
+    func closesPipeReadEnds(command: [String]) throws {
+        var opened: [OpenedEnd] = []
+        _ = try? BundleIdentifierResolver.runCapturing(
+            executable: URL(fileURLWithPath: command[0]),
+            arguments: Array(command.dropFirst()),
+            timeout: 5,
+            makePipe: {
+                let pipe = Pipe()
+                let descriptor = pipe.fileHandleForReading.fileDescriptor
+                var info = stat()
+                fstat(descriptor, &info)
+                opened.append(OpenedEnd(descriptor: descriptor, device: info.st_dev, inode: info.st_ino))
+                return pipe
+            }
+        )
+        #expect(opened.count == 2)
+        for end in opened {
+            var info = stat()
+            let stillOpen = fstat(end.descriptor, &info) == 0 && info.st_dev == end.device && info.st_ino == end.inode
+            #expect(!stillOpen, "read end \(end.descriptor) is still open")
+        }
+    }
+
+    @Test("Returns the child's stdout")
+    func returnsStdout() throws {
+        let output = try BundleIdentifierResolver.runCapturing(
+            executable: URL(fileURLWithPath: "/bin/echo"), arguments: ["hello"], timeout: 5
+        )
+        #expect(output == "hello\n")
+    }
+}
