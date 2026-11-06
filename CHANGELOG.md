@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Notarized Homebrew packages retain their original Developer ID signature after installation.
+Android connections now work when another app occupies the bridge's default port. Notarized Homebrew packages retain their original Developer ID signature after installation.
 
 ### Fixed
 
+- Android: the bridge selects a fallback when 8080 is occupied and reports bind exhaustion clearly. The CLI validates endpoints and refreshes screen dimensions after bridge restarts. Init polls for service startup; actions reconnect after connection refusal and retain original errors if cleanup fails, without replaying uncertain outcomes.
 - Homebrew: preserve the upstream signature for notarized releases instead of replacing it with an ad-hoc signature. Release installation checks now use the same formula generator and verify that Homebrew leaves the signed binary unchanged.
 
 ## [0.16.0] - 2026-10-21

@@ -189,5 +189,7 @@ public enum BridgeError: Error, LocalizedError, HintProviding {
             || lowered.contains("connection refused")
             || lowered.contains("connection was refused")
             || lowered.contains("non-http response")
+            || lowered.contains("bridge server is ")
+            || lowered.contains("bridge server startup failed:")
     }
 }

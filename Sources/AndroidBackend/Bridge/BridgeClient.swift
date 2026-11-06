@@ -13,7 +13,8 @@ import SimUseCore
 ///
 /// Lifecycle: a client is created with a known device serial; it lazily
 /// establishes an `adb forward` and fetches the auth token on first
-/// request, caches both, and refreshes them on 401 / connection refused.
+/// request and checks provider discovery before each external HTTP operation.
+/// A request lock keeps validation, endpoint replacement and sending together.
 ///
 /// The expected bridge protocol_version is compiled in; mismatches
 /// surface as `BridgeError.protocolMismatch` on the first `ping`.
@@ -21,7 +22,7 @@ import SimUseCore
 /// Thread-safety: `BridgeClientRegistry` hands the same instance to
 /// concurrent callers across daemon worker threads. The mutable cached
 /// state (`cachedLocalPort`, `cachedAuthToken`, `cachedDisplay`,
-/// `verifiedProtocolVersion`) is guarded by `lock: NSLock`; every read
+/// `verifiedProtocolVersion`) is guarded by `lock: NSRecursiveLock`; every read
 /// and write goes through `lock.lock() / lock.unlock()`. The
 /// conformance is `@unchecked Sendable` because the synthesised one
 /// would balk at the `var` properties even though they're never read
@@ -29,6 +30,7 @@ import SimUseCore
 public final class BridgeClient: @unchecked Sendable {
     public static let expectedProtocolVersion = 2
     public static let defaultRemotePort = 8080
+    private var cachedRemotePort = BridgeClient.defaultRemotePort
 
     /// Android package id of the device-bridge APK. Single source of
     /// truth shared with `AndroidDeviceController.InitOptions`; used by
@@ -61,11 +63,10 @@ public final class BridgeClient: @unchecked Sendable {
     public let connection: BridgeConnection
     private let sessionHome: URL
 
-    private let lock = NSLock()
+    // Serialize discovery through transmission, including nested handshakes.
+    private let lock = NSRecursiveLock()
+    private var requestDepth = 0
     private var cachedLocalPort: Int?
-    /// Set while `cachedLocalPort` came from disk and has not yet been
-    /// confirmed as this serial's forward on the current adb server.
-    private var restoredPortUnconfirmed = false
     private var cachedAuthToken: String?
     private var verifiedProtocolVersion: Bool = false
     private var cachedDisplay: DisplayMetrics?
@@ -96,28 +97,21 @@ public final class BridgeClient: @unchecked Sendable {
         self.connectionTimeout = connectionTimeout
         self.readTimeout = readTimeout
 
-        // Hydrate from disk cache so successive CLI invocations skip the
-        // ~1s `adb shell content query` + ~50ms `adb forward` startup.
-        // Only a session created under this same connection is a
-        // candidate: its port is a forward on *that* adb server, so
-        // replaying it against another one (or a cache that predates the
-        // field) could hand the token to whatever listens there. The port
-        // itself is still confirmed with `adb forward --list` before the
-        // first request (see `currentLocalPort`), because a listener that
-        // answers is not proof the forward is still ours; a stale token on
-        // a confirmed forward falls back to the 401 re-fetch. When only
-        // the bridge host changed, the old forward is on this same adb
-        // server: remove it best effort and drop the cache. A forward on
-        // a different adb server is left alone because this process cannot
-        // address that server.
+        // Restore only sessions from this connection. Before any HTTP, confirm
+        // the provider's current device port and the adb forward registration.
+        // A host-only change can clean up the old forward on the same server.
         if let cached = BridgeSessionStore.read(udid: serial, home: sessionHome) {
             if cached.connection == connection.identity {
+                self.cachedRemotePort = cached.remotePort
                 self.cachedAuthToken = cached.token
                 self.cachedLocalPort = cached.localPort
-                self.restoredPortUnconfirmed = true
             } else if cached.adbServer == connection.adbServer {
-                _ = try? adb.forwardRemove(serial: serial, localPort: cached.localPort)
-                BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
+                if let forwards = try? adb.forwards() {
+                    if forwards.contains(Adb.Forward(serial: serial, localPort: cached.localPort, remote: "tcp:\(cached.remotePort)")) {
+                        _ = try? adb.forwardRemove(serial: serial, localPort: cached.localPort)
+                    }
+                    BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
+                }
             }
         }
     }
@@ -125,12 +119,12 @@ public final class BridgeClient: @unchecked Sendable {
     // MARK: - Public entry points
 
     public func ping(force: Bool = false) throws -> PingResult {
-        // Fast path: once we've verified the bridge's protocol_version
-        // matches our expected version within this process, subsequent
-        // `ping()` calls are pointless — every other endpoint will fail
-        // fast if the bridge has gone away, and the protocol_version
-        // doesn't change at runtime. Saves ~70 ms of HTTP round-trip
-        // per request that previously called `ping()` defensively.
+        try withFreshEndpoint { try pingVerified(force: force) }
+    }
+
+    private func pingVerified(force: Bool) throws -> PingResult {
+        // Provider discovery precedes this fast path on every external call.
+        // Reuse the protocol check only while the endpoint remains unchanged.
         lock.lock()
         let alreadyVerified = verifiedProtocolVersion
         lock.unlock()
@@ -138,8 +132,27 @@ public final class BridgeClient: @unchecked Sendable {
             return PingResult(result: "pong", protocolVersion: Self.expectedProtocolVersion, bridgeVersion: "")
         }
 
-        let request = try buildRequest(method: "GET", path: "/ping", requiresAuth: false, body: nil, contentType: nil)
-        let data = try sendRaw(request: request, expectAuth: false)
+        for attempt in 0...1 {
+            do {
+                return try performPing(finalAttempt: attempt == 1)
+            } catch {
+                switch error {
+                case BridgeError.httpStatus, BridgeError.malformedEnvelope,
+                     BridgeError.applicationError, BridgeError.transport:
+                    try cleanupEndpoint(preserving: error)
+                    if attempt == 0 { continue }
+                default:
+                    break
+                }
+                throw error
+            }
+        }
+        preconditionFailure("Handshake attempts exhausted")
+    }
+
+    private func performPing(finalAttempt: Bool) throws -> PingResult {
+        let request = buildRequest(method: "GET", path: "/ping", requiresAuth: false, body: nil, contentType: nil)
+        let data = try sendRaw(request: request, expectAuth: false, allowReconnect: false, classifyPingFailure: finalAttempt)
         // `/ping` is the one endpoint whose envelope is **flat**: the
         // `protocol_version` and `bridge_version` fields sit beside
         // `status` / `result`, not nested. PingResult decodes that shape
@@ -149,6 +162,9 @@ public final class BridgeClient: @unchecked Sendable {
             result = try JSONDecoder().decode(PingResult.self, from: data)
         } catch {
             throw BridgeError.malformedEnvelope(underlying: error.localizedDescription)
+        }
+        guard result.result == "pong" else {
+            throw BridgeError.malformedEnvelope(underlying: "Bridge ping did not return pong")
         }
         guard result.protocolVersion == Self.expectedProtocolVersion else {
             throw BridgeError.protocolMismatch(client: Self.expectedProtocolVersion, bridge: result.protocolVersion)
@@ -175,40 +191,29 @@ public final class BridgeClient: @unchecked Sendable {
     /// `GET /a11y_tree_full` → wire envelope with an `ElementNode` payload.
     public func fetchTreeRaw(filter: Bool = false) throws -> Data {
         let path = filter ? "/a11y_tree_full?filter=true" : "/a11y_tree_full"
-        let request = try buildRequest(method: "GET", path: path, requiresAuth: true, body: nil, contentType: nil)
+        let request = buildRequest(method: "GET", path: path, requiresAuth: true, body: nil, contentType: nil)
         let data = try sendRaw(request: request, expectAuth: true)
         return data
     }
 
-    /// Device screen dimensions in pixels. Cached for the lifetime of this
-    /// `BridgeClient` instance — screen size doesn't change while the
-    /// process is running, and fetching the tree just for `display` is
-    /// expensive (~80–200 ms). First call pays a filtered tree fetch
-    /// (`?filter=true` keeps the payload small); subsequent calls are
-    /// served from cache.
+    /// Screen dimensions cached for the current endpoint. Keep response parsing
+    /// and cache publication in the same lifecycle as discovery and transport.
     public func displayInfo() throws -> DisplayMetrics {
-        lock.lock()
-        if let cached = cachedDisplay {
-            lock.unlock()
-            return cached
-        }
-        lock.unlock()
-
-        let bytes = try fetchTreeRaw(filter: true)
-        let envelope: BridgeEnvelope<JSONValue> = try {
+        try withFreshEndpoint {
+            if let cached = cachedDisplay { return cached }
+            let bytes = try fetchTreeRaw(filter: true)
+            let envelope: BridgeEnvelope<JSONValue>
             do {
-                return try JSONDecoder().decode(BridgeEnvelope<JSONValue>.self, from: bytes)
+                envelope = try JSONDecoder().decode(BridgeEnvelope<JSONValue>.self, from: bytes)
             } catch {
                 throw BridgeError.malformedEnvelope(underlying: error.localizedDescription)
             }
-        }()
-        guard let display = envelope.display else {
-            throw BridgeError.malformedEnvelope(underlying: "Bridge tree response missing `display` field")
+            guard let display = envelope.display else {
+                throw BridgeError.malformedEnvelope(underlying: "Bridge tree response missing `display` field")
+            }
+            cachedDisplay = display
+            return display
         }
-        lock.lock()
-        cachedDisplay = display
-        lock.unlock()
-        return display
     }
 
     /// `POST /tap` with form-encoded `x=…&y=…`. Coordinates in pixels.
@@ -258,7 +263,7 @@ public final class BridgeClient: @unchecked Sendable {
     /// with `flagRetrieveInteractiveWindows` in the accessibility service
     /// config; older bridges return 404 here.
     public func keyboardState() throws -> KeyboardStateResult {
-        let request = try buildRequest(method: "GET", path: "/keyboard/state", requiresAuth: true, body: nil, contentType: nil)
+        let request = buildRequest(method: "GET", path: "/keyboard/state", requiresAuth: true, body: nil, contentType: nil)
         let envelope: BridgeEnvelope<KeyboardStateResult> = try send(request: request, expectAuth: true)
         guard envelope.isSuccess, let result = envelope.result else {
             throw BridgeError.applicationError(status: envelope.status, code: envelope.code, message: envelope.error)
@@ -304,7 +309,7 @@ public final class BridgeClient: @unchecked Sendable {
 
     /// `GET /screenshot` → base64-encoded PNG (decoded for the caller).
     public func screenshot() throws -> Data {
-        let request = try buildRequest(method: "GET", path: "/screenshot", requiresAuth: true, body: nil, contentType: nil)
+        let request = buildRequest(method: "GET", path: "/screenshot", requiresAuth: true, body: nil, contentType: nil)
         let envelope: BridgeEnvelope<String> = try send(request: request, expectAuth: true)
         guard envelope.isSuccess, let b64 = envelope.result else {
             throw BridgeError.applicationError(status: envelope.status, code: envelope.code, message: envelope.error)
@@ -319,58 +324,79 @@ public final class BridgeClient: @unchecked Sendable {
         return data
     }
 
-    /// Forget cached forward + token. Caller must re-`ping` to re-establish.
+    /// Forget the endpoint, removing its forward only after checking ownership.
     public func invalidate() {
         lock.lock()
         defer { lock.unlock() }
-        if let port = cachedLocalPort {
-            _ = try? adb.forwardRemove(serial: serial, localPort: port)
-        }
-        cachedLocalPort = nil
-        cachedAuthToken = nil
-        restoredPortUnconfirmed = false
-        verifiedProtocolVersion = false
-        BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
+        try? replaceEndpoint(with: nil)
     }
 
     // MARK: - Internal
 
-    private func currentLocalPort() throws -> Int {
+    private func withFreshEndpoint<Result>(_ body: () throws -> Result) throws -> Result {
         lock.lock()
-        let cached = cachedLocalPort
-        let unconfirmed = restoredPortUnconfirmed
-        lock.unlock()
-        if let port = cached {
-            guard unconfirmed else { return port }
-            // A failed `adb forward --list` throws rather than counting
-            // as "gone": the forward may well still be registered, and
-            // opening another one here would strand it on the adb server.
-            // The session stays cached for the next call to confirm.
-            if try restoredForwardIsLive(localPort: port) {
-                lock.lock(); restoredPortUnconfirmed = false; lock.unlock()
-                return port
-            }
-            // Confirmed not our forward any more (removed, adb server
-            // restarted, or the port now belongs to something else), so
-            // there is nothing of ours left to remove. Drop the token with
-            // it so it is only ever sent through a forward we created.
-            lock.lock()
-            cachedLocalPort = nil
-            cachedAuthToken = nil
-            restoredPortUnconfirmed = false
-            lock.unlock()
+        defer { lock.unlock() }
+        if requestDepth == 0 {
+            let endpoint = try AuthTokenFetcher.fetchEndpoint(adb: adb, serial: serial)
+            try replaceEndpoint(with: endpoint)
         }
-
-        let port = try adb.forward(serial: serial, remotePort: Self.defaultRemotePort)
-        lock.lock()
-        cachedLocalPort = port
-        lock.unlock()
-        persistSession()
-        return port
+        requestDepth += 1
+        defer { requestDepth -= 1 }
+        return try body()
     }
 
-    private func restoredForwardIsLive(localPort: Int) throws -> Bool {
-        try adb.forwards().contains(Adb.Forward(serial: serial, localPort: localPort, remote: "tcp:\(Self.defaultRemotePort)"))
+    /// Called under the recursive request lock. Discovery, cache replacement
+    /// and request transmission form one serialized lifecycle.
+    private func replaceEndpoint(with endpoint: AuthTokenFetcher.Endpoint?) throws {
+        if let port = cachedLocalPort {
+            // A failed list preserves the entire unconfirmed session. A local
+            // port number alone is insufficient evidence to remove a forward.
+            let owned = try adb.forwards().contains(Adb.Forward(
+                serial: serial, localPort: port, remote: "tcp:\(cachedRemotePort)"
+            ))
+            if !owned || endpoint?.remotePort != cachedRemotePort {
+                if owned { try adb.forwardRemove(serial: serial, localPort: port) }
+                cachedLocalPort = nil
+                verifiedProtocolVersion = false
+                cachedDisplay = nil
+                BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
+            }
+        }
+        if cachedAuthToken != endpoint?.token {
+            verifiedProtocolVersion = false
+            cachedDisplay = nil
+        }
+        cachedAuthToken = endpoint?.token
+        cachedRemotePort = endpoint?.remotePort ?? Self.defaultRemotePort
+        if endpoint == nil {
+            verifiedProtocolVersion = false
+            cachedDisplay = nil
+            BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
+        } else {
+            persistSession()
+        }
+    }
+
+    /// Cleanup must not hide the failure that triggered recovery. If ownership
+    /// cannot be checked, retain the endpoint and stop with the original failure.
+    private func cleanupEndpoint(preserving failure: Error) throws {
+        do {
+            try replaceEndpoint(with: nil)
+        } catch {
+            FileHandle.standardError.write(Data("Bridge endpoint cleanup failed; preserving the original request error.\n".utf8))
+            throw failure
+        }
+    }
+
+    private func currentLocalPort() throws -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        if let port = cachedLocalPort { return port }
+        _ = try currentAuthToken()
+        let port = try adb.forward(serial: serial, remotePort: cachedRemotePort)
+        cachedLocalPort = port
+        persistSession()
+        return port
     }
 
     private func currentAuthToken() throws -> String {
@@ -381,9 +407,11 @@ public final class BridgeClient: @unchecked Sendable {
         }
         lock.unlock()
 
-        let token = try AuthTokenFetcher.fetch(adb: adb, serial: serial)
+        let endpoint = try AuthTokenFetcher.fetchEndpoint(adb: adb, serial: serial)
+        let token = endpoint.token
         lock.lock()
         cachedAuthToken = token
+        cachedRemotePort = endpoint.remotePort
         lock.unlock()
         persistSession()
         return token
@@ -393,16 +421,25 @@ public final class BridgeClient: @unchecked Sendable {
         lock.lock()
         let token = cachedAuthToken
         let port = cachedLocalPort
+        let remotePort = cachedRemotePort
         lock.unlock()
         guard let token, let port else { return }
         let session = BridgeSession(
             token: token,
             localPort: port,
-            remotePort: Self.defaultRemotePort,
+            remotePort: remotePort,
             connection: connection.identity,
             adbServer: connection.adbServer
         )
         BridgeSessionStore.write(session, udid: serial, home: sessionHome)
+    }
+
+    private struct Request {
+        let method: String
+        let path: String
+        let requiresAuth: Bool
+        let body: Data?
+        let contentType: String?
     }
 
     private func buildRequest(
@@ -411,28 +448,53 @@ public final class BridgeClient: @unchecked Sendable {
         requiresAuth: Bool,
         body: Data?,
         contentType: String?
-    ) throws -> URLRequest {
+    ) -> Request {
+        Request(method: method, path: path, requiresAuth: requiresAuth, body: body, contentType: contentType)
+    }
+
+    /// Materialize the URL and bearer only inside a validated request lifecycle.
+    private func makeURLRequest(from request: Request) throws -> URLRequest {
         let port = try currentLocalPort()
-        guard let url = URL(string: "http://\(connection.bridgeHost):\(port)\(path)") else {
-            throw BridgeError.transport(underlying: "Could not build URL for \(path)", serial: nil)
+        guard let url = URL(string: "http://\(connection.bridgeHost):\(port)\(request.path)") else {
+            throw BridgeError.transport(underlying: "Could not build URL for \(request.path)", serial: serial)
         }
         var req = URLRequest(url: url)
-        req.httpMethod = method
+        req.httpMethod = request.method
         req.timeoutInterval = readTimeout
-        if let body {
+        if let body = request.body {
             req.httpBody = body
-            if let contentType {
+            if let contentType = request.contentType {
                 req.setValue(contentType, forHTTPHeaderField: "Content-Type")
             }
         }
-        if requiresAuth {
+        if request.requiresAuth {
             let token = try currentAuthToken()
             req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
         return req
     }
 
-    private func sendRaw(request: URLRequest, expectAuth: Bool, allowReconnect: Bool = true) throws -> Data {
+    private func sendRaw(
+        request: Request,
+        expectAuth: Bool,
+        allowReconnect: Bool = true,
+        classifyPingFailure: Bool = false
+    ) throws -> Data {
+        try withFreshEndpoint {
+            let current = try makeURLRequest(from: request)
+            return try sendVerified(
+                request: current, expectAuth: expectAuth,
+                allowReconnect: allowReconnect, classifyPingFailure: classifyPingFailure
+            )
+        }
+    }
+
+    private func sendVerified(
+        request: URLRequest,
+        expectAuth: Bool,
+        allowReconnect: Bool,
+        classifyPingFailure: Bool
+    ) throws -> Data {
         // Eager handshake on the first non-ping HTTP call: run `ping()`
         // once so `BridgeError.protocolMismatch` and
         // `BridgeError.bridgeVersionMismatch` surface before the verb's
@@ -446,53 +508,63 @@ public final class BridgeClient: @unchecked Sendable {
         // and re-enters `sendRaw`; that re-entry skips this branch and
         // proceeds straight to the wire. Once `ping()` succeeds and
         // flips `verifiedProtocolVersion`, every subsequent sendRaw
-        // takes the fast path with zero extra round-trip.
+        // reuses that protocol check after the outer provider validation.
+        var request = request
         lock.lock()
         let alreadyVerified = verifiedProtocolVersion
         lock.unlock()
         if !alreadyVerified, request.url?.path != "/ping" {
             _ = try ping()
+            // The handshake can replace the forward and token.
+            request = try makeURLRequest(from: rebuildRequest(from: request, expectAuth: expectAuth))
         }
 
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try urlSession.synchronousDataTask(with: request)
         } catch {
-            if allowReconnect {
+            let definitelyNotSent = (error as? URLError)?.code == .cannotConnectToHost
+            if allowReconnect && (request.httpMethod == "GET" || definitelyNotSent) {
                 // adb forward died or the bridge restarted. Drop caches and
                 // try once more — the port forward will be re-created, the
                 // token re-fetched.
                 lock.lock()
                 let wasVerified = verifiedProtocolVersion
                 lock.unlock()
-                invalidate()
+                let failure = BridgeError.transport(underlying: error.localizedDescription, serial: serial)
+                try cleanupEndpoint(preserving: failure)
                 // If we'd previously verified the protocol_version in this
                 // process, the bridge we're reconnecting to might be a
                 // different build (e.g. someone reinstalled the APK between
                 // requests against a long-running daemon). Re-ping so a
                 // mismatch surfaces as `BridgeError.protocolMismatch`
                 // instead of being served silently by the new bridge.
-                // Bounded recursion: `invalidate()` already cleared
+                // Bounded recursion: endpoint replacement already cleared
                 // `verifiedProtocolVersion`, so the ping's own
                 // transport-error retry will not loop back into this
                 // branch.
                 if wasVerified {
                     _ = try ping(force: true)
                 }
-                let retry = try rebuildRequest(from: request, expectAuth: expectAuth)
+                if cachedAuthToken == nil {
+                    let endpoint = try AuthTokenFetcher.fetchEndpoint(adb: adb, serial: serial)
+                    try replaceEndpoint(with: endpoint)
+                }
+                let retry = rebuildRequest(from: request, expectAuth: expectAuth)
                 return try sendRaw(request: retry, expectAuth: expectAuth, allowReconnect: false)
             }
-            // Reconnect already failed once (allowReconnect == false): the
-            // `adb forward` was re-established (rebuildRequest succeeded,
-            // else we'd have thrown an adb error first), so the device is
-            // reachable but nothing is answering on the bridge port. One
-            // cheap probe disambiguates the dominant cause — a device that
-            // was never `sim-use android init`-ed — from a genuine drop on
-            // an already-bootstrapped bridge. Compute the error before
-            // dropping caches and removing the retry's forward, which
-            // would otherwise be stranded without a persisted session.
+            if request.url?.path == "/ping" {
+                let failure = classifyPingFailure
+                    ? connectionFailure(underlying: error)
+                    : BridgeError.transport(underlying: error.localizedDescription, serial: serial)
+                try cleanupEndpoint(preserving: failure)
+                throw failure
+            }
+            // A GET has exhausted reconnect, or a POST may already have
+            // executed. Report the failure and discard the endpoint without
+            // replaying an action whose outcome is unknown.
             let failure = connectionFailure(underlying: error)
-            invalidate()
+            try cleanupEndpoint(preserving: failure)
             throw failure
         }
         guard let http = response as? HTTPURLResponse else {
@@ -503,8 +575,13 @@ public final class BridgeClient: @unchecked Sendable {
             return data
         case 401:
             if allowReconnect && expectAuth {
-                lock.lock(); cachedAuthToken = nil; lock.unlock()
-                let retry = try rebuildRequest(from: request, expectAuth: expectAuth)
+                let failure = BridgeError.httpStatus(code: 401, body: String(data: data, encoding: .utf8) ?? "")
+                try cleanupEndpoint(preserving: failure)
+                if cachedAuthToken == nil {
+                    let endpoint = try AuthTokenFetcher.fetchEndpoint(adb: adb, serial: serial)
+                    try replaceEndpoint(with: endpoint)
+                }
+                let retry = rebuildRequest(from: request, expectAuth: expectAuth)
                 return try sendRaw(request: retry, expectAuth: expectAuth, allowReconnect: false)
             }
             throw BridgeError.httpStatus(code: 401, body: String(data: data, encoding: .utf8) ?? "")
@@ -530,11 +607,10 @@ public final class BridgeClient: @unchecked Sendable {
     }
 
     /// Map a connection-level URLSession failure to the most actionable
-    /// `BridgeError`. Reached only after a reconnect attempt has already
-    /// failed, so the `adb forward` is live and a single `pm list
-    /// packages` round-trip is cheap. If the bridge APK isn't installed
-    /// at all — the overwhelmingly common reason a first call against a
-    /// freshly plugged-in device returns "network connection was lost" —
+    /// `BridgeError`. Used after reconnect fails or an action cannot safely
+    /// be replayed. A single `pm list packages` probe checks whether the
+    /// bridge APK is installed. If it is absent — a common reason that a
+    /// first call returns "network connection was lost" —
     /// surface `.bridgeNotInstalled`, whose message already names the
     /// exact `sim-use android init --device <serial>` to run. Otherwise
     /// keep the raw transport error, now tagged with `serial` so
@@ -562,7 +638,7 @@ public final class BridgeClient: @unchecked Sendable {
         return result.stdout.contains(Self.bridgePackageName)
     }
 
-    private func send<R: Decodable>(request: URLRequest, expectAuth: Bool) throws -> BridgeEnvelope<R> {
+    private func send<R: Decodable>(request: Request, expectAuth: Bool) throws -> BridgeEnvelope<R> {
         let data = try sendRaw(request: request, expectAuth: expectAuth)
         do {
             return try JSONDecoder().decode(BridgeEnvelope<R>.self, from: data)
@@ -572,7 +648,7 @@ public final class BridgeClient: @unchecked Sendable {
     }
 
     private func sendNoResult(method: String, path: String, body: Data?, contentType: String?) throws {
-        let request = try buildRequest(method: method, path: path, requiresAuth: true, body: body, contentType: contentType)
+        let request = buildRequest(method: method, path: path, requiresAuth: true, body: body, contentType: contentType)
         struct Empty: Decodable {}
         let envelope: BridgeEnvelope<Empty> = try send(request: request, expectAuth: true)
         if !envelope.isSuccess {
@@ -580,13 +656,13 @@ public final class BridgeClient: @unchecked Sendable {
         }
     }
 
-    private func rebuildRequest(from old: URLRequest, expectAuth: Bool) throws -> URLRequest {
+    private func rebuildRequest(from old: URLRequest, expectAuth: Bool) -> Request {
         let path = old.url.flatMap { url -> String in
             var pathPart = url.path
             if let q = url.query, !q.isEmpty { pathPart += "?\(q)" }
             return pathPart
         } ?? "/"
-        return try buildRequest(
+        return buildRequest(
             method: old.httpMethod ?? "GET",
             path: path,
             requiresAuth: expectAuth,
