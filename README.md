@@ -211,7 +211,7 @@ sim-use drives both **iOS Simulators** and **Android devices / emulators** throu
   * `emulator-5554` / `R5CT1ABCD12` / `192.168.1.5:5555` → Android device
   * `00008130-...` (8-16 hex) / 40-hex → physical iPhone/iPad (restricted verb set)
 
-For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup. The bridge first tries device loopback port 8080. If that port is occupied, Android assigns an available port and the CLI discovers it automatically. Cold connections check the discovered endpoint and any restored adb forward; a running daemon reuses its connection and discovers again after failure. Actions with an unknown outcome are reported without being repeated.
+For Android, run `sim-use android init --device <serial>` once to install the bridge APK. See `AGENTS.md` for Android toolchain setup. The bridge first tries device loopback port 8080. If that port is occupied, Android assigns an available port and the CLI discovers it automatically. A running daemon reuses its connection. A new process checks its adb forward and reuses an endpoint that was discovered in the last ten minutes; otherwise it discovers again. Both discover again after a failure or a response that is not from the bridge. Actions with an unknown outcome are reported without being repeated.
 
 When `ADB_SERVER_SOCKET` points at an adb server on another machine (`tcp:<host>:<port>`), sim-use reaches the bridge on that host, since that is where `adb forward` listens; `SIM_USE_BRIDGE_HOST` overrides the host.
 

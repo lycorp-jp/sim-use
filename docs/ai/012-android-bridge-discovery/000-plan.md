@@ -7,6 +7,11 @@
 | **Primary PRs** | #185 (original contribution), #189 (continuation; merge pending) |
 | **Related** | #188, [008-linux-android-build](../008-linux-android-build/000-design.md) |
 
+> Updated 2026-11-12: A new client no longer discovers before each first
+> HTTP request. It reuses a disk session that a discovery created in the last
+> 600 s. A response from another listener now also triggers discovery. See
+> [002-review-hardening.md](002-review-hardening.md).
+
 ## Background
 
 The bridge binds device loopback port 8080. If another app owns that port,
@@ -96,3 +101,5 @@ Reproduction steps: [reproduction.md](reproduction.md). Results:
   separate process-liveness probe is outside `BridgeClient` and stays unchanged.
 
 ## Amendments
+
+- Updated 2026-11-12: Trust window for discovered disk sessions, recovery after a response from another listener, shared disk session ownership, one discovery in `init` — see [002-review-hardening.md](002-review-hardening.md).

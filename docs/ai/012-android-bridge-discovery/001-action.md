@@ -1,5 +1,10 @@
 # 012 — Android bridge endpoint discovery: Action log
 
+> Updated 2026-11-12: Review of #189 changed the restored-session rule and
+> added recovery after a response from another listener. The outcome and
+> measurements below describe `11b352ad`. See
+> [002-review-hardening.md](002-review-hardening.md) for the later state.
+
 ## Timeline
 
 | Date | Change | Ref |

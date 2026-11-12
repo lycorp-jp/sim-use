@@ -74,4 +74,23 @@ response cannot replace the new cache and that an old action failure cannot
 remove the replacement forward. The same suite checks retry counts for HTTP
 401, refusal, timeout, lost connection, cancellation, and business HTTP 500.
 
-The accepted warm endpoint identity gap is tracked in #188.
+## Another listener on a warm port
+
+Warm the daemon with one `describe-ui` call while the bridge uses device port
+8080. Stop the bridge through its provider, start the occupied-port listener
+from the first section on 8080, and start the bridge again. It binds another
+port. Run `describe-ui` two times through the same daemon, then a tap.
+
+The listener returns HTTP 404 without a bridge envelope. The first GET must
+recover in the same call: the listener sees one request, and `adb forward
+--list` then shows one forward, to the new device port. The daemon PID must
+not change.
+
+## New processes
+
+`screenshot` and `android ping` do not use the daemon. After one of them
+discovers the endpoint, the next calls in the following 600 s must run
+`forward --list` but no `content query`. Check this with the adb recording
+wrapper. `android init` must run `content query` again each time.
+
+The accepted endpoint identity gap for reused sessions is tracked in #188.
