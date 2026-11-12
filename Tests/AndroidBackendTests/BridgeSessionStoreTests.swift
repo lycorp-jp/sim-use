@@ -75,6 +75,15 @@ final class BridgeSessionStoreTests: XCTestCase {
 
     // MARK: - UDID validation (path-traversal defence)
 
+    func testExclusiveAccessRejectsUnsafeSessionPaths() {
+        for serial in ["", ".", "..", "../[::1]:5555", "[::1%en0]/../escape"] {
+            XCTAssertThrowsError(try BridgeSessionStore.withExclusiveAccess(udid: serial, home: tempHome) {
+                XCTFail("An unsafe serial must not enter the lock body")
+            })
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tempHome.appendingPathComponent(".sim-use").path))
+    }
+
     /// A udid like `../escapee` would resolve to `~/escapee/bridge.json`
     /// outside the `~/.sim-use/` tree. The store rejects it silently
     /// (consistent with the existing "best-effort" contract that
@@ -120,12 +129,12 @@ final class BridgeSessionStoreTests: XCTestCase {
         XCTAssertEqual(loaded?.localPort, 9999)
     }
 
-    /// Real-device serials carry colon-separated transport identifiers
-    /// on Wi-Fi (`192.168.1.5:5555`) and underscores on some emulator
-    /// builds — both must pass the validator.
+    /// Wi-Fi addresses, scoped IPv6 addresses, and emulator serials must
+    /// remain safe single path components.
     func testRoundTripAcceptsRealisticSerials() {
         let session = BridgeSession(token: "x", localPort: 1, remotePort: 8080)
-        for udid in ["192.168.1.5:5555", "R5CT_1ABCD12", "emulator-5556"] {
+        for udid in ["192.168.1.5:5555", "R5CT_1ABCD12", "emulator-5556",
+                     "[2001:db8::2]:5555", "[fe80::2%wlan0]:5555"] {
             BridgeSessionStore.write(session, udid: udid, home: tempHome)
             let loaded = BridgeSessionStore.read(udid: udid, home: tempHome)
             XCTAssertNotNil(loaded, "serial \(udid) should be accepted")

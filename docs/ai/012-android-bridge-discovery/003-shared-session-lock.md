@@ -1,5 +1,8 @@
 # 012.003 — Shared session transitions
 
+> Updated 2026-11-12: Bracketed and scoped IPv6 serials also need to pass the
+> mandatory lock's path validation. See [004-ipv6-session-paths.md](004-ipv6-session-paths.md).
+
 ## Context
 
 Review-loop round 1 of #189 found R189-06. A client's state lock does not

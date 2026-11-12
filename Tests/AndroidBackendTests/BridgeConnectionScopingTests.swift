@@ -17,7 +17,7 @@ import XCTest
 /// that answers every request like a live listener would and records
 /// where it went and which token it carried.
 final class BridgeConnectionScopingTests: XCTestCase {
-    private let serial = "emulator-5554"
+    private var serial = "emulator-5554"
     private let serverA = ["ADB_SERVER_SOCKET": "tcp:192.0.2.10:5037"]
     private let serverB = ["ADB_SERVER_SOCKET": "tcp:192.0.2.20:5037"]
 
@@ -41,6 +41,30 @@ final class BridgeConnectionScopingTests: XCTestCase {
     }
 
     // MARK: - Regressions
+
+    func testIPv6SerialsSupportColdAndRestoredSessions() throws {
+        for candidate in ["[2001:db8::2]:5555", "[fe80::2%wlan0]:5555"] {
+            serial = candidate
+            RecordingBridgeProtocol.reset()
+            let client = try makeClient(environment: [:])
+            _ = try client.ping()
+            try client.pressKey(3)
+            let stored = try XCTUnwrap(BridgeSessionStore.read(udid: serial, home: home))
+            XCTAssertEqual(stored.localPort, 18081)
+            let lockFile = BridgeSessionStore.directory(for: serial, home: home).appendingPathComponent("bridge.lock")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: lockFile.path))
+            let coldCalls = adbCalls().count
+
+            let restored = try makeClient(environment: [:])
+            try restored.pressKey(3)
+
+            let reuseCalls = Array(adbCalls().dropFirst(coldCalls))
+            XCTAssertEqual(reuseCalls, ["forward --list"])
+            XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: home), stored)
+            XCTAssertEqual(RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }.count, 2)
+            restored.invalidate()
+        }
+    }
 
     func testWarmOperationsDoNotRunAdb() throws {
         let client = try makeClient(environment: [:])

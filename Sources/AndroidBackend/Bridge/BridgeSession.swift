@@ -141,20 +141,16 @@ public enum BridgeSessionStore {
     }
 
     /// Rejects udids that would escape the `~/.sim-use/` tree
-    /// (`..`, slash-containing, empty) or that aren't well-formed adb
-    /// serials. `adb devices` always emits well-formed serials in
-    /// practice, so this is a defence-in-depth guard rather than a
-    /// regularly-triggered filter.
+    /// (`..`, slash-containing, empty). This checks path safety, not the
+    /// syntax of every adb transport name.
     static func isValidUDID(_ udid: String) -> Bool {
         if udid.isEmpty { return false }
         if udid == "." || udid == ".." { return false }
         if udid.contains("/") { return false }
-        // Allow only characters that appear in real adb serials:
-        // hex / dashes (emulator-NNNN, RFFNW00H4WK), dots and colons
-        // (Wi-Fi adb: 192.168.1.5:5555), and underscores
-        // (occasionally produced by emulator tooling).
+        // Include brackets and scope identifiers for IPv6 transports,
+        // such as [fe80::2%wlan0]:5555, as single path components.
         let allowed = CharacterSet(charactersIn:
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-"
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-[]%"
         )
         return udid.unicodeScalars.allSatisfy(allowed.contains)
     }

@@ -104,3 +104,4 @@ Reproduction steps: [reproduction.md](reproduction.md). Results:
 
 - Updated 2026-11-12: Trust window for discovered disk sessions, recovery after a response from another listener, shared disk session ownership, one discovery in `init` — see [002-review-hardening.md](002-review-hardening.md).
 - Updated 2026-11-12: Coordinate disk and forward transitions across clients and processes — see [003-shared-session-lock.md](003-shared-session-lock.md).
+- Updated 2026-11-12: Accept bracketed and scoped IPv6 adb serials in session paths — see [004-ipv6-session-paths.md](004-ipv6-session-paths.md).
