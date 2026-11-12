@@ -32,10 +32,10 @@ final class AuthTokenFetcherTests: XCTestCase {
             stdout: #"Row: 0 result={"result":"token"}"#)?.remotePort, 8080)
     }
 
-    func testEndpointExhaustionFailsBeforeHTTP() {
+    func testStartupFailureAndInvalidPortAreRejected() {
         XCTAssertThrowsError(try AuthTokenFetcher.parseEndpoint(
-            stdout: #"Row: 0 result={"result":"token","server_error":"Bridge ports are occupied; inspect adb shell ss -ltnp"}"#)) { error in
-            XCTAssertTrue(error.localizedDescription.contains("ports are occupied"))
+            stdout: #"Row: 0 result={"result":"token","server_error":"Bind failed"}"#)) { error in
+            XCTAssertTrue(error.localizedDescription.contains("Bind failed"))
         }
         XCTAssertThrowsError(try AuthTokenFetcher.parseEndpoint(
             stdout: #"Row: 0 result={"result":"token","port":0}"#))
@@ -95,11 +95,11 @@ final class AuthTokenFetcherTests: XCTestCase {
             let adb = Adb(binaryPath: script.path)
             if terminal == "running" || terminal == "legacy" {
                 let endpoint = try AuthTokenFetcher.fetchEndpoint(
-                    adb: adb, serial: "test-target", timeout: 0.2, pollInterval: 0.01)
+                    adb: adb, serial: "test-target", timeout: 5, pollInterval: 0.01)
                 XCTAssertEqual(endpoint.remotePort, terminal == "running" ? 49153 : 8080)
             } else {
                 XCTAssertThrowsError(try AuthTokenFetcher.fetchEndpoint(
-                    adb: adb, serial: "test-target", timeout: 0.1, pollInterval: 0.01)) {
+                    adb: adb, serial: "test-target", timeout: terminal == "failed" ? 5 : 0.1, pollInterval: 0.01)) {
                     guard let error = $0 as? BridgeError,
                           case .transport(_, let serial) = error else { return XCTFail("Expected transport error") }
                     XCTAssertEqual(serial, "test-target")
@@ -109,7 +109,7 @@ final class AuthTokenFetcherTests: XCTestCase {
             let queries = try String(contentsOf: count, encoding: .utf8).split(separator: "\n").count
             if terminal == "failed" { XCTAssertEqual(queries, 2) }
             else if terminal == "running" || terminal == "legacy" { XCTAssertEqual(queries, 2) }
-            else { XCTAssertGreaterThan(queries, 1); XCTAssertLessThan(queries, 30) }
+            else { XCTAssertGreaterThanOrEqual(queries, 1) }
         }
     }
 

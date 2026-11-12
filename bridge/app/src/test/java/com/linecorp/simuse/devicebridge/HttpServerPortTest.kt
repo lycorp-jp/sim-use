@@ -5,35 +5,30 @@ import com.linecorp.simuse.devicebridge.server.HttpServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.net.BindException
 
 class HttpServerPortTest {
     @Test fun preferredPortIsUsed() {
-        val preferred = HttpServer.bindAvailablePort(listOf(0)).use { it.localPort }
-        HttpServer.bindAvailablePort(listOf(preferred, 0)).use { socket ->
+        val preferred = HttpServer.bindAvailablePort(0).use { it.localPort }
+        HttpServer.bindAvailablePort(preferred).use { socket ->
             assertEquals(preferred, socket.localPort)
             assertTrue(socket.inetAddress.isLoopbackAddress)
         }
     }
 
     @Test fun occupiedPreferredPortUsesFallback() {
-        HttpServer.bindAvailablePort(listOf(0)).use { occupied ->
-            HttpServer.bindAvailablePort(listOf(occupied.localPort, 0)).use { fallback ->
+        HttpServer.bindAvailablePort(0).use { occupied ->
+            HttpServer.bindAvailablePort(occupied.localPort).use { fallback ->
                 assertTrue(fallback.localPort != occupied.localPort)
+                assertTrue(fallback.localPort in 1..65535)
+                assertTrue(fallback.inetAddress.isLoopbackAddress)
             }
         }
     }
 
-    @Test fun allOccupiedPortsGiveActionableError() {
-        HttpServer.bindAvailablePort(listOf(0)).use { occupied ->
-            try {
-                HttpServer.bindAvailablePort(listOf(occupied.localPort)).close()
-                throw AssertionError("Expected bind failure")
-            } catch (e: BindException) {
-                assertTrue(e.message!!.contains("ports are occupied"))
-                assertTrue(e.message!!.contains(occupied.localPort.toString()))
-                assertTrue(e.message!!.contains("ss -ltnp"))
-            }
+    @Test fun ephemeralPortIsPublishedInsteadOfZero() {
+        HttpServer.bindAvailablePort(0).use { socket ->
+            assertTrue(socket.localPort in 1..65535)
+            assertTrue(socket.inetAddress.isLoopbackAddress)
         }
     }
 }

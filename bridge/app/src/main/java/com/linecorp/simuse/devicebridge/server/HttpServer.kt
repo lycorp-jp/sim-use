@@ -49,7 +49,7 @@ class HttpServer(
         if (running.get()) return
         // Bind before reporting success so provider discovery never advertises
         // a listener that failed to start.
-        val ss = bindAvailablePort(listOf(port) + (49152..49159))
+        val ss = bindAvailablePort(port)
         serverSocket = ss
         running.set(true)
         val pool = Executors.newFixedThreadPool(HANDLER_POOL_SIZE)
@@ -295,26 +295,27 @@ class HttpServer(
     )
 
     companion object {
-        internal fun bindAvailablePort(ports: List<Int>): ServerSocket {
-            for (candidate in ports) {
-                val socket = ServerSocket()
-                try {
-                    socket.reuseAddress = true
-                    // adb forward reaches loopback; never expose the bearer
-                    // API to peers on the device's Wi-Fi network.
-                    socket.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), candidate))
-                    return socket
-                } catch (e: java.net.BindException) {
-                    socket.close()
-                } catch (e: Exception) {
-                    socket.close()
-                    throw e
-                }
+        internal fun bindAvailablePort(preferredPort: Int): ServerSocket {
+            return try {
+                bindLoopback(preferredPort)
+            } catch (e: java.net.BindException) {
+                if (preferredPort == 0) throw e
+                bindLoopback(0)
             }
-            throw java.net.BindException(
-                "Bridge ports are occupied (${ports.joinToString()}). " +
-                    "Another app may own these ports; inspect adb shell ss -ltnp for the listener."
-            )
+        }
+
+        private fun bindLoopback(port: Int): ServerSocket {
+            val socket = ServerSocket()
+            try {
+                socket.reuseAddress = true
+                // adb forward reaches loopback; never expose the bearer
+                // API to peers on the device's Wi-Fi network.
+                socket.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port))
+                return socket
+            } catch (e: Exception) {
+                socket.close()
+                throw e
+            }
         }
 
         private const val TAG = "SimuseHttpServer"

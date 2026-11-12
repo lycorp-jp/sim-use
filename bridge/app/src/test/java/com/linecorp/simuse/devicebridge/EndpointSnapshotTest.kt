@@ -72,13 +72,13 @@ class EndpointSnapshotTest {
         }
     }
 
-    @Test fun failedBindCanRestartAfterPortIsReleased() {
+    @Test fun failedBindCanRestart() {
         val service = SimuseAccessibilityService()
-        val occupied = HttpServer.bindAvailablePort(listOf(0))
-        val port = occupied.localPort
         var listener: java.net.ServerSocket? = null
+        var failBind = true
         every { anyConstructed<HttpServer>().start() } answers {
-            listener = HttpServer.bindAvailablePort(listOf(port))
+            if (failBind) throw java.net.BindException("Test bind failure")
+            listener = HttpServer.bindAvailablePort(0)
         }
         every { anyConstructed<HttpServer>().boundPort } answers { listener?.localPort }
         every { anyConstructed<HttpServer>().stop() } answers { listener?.close(); Unit }
@@ -86,15 +86,14 @@ class EndpointSnapshotTest {
             service.startServer()
             val failed = snapshot(service)
             assertNull(failed.first)
-            assertTrue(failed.second!!.contains("ports are occupied"))
+            assertEquals("Test bind failure", failed.second)
             assertEquals("failed", failed.third)
-            occupied.close()
+            failBind = false
             service.startServer()
-            assertEquals(Triple(port, null, "running"), snapshot(service))
+            assertEquals(Triple(listener!!.localPort, null, "running"), snapshot(service))
             service.stopServer()
             assertEquals(Triple(null, null, "stopped"), snapshot(service))
         } finally {
-            occupied.close()
             listener?.close()
         }
     }
