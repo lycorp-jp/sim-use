@@ -2,19 +2,16 @@
 import Foundation
 
 /// Persistent per-UDID bridge connection state. Lets the stateless CLI
-/// reuse the bearer token and the `adb forward` port across
-/// invocations instead of paying `adb shell content query` (~1s) +
-/// `adb forward` (~50ms) every call.
+/// reuse an `adb forward` registration across invocations. Each new client
+/// discovers the current device endpoint before it reuses a disk session.
 ///
 /// File layout: `~/.sim-use/<udid>/bridge.json`. Best-effort — if the
 /// file is unreadable, was written under another `BridgeConnection`
 /// (or before sessions recorded one), or its forward is no longer
 /// listed by `adb forward --list`, the BridgeClient falls back to a cold
 /// bootstrap (`AuthTokenFetcher.fetch` + `adb forward`) and rewrites the
-/// cache on success.
-///
-/// This is a stopgap for V1 while a proper Android daemon (C11) is
-/// pending. The daemon will subsume this when it lands.
+/// cache on success. A running daemon keeps its validated session in memory
+/// and does not query adb again until failure.
 public struct BridgeSession: Codable, Equatable, Sendable {
     public let token: String
     public let localPort: Int

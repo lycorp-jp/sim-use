@@ -42,6 +42,20 @@ final class BridgeConnectionScopingTests: XCTestCase {
 
     // MARK: - Regressions
 
+    func testWarmOperationsDoNotRunAdb() throws {
+        let client = try makeClient(environment: [:])
+        RecordingBridgeProtocol.treeBody = #"{"status":"success","display":{"width":100,"height":200},"result":[]}"#
+        _ = try client.displayInfo()
+        let coldCalls = adbCalls()
+
+        _ = try client.ping()
+        _ = try client.fetchTreeRaw()
+        try client.pressKey(3)
+        _ = try client.displayInfo()
+
+        XCTAssertEqual(adbCalls(), coldCalls, "warm operations must not query adb")
+    }
+
     /// Session written against server A, client now pointed at server B:
     /// the cached port and token must not be used, even though a
     /// listener answers on B at A's old port.
@@ -374,11 +388,22 @@ final class BridgeConnectionScopingTests: XCTestCase {
         })
     }
 
-    func testUncertainActionTransportFailureDoesNotReplay() throws {
-        RecordingBridgeProtocol.businessTransportError = .networkConnectionLost
-        RecordingBridgeProtocol.businessFailuresRemaining = 1
+    func testUncertainActionTransportFailuresDoNotReplay() throws {
+        let client = try makeClient(environment: [:])
+        for code in [URLError.Code.networkConnectionLost, .timedOut, .cancelled] {
+            RecordingBridgeProtocol.reset()
+            RecordingBridgeProtocol.businessTransportError = code
+            RecordingBridgeProtocol.businessFailuresRemaining = 1
+            XCTAssertThrowsError(try client.pressKey(3))
+            XCTAssertEqual(RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }.count, 1)
+        }
+    }
+
+    func testUnauthorizedActionHasOneRetryLimit() throws {
+        RecordingBridgeProtocol.businessStatus = 401
         XCTAssertThrowsError(try makeClient(environment: [:]).pressKey(3))
-        XCTAssertEqual(RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }.count, 1)
+        XCTAssertEqual(RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }.count, 2)
+        XCTAssertNil(BridgeSessionStore.read(udid: serial, home: home))
     }
 
     func testHandshakeRediscoveryIsBounded() throws {
@@ -405,7 +430,7 @@ final class BridgeConnectionScopingTests: XCTestCase {
         XCTAssertNil(BridgeSessionStore.read(udid: serial, home: home))
     }
 
-    func testWarmClientDiscoversMigrationWithoutForceOrReplacement() throws {
+    func testWarmGETDiscoversMigrationAfterConnectionRefusal() throws {
         remotePort = 49152
         let client = try makeClient(environment: [:])
         _ = try client.ping()
@@ -413,15 +438,15 @@ final class BridgeConnectionScopingTests: XCTestCase {
         remotePort = 49153
         try writeAdbFixture()
         RecordingBridgeProtocol.rejectPort = 18081
-        RecordingBridgeProtocol.oldStatus = 404
+        RecordingBridgeProtocol.rejectedTransportError = .cannotConnectToHost
         _ = try client.ping()
         _ = try client.fetchTreeRaw()
         _ = try client.fetchTreeRaw()
-        XCTAssertFalse(RecordingBridgeProtocol.requests().contains { $0.port == 18081 })
+        XCTAssertEqual(RecordingBridgeProtocol.requests().filter { $0.port == 18081 }.count, 1)
         XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: home)?.remotePort, 49153)
     }
 
-    func testWarmActionChecksProviderWithoutExplicitPing() throws {
+    func testWarmActionDiscoversMigrationAfterUnauthorizedResponse() throws {
         remotePort = 49152
         let client = try makeClient(environment: [:])
         try client.pressKey(3)
@@ -429,9 +454,11 @@ final class BridgeConnectionScopingTests: XCTestCase {
         remotePort = 49153
         try writeAdbFixture()
         RecordingBridgeProtocol.rejectPort = 18081
+        RecordingBridgeProtocol.oldStatus = 401
         try client.pressKey(3)
-        XCTAssertFalse(RecordingBridgeProtocol.requests().contains { $0.port == 18081 })
-        XCTAssertEqual(RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }.count, 1)
+        let actions = RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }
+        XCTAssertEqual(actions.filter { $0.port == 18081 }.count, 1)
+        XCTAssertEqual(actions.filter { $0.port == 18082 }.count, 1)
     }
 
     func testPortMigrationDoesNotRemoveReusedLocalForward() throws {
@@ -484,12 +511,12 @@ final class BridgeConnectionScopingTests: XCTestCase {
         remotePort = 49153
         try writeAdbFixture()
         RecordingBridgeProtocol.rejectPort = 18081
+        RecordingBridgeProtocol.rejectedTransportError = .cannotConnectToHost
         try await withThrowingTaskGroup(of: Void.self) { group in
             for _ in 0..<4 { group.addTask { try client.pressKey(3) } }
             try await group.waitForAll()
         }
         let requests = RecordingBridgeProtocol.requests()
-        XCTAssertFalse(requests.contains { $0.port == 18081 })
         XCTAssertEqual(requests.filter { $0.path == "/keyboard/key" && $0.port == 18082 }.count, 4)
         XCTAssertEqual(adbCalls().filter { $0.contains("forward tcp:0 tcp:49153") }.count, 1)
     }
@@ -512,33 +539,58 @@ final class BridgeConnectionScopingTests: XCTestCase {
         XCTAssertFalse(RecordingBridgeProtocol.requests().contains { $0.authorization == "Bearer token-A" })
     }
 
-    func testDisplayParsingCannotRepopulateCacheAfterMigration() async throws {
+    func testOldDisplayResponseCannotOverwriteReplacementCache() async throws {
         remotePort = 49152
         let client = try makeClient(environment: [:])
         let received = DispatchSemaphore(value: 0)
-        let finished = DispatchSemaphore(value: 0)
-        // A large valid result keeps decoding in progress after HTTP completes.
-        let padding = String(repeating: "0,", count: 500_000) + "0"
-        RecordingBridgeProtocol.treeBody = "{\"status\":\"success\",\"display\":{\"width\":100,\"height\":200},\"result\":[\(padding)]}"
-        RecordingBridgeProtocol.onTreeResponse = { received.signal() }
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        RecordingBridgeProtocol.treeBody = #"{"status":"success","display":{"width":100,"height":200},"result":[]}"#
+        RecordingBridgeProtocol.responseGate = release
+        RecordingBridgeProtocol.onResponseWaiting = { received.signal() }
         let oldRead = Task.detached {
-            defer { finished.signal() }
             return try client.displayInfo()
         }
         XCTAssertEqual(received.wait(timeout: .now() + 10), .success)
-        XCTAssertEqual(finished.wait(timeout: .now()), .timedOut)
+        // Invalidation and a second HTTP call must complete while the first is blocked.
+        client.invalidate()
         remotePort = 49153
         try writeAdbFixture()
+        RecordingBridgeProtocol.responseGate = nil
         RecordingBridgeProtocol.treeBody = #"{"status":"success","display":{"width":300,"height":400},"result":[]}"#
-        let newRead = Task.detached {
-            _ = try client.ping()
-            return try client.displayInfo()
-        }
-        let newDisplay = try await newRead.value
+        let newDisplay = try client.displayInfo()
+        release.signal()
         let oldDisplay = try await oldRead.value
         XCTAssertEqual(oldDisplay, DisplayMetrics(width: 100, height: 200))
         XCTAssertEqual(newDisplay, DisplayMetrics(width: 300, height: 400))
         XCTAssertEqual(try client.displayInfo(), DisplayMetrics(width: 300, height: 400))
+    }
+
+    func testOldActionFailureDoesNotRemoveReplacementSession() async throws {
+        let client = try makeClient(environment: [:])
+        _ = try client.ping()
+        let received = DispatchSemaphore(value: 0)
+        let release = DispatchSemaphore(value: 0)
+        defer { release.signal() }
+        RecordingBridgeProtocol.responseGate = release
+        RecordingBridgeProtocol.onResponseWaiting = { received.signal() }
+        RecordingBridgeProtocol.businessTransportError = .networkConnectionLost
+        RecordingBridgeProtocol.businessFailuresRemaining = 1
+        let oldAction = Task.detached { () -> Bool in
+            do { try client.pressKey(3); return false }
+            catch { return true }
+        }
+        XCTAssertEqual(received.wait(timeout: .now() + 10), .success)
+        client.invalidate()
+        remotePort = 49153
+        try writeAdbFixture()
+        RecordingBridgeProtocol.responseGate = nil
+        try client.pressKey(3)
+        release.signal()
+        let failed = await oldAction.value
+        XCTAssertTrue(failed)
+        XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: home)?.remotePort, 49153)
+        XCTAssertFalse(adbCalls().contains { $0.contains("--remove tcp:18082") })
     }
 
     func testCleanupListFailurePreservesOriginalHandshakeError() throws {
@@ -692,7 +744,9 @@ final class RecordingBridgeProtocol: URLProtocol {
         var businessTransportError: URLError.Code = .networkConnectionLost
         var businessFailuresRemaining: Int = 0
         var treeBody: String? = nil
-        var onTreeResponse: (() -> Void)? = nil
+        var responseGate: DispatchSemaphore? = nil
+        var onResponseWaiting: (() -> Void)? = nil
+        var rejectedTransportError: URLError.Code? = nil
         var onBusinessFailure: (() -> Void)? = nil
     }
     nonisolated(unsafe) private static var settings = Settings()
@@ -732,9 +786,19 @@ final class RecordingBridgeProtocol: URLProtocol {
         set { lock.lock(); defer { lock.unlock() }; settings.treeBody = newValue }
     }
 
-    static var onTreeResponse: (() -> Void)? {
-        get { lock.lock(); defer { lock.unlock() }; return settings.onTreeResponse }
-        set { lock.lock(); defer { lock.unlock() }; settings.onTreeResponse = newValue }
+    static var responseGate: DispatchSemaphore? {
+        get { lock.lock(); defer { lock.unlock() }; return settings.responseGate }
+        set { lock.lock(); defer { lock.unlock() }; settings.responseGate = newValue }
+    }
+
+    static var onResponseWaiting: (() -> Void)? {
+        get { lock.lock(); defer { lock.unlock() }; return settings.onResponseWaiting }
+        set { lock.lock(); defer { lock.unlock() }; settings.onResponseWaiting = newValue }
+    }
+
+    static var rejectedTransportError: URLError.Code? {
+        get { lock.lock(); defer { lock.unlock() }; return settings.rejectedTransportError }
+        set { lock.lock(); defer { lock.unlock() }; settings.rejectedTransportError = newValue }
     }
 
     static var onBusinessFailure: (() -> Void)? {
@@ -774,25 +838,39 @@ final class RecordingBridgeProtocol: URLProtocol {
         if rejected { Self.settings.onRejected = nil }
         Self.lock.unlock()
 
-        guard settings.listenerAvailable else {
-            client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
-            return
+        let respond = { [self] in
+            guard settings.listenerAvailable else {
+                client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+                return
+            }
+            if failBusiness {
+                settings.onBusinessFailure?()
+                client?.urlProtocol(self, didFailWithError: URLError(settings.businessTransportError))
+                return
+            }
+            if rejected { settings.onRejected?() }
+            if rejected, let error = settings.rejectedTransportError {
+                client?.urlProtocol(self, didFailWithError: URLError(error))
+                return
+            }
+            let treeBody = url?.path == "/a11y_tree_full" ? settings.treeBody : nil
+            let body = rejected ? #"{"unrelated":true}"# : url?.path == "/ping"
+                ? #"{"status":"success","result":"pong","protocol_version":2,"bridge_version":"test"}"#
+                : treeBody ?? #"{"status":"success"}"#
+            let response = HTTPURLResponse(url: url!, statusCode: rejected ? settings.oldStatus : (url?.path == "/ping" ? 200 : settings.businessStatus), httpVersion: "HTTP/1.1", headerFields: nil)!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
         }
-        if failBusiness {
-            settings.onBusinessFailure?()
-            client?.urlProtocol(self, didFailWithError: URLError(settings.businessTransportError))
-            return
+        if let gate = settings.responseGate, url?.path != "/ping" {
+            settings.onResponseWaiting?()
+            DispatchQueue.global().async {
+                _ = gate.wait(timeout: .now() + 10)
+                respond()
+            }
+        } else {
+            respond()
         }
-        if rejected { settings.onRejected?() }
-        let treeBody = url?.path == "/a11y_tree_full" ? settings.treeBody : nil
-        let body = rejected ? #"{"unrelated":true}"# : url?.path == "/ping"
-            ? #"{"status":"success","result":"pong","protocol_version":2,"bridge_version":"test"}"#
-            : treeBody ?? #"{"status":"success"}"#
-        let response = HTTPURLResponse(url: url!, statusCode: rejected ? settings.oldStatus : (url?.path == "/ping" ? 200 : settings.businessStatus), httpVersion: "HTTP/1.1", headerFields: nil)!
-        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(body.utf8))
-        client?.urlProtocolDidFinishLoading(self)
-        if url?.path == "/a11y_tree_full" { settings.onTreeResponse?() }
     }
 
     override func stopLoading() {}
