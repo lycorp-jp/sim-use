@@ -2,15 +2,19 @@
 import Foundation
 
 /// Persistent per-UDID bridge connection state. Lets the stateless CLI
-/// reuse an `adb forward` registration across invocations. Each new client
-/// discovers the current device endpoint before it reuses a disk session.
+/// reuse an `adb forward` registration across invocations, and for a short
+/// time the endpoint and token that the last provider discovery returned.
+/// The file is also the record of the one forward that sim-use processes
+/// share for this device.
 ///
 /// File layout: `~/.sim-use/<udid>/bridge.json`. Best-effort — if the
 /// file is unreadable, was written under another `BridgeConnection`
 /// (or before sessions recorded one), or its forward is no longer
 /// listed by `adb forward --list`, the BridgeClient falls back to a cold
-/// bootstrap (`AuthTokenFetcher.fetch` + `adb forward`) and rewrites the
-/// cache on success. A running daemon keeps its validated session in memory
+/// bootstrap (provider discovery + `adb forward`) and rewrites the
+/// cache on success. A session outside
+/// `BridgeClient.restoredSessionTrustWindow` keeps its forward but needs
+/// discovery again. A running daemon keeps its validated session in memory
 /// and does not query adb again until failure.
 public struct BridgeSession: Codable, Equatable, Sendable {
     public let token: String
@@ -21,14 +25,22 @@ public struct BridgeSession: Codable, Equatable, Sendable {
     public let connection: String?
     /// Canonical adb server owning the forward; nil in older caches.
     public let adbServer: String?
+    /// When the shell-only provider returned this endpoint and token. Nil in
+    /// caches from releases that connected without discovery.
+    public let discoveredAt: Date?
     public let writtenAt: Date
 
-    public init(token: String, localPort: Int, remotePort: Int, connection: String? = nil, adbServer: String? = nil, writtenAt: Date = Date()) {
+    public init(
+        token: String, localPort: Int, remotePort: Int,
+        connection: String? = nil, adbServer: String? = nil,
+        discoveredAt: Date? = nil, writtenAt: Date = Date()
+    ) {
         self.token = token
         self.localPort = localPort
         self.remotePort = remotePort
         self.connection = connection
         self.adbServer = adbServer
+        self.discoveredAt = discoveredAt
         self.writtenAt = writtenAt
     }
 }

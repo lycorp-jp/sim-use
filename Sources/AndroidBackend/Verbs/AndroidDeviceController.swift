@@ -176,22 +176,21 @@ public final class AndroidDeviceController {
         // Step 4: toggle the in-process HTTP server.
         try AuthTokenFetcher.toggleSocketServer(adb: adb, serial: serial, enabled: true)
 
-        // Settings can settle before onServiceConnected publishes the listener.
-        // Use a three-second soft polling budget; adb query duration is additional.
+        // Steps 5+6: discover the token and port, port-forward, and ping for
+        // the protocol_version check. Settings can settle before
+        // onServiceConnected publishes the listener, so discovery uses a
+        // three-second soft polling budget; adb query duration is additional.
         // A reported bind failure stops polling without another query.
-        let endpoint = try AuthTokenFetcher.fetchEndpoint(adb: adb, serial: serial, timeout: 3)
-        let tokenOK = !endpoint.token.isEmpty
-
-        // Step 6: port-forward and ping for protocol_version check.
         let client = BridgeClient(adb: adb, serial: serial)
-        let ping = try client.ping()
+        let connected = try client.connectAfterBridgeStart(startupTimeout: 3)
 
         return InitReport(
             serial: serial,
-            bridgeVersion: ping.bridgeVersion,
-            protocolVersion: ping.protocolVersion,
-            authTokenInstalled: tokenOK,
-            portForward: endpoint.remotePort,
+            bridgeVersion: connected.ping.bridgeVersion,
+            protocolVersion: connected.ping.protocolVersion,
+            // Discovery fails without a token, so a connection implies one.
+            authTokenInstalled: true,
+            portForward: connected.remotePort,
             bridgeHost: client.connection.bridgeHost
         )
     }

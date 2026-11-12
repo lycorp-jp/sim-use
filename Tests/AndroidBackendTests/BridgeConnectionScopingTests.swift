@@ -98,8 +98,9 @@ final class BridgeConnectionScopingTests: XCTestCase {
         assertAllRequests(host: "127.0.0.1", port: 18081, authorizedWith: "token-B")
     }
 
-    /// Same connection and the forward is still
-    /// registered for this serial; discovery confirms the device port.
+    /// Same connection and the forward is still registered for this
+    /// serial, but the session has no recorded discovery (an older
+    /// release wrote it): discovery confirms the device port and token.
     func testMatchingSessionWithLiveForwardIsReused() throws {
         persistSession(token: "token-A", localPort: 18080, environment: serverA)
         try "\(serial) tcp:18080 tcp:8080\n".write(to: forwardList, atomically: true, encoding: .utf8)
@@ -339,7 +340,10 @@ final class BridgeConnectionScopingTests: XCTestCase {
 
     func testHandshakeHTTPFailureRediscoveryIsBoundedAndReachesOldListener() throws {
         for status in [404, 401, 500, 200] {
+            // Each status starts cold: no session or forward from the last one.
             RecordingBridgeProtocol.reset()
+            BridgeSessionStore.invalidate(udid: serial, home: home)
+            try? FileManager.default.removeItem(at: forwardList)
             remotePort = 49152
             let client = try makeClient(environment: [:])
             _ = try client.ping()
@@ -539,6 +543,174 @@ final class BridgeConnectionScopingTests: XCTestCase {
         XCTAssertFalse(RecordingBridgeProtocol.requests().contains { $0.authorization == "Bearer token-A" })
     }
 
+    // MARK: - Recent discovered sessions
+
+    /// A new process reuses a session that a recent provider discovery
+    /// created: the only adb call is the forward ownership check.
+    func testRecentDiscoveredSessionIsReusedWithoutProviderQuery() throws {
+        persistSession(token: "token-A", localPort: 18080, environment: [:], discoveredAt: Date().addingTimeInterval(-300))
+        try "\(serial) tcp:18080 tcp:8080\n".write(to: forwardList, atomically: true, encoding: .utf8)
+        let stored = BridgeSessionStore.read(udid: serial, home: home)
+
+        try makeClient(environment: [:]).pressKey(3)
+
+        assertAllRequests(host: "127.0.0.1", port: 18080, authorizedWith: "token-A")
+        XCTAssertEqual(adbCalls(), ["forward --list"])
+        XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: home), stored,
+                       "reuse must not extend the trust window")
+    }
+
+    func testSessionOutsideTheTrustWindowRequiresDiscovery() throws {
+        let window = BridgeClient.restoredSessionTrustWindow
+        for discoveredAt in [nil, Date().addingTimeInterval(-window - 1), Date().addingTimeInterval(120)] {
+            RecordingBridgeProtocol.reset()
+            try? FileManager.default.removeItem(at: adbLog)
+            persistSession(token: "token-A", localPort: 18080, environment: [:], discoveredAt: discoveredAt)
+            try "\(serial) tcp:18080 tcp:8080\n".write(to: forwardList, atomically: true, encoding: .utf8)
+
+            try makeClient(environment: [:]).pressKey(3)
+
+            XCTAssertEqual(adbCalls().filter { $0.contains("content query") }.count, 1, "\(String(describing: discoveredAt))")
+            assertAllRequests(host: "127.0.0.1", port: 18080, authorizedWith: "token-B")
+            XCTAssertFalse(RecordingBridgeProtocol.requests().contains { $0.authorization == "Bearer token-A" })
+        }
+    }
+
+    func testRecentSessionWithoutOwnedForwardRequiresDiscovery() throws {
+        persistSession(token: "token-A", localPort: 18080, environment: [:], discoveredAt: Date())
+        try "other-device tcp:18080 tcp:8080\n".write(to: forwardList, atomically: true, encoding: .utf8)
+
+        try makeClient(environment: [:]).pressKey(3)
+
+        assertNothingSent(toPort: 18080, withToken: "token-A")
+        assertAllRequests(host: "127.0.0.1", port: 18081, authorizedWith: "token-B")
+    }
+
+    /// The handshake carries no bearer. A reused session whose port now
+    /// belongs to another listener fails there and is discovered again.
+    func testRecentSessionOnUnrelatedListenerRediscoversBeforeBearer() throws {
+        persistSession(token: "token-A", localPort: 18080, environment: [:], discoveredAt: Date())
+        try "\(serial) tcp:18080 tcp:8080\n".write(to: forwardList, atomically: true, encoding: .utf8)
+        RecordingBridgeProtocol.rejectPort = 18080
+        RecordingBridgeProtocol.oldStatus = 404
+
+        try makeClient(environment: [:]).pressKey(3)
+
+        let requests = RecordingBridgeProtocol.requests()
+        XCTAssertFalse(requests.contains { $0.port == 18080 && $0.authorization != nil })
+        XCTAssertFalse(requests.contains { $0.authorization == "Bearer token-A" })
+        XCTAssertTrue(requests.contains { $0.port == 18081 && $0.authorization == "Bearer token-B" })
+        XCTAssertTrue(adbCalls().contains("-s \(serial) forward --remove tcp:18080"))
+    }
+
+    /// `init` restarts the bridge, so it must discover even when a recent
+    /// session exists. It discovers once and reports the connected port.
+    func testConnectAfterBridgeStartDiscoversOnceDespiteRecentSession() throws {
+        persistSession(token: "token-A", localPort: 18080, environment: [:], discoveredAt: Date())
+        try "\(serial) tcp:18080 tcp:8080\n".write(to: forwardList, atomically: true, encoding: .utf8)
+        let client = try makeClient(environment: [:])
+
+        let connected = try client.connectAfterBridgeStart(startupTimeout: 0.2)
+        try client.pressKey(3)
+
+        XCTAssertEqual(connected.remotePort, 8080)
+        XCTAssertEqual(connected.ping.protocolVersion, BridgeClient.expectedProtocolVersion)
+        XCTAssertEqual(adbCalls().filter { $0.contains("content query") }.count, 1)
+        XCTAssertFalse(adbCalls().contains { $0.contains("forward tcp:0") }, "the owned forward must be reused")
+        assertAllRequests(host: "127.0.0.1", port: 18080, authorizedWith: "token-B")
+    }
+
+    // MARK: - Responses from another listener
+
+    /// Every bridge error is a JSON envelope. Another response shape means
+    /// that another listener owns the cached port, so a GET discovers again.
+    func testWarmGETRecoversAfterResponseFromAnotherListener() throws {
+        remotePort = 49152
+        let client = try makeClient(environment: [:])
+        _ = try client.ping()
+        RecordingBridgeProtocol.reset()
+        remotePort = 49153
+        try writeAdbFixture()
+        RecordingBridgeProtocol.rejectPort = 18081
+        RecordingBridgeProtocol.oldStatus = 404
+
+        _ = try client.fetchTreeRaw()
+        _ = try client.fetchTreeRaw()
+
+        let requests = RecordingBridgeProtocol.requests()
+        XCTAssertEqual(requests.filter { $0.port == 18081 }.count, 1)
+        XCTAssertEqual(requests.filter { $0.port == 18082 && $0.path == "/a11y_tree_full" }.count, 2)
+        XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: home)?.remotePort, 49153)
+    }
+
+    /// The same response on a POST is reported without replay, but the next
+    /// request must not reach the other listener again.
+    func testWarmActionDiscardsEndpointAfterResponseFromAnotherListener() throws {
+        remotePort = 49152
+        let client = try makeClient(environment: [:])
+        try client.pressKey(3)
+        RecordingBridgeProtocol.reset()
+        remotePort = 49153
+        try writeAdbFixture()
+        RecordingBridgeProtocol.rejectPort = 18081
+        RecordingBridgeProtocol.oldStatus = 404
+
+        XCTAssertThrowsError(try client.pressKey(3)) {
+            guard case BridgeError.httpStatus(let code, _) = $0 else { return XCTFail("Unexpected error: \($0)") }
+            XCTAssertEqual(code, 404)
+        }
+        try client.pressKey(3)
+
+        let actions = RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }
+        XCTAssertEqual(actions.filter { $0.port == 18081 }.count, 1)
+        XCTAssertEqual(actions.filter { $0.port == 18082 }.count, 1)
+    }
+
+    /// A bridge error envelope is a business result: the endpoint stays.
+    func testBridgeErrorEnvelopeKeepsTheEndpoint() throws {
+        let client = try makeClient(environment: [:])
+        try client.pressKey(3)
+        let warmCalls = adbCalls()
+        RecordingBridgeProtocol.businessStatus = 500
+
+        XCTAssertThrowsError(try client.pressKey(3))
+
+        XCTAssertEqual(adbCalls(), warmCalls)
+        XCTAssertNotNil(BridgeSessionStore.read(udid: serial, home: home))
+    }
+
+    // MARK: - Shared disk session
+
+    /// Another process replaced the forward and the disk session after a
+    /// port change. This client must use that forward, not strand it.
+    func testReplacedDiskSessionIsAdoptedInsteadOfLeakingAForward() throws {
+        let client = try makeClient(environment: [:])
+        try client.pressKey(3)
+        let warmCalls = adbCalls().count
+        RecordingBridgeProtocol.reset()
+        try "\(serial) tcp:18090 tcp:49153\n".write(to: forwardList, atomically: true, encoding: .utf8)
+        BridgeSessionStore.write(BridgeSession(
+            token: "token-C", localPort: 18090, remotePort: 49153,
+            connection: BridgeConnection(environment: [:]).identity,
+            adbServer: BridgeConnection(environment: [:]).adbServer,
+            discoveredAt: Date()
+        ), udid: serial, home: home)
+        remotePort = 49153
+        try writeAdbFixture()
+        RecordingBridgeProtocol.rejectPort = 18081
+        RecordingBridgeProtocol.rejectedTransportError = .cannotConnectToHost
+
+        try client.pressKey(3)
+
+        let recovery = Array(adbCalls().dropFirst(warmCalls))
+        XCTAssertFalse(recovery.contains { $0.contains("forward tcp:0") || $0.contains("forward --remove") }, "\(recovery)")
+        XCTAssertFalse(recovery.contains { $0.contains("content query") }, "\(recovery)")
+        XCTAssertTrue(RecordingBridgeProtocol.requests().contains {
+            $0.port == 18090 && $0.path == "/keyboard/key" && $0.authorization == "Bearer token-C"
+        })
+        XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: home)?.localPort, 18090)
+    }
+
     func testOldDisplayResponseCannotOverwriteReplacementCache() async throws {
         remotePort = 49152
         let client = try makeClient(environment: [:])
@@ -643,13 +815,17 @@ final class BridgeConnectionScopingTests: XCTestCase {
 
     // MARK: - Fixtures
 
-    private func persistSession(token: String, localPort: Int, environment: [String: String]) {
+    /// `discoveredAt: nil` is the shape that older releases wrote.
+    private func persistSession(
+        token: String, localPort: Int, environment: [String: String], discoveredAt: Date? = nil
+    ) {
         let session = BridgeSession(
             token: token,
             localPort: localPort,
             remotePort: BridgeClient.defaultRemotePort,
             connection: BridgeConnection(environment: environment).identity,
-            adbServer: BridgeConnection(environment: environment).adbServer
+            adbServer: BridgeConnection(environment: environment).adbServer,
+            discoveredAt: discoveredAt
         )
         BridgeSessionStore.write(session, udid: serial, home: home)
     }

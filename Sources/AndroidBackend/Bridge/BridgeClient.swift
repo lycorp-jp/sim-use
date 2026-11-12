@@ -13,8 +13,9 @@ import SimUseCore
 ///
 /// Lifecycle: a client is created with a known device serial; it lazily
 /// establishes an `adb forward` and fetches the auth token on first
-/// request, then discovers again only after failure. Restored disk sessions
-/// are checked against discovery and adb ownership before their first HTTP.
+/// request, then discovers again only after failure. A disk session needs an
+/// adb ownership check before its first HTTP, and provider discovery too
+/// unless a discovery created it within `restoredSessionTrustWindow`.
 ///
 /// The expected bridge protocol_version is compiled in; mismatches
 /// surface as `BridgeError.protocolMismatch` on the first `ping`.
@@ -68,7 +69,6 @@ public final class BridgeClient: @unchecked Sendable {
     }
     private var generation: UInt64 = 0
     private var session: Session?
-    private var restoredSession: BridgeSession?
     private var verifiedPing: PingResult?
     private var cachedDisplay: DisplayMetrics?
 
@@ -98,18 +98,16 @@ public final class BridgeClient: @unchecked Sendable {
         self.connectionTimeout = connectionTimeout
         self.readTimeout = readTimeout
 
-        // A disk session is only a candidate until cold discovery confirms it.
-        if let cached = BridgeSessionStore.read(udid: serial, home: sessionHome) {
-            if cached.connection == connection.identity {
-                self.restoredSession = cached
-            } else if cached.adbServer == connection.adbServer {
-                if let forwards = try? adb.forwards() {
-                    if forwards.contains(Adb.Forward(serial: serial, localPort: cached.localPort, remote: "tcp:\(cached.remotePort)")) {
-                        _ = try? adb.forwardRemove(serial: serial, localPort: cached.localPort)
-                    }
-                    BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
-                }
+        // A session for this connection stays on disk until the first request
+        // checks it (`establishEndpoint`). After a host-only change the old
+        // forward is on this adb server but points at another bridge host.
+        if let cached = BridgeSessionStore.read(udid: serial, home: sessionHome),
+           cached.connection != connection.identity, cached.adbServer == connection.adbServer,
+           let forwards = try? adb.forwards() {
+            if forwards.contains(Adb.Forward(serial: serial, localPort: cached.localPort, remote: "tcp:\(cached.remotePort)")) {
+                _ = try? adb.forwardRemove(serial: serial, localPort: cached.localPort)
             }
+            BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
         }
     }
 
@@ -117,6 +115,22 @@ public final class BridgeClient: @unchecked Sendable {
 
     public func ping(force: Bool = false) throws -> PingResult {
         try verifiedEndpoint(force: force).ping
+    }
+
+    /// Connect after `init` started the bridge. A restart can move the
+    /// bridge to another port, so a recent disk session is not sufficient:
+    /// discover again, and poll up to `startupTimeout` for the listener.
+    public func connectAfterBridgeStart(startupTimeout: TimeInterval) throws -> (ping: PingResult, remotePort: Int) {
+        do {
+            lock.lock()
+            defer { lock.unlock() }
+            session = nil
+            verifiedPing = nil
+            cachedDisplay = nil
+            _ = try establishEndpoint(startupTimeout: startupTimeout)
+        }
+        let verified = try verifiedEndpoint()
+        return (verified.ping, verified.session.remotePort)
     }
 
     private func verifiedEndpoint(force: Bool = false) throws -> (session: Session, ping: PingResult) {
@@ -342,38 +356,76 @@ public final class BridgeClient: @unchecked Sendable {
 
     // MARK: - Internal
 
+    /// How long a new process reuses a session that provider discovery
+    /// created, with only an adb forward ownership check. It matches the
+    /// default daemon idle timeout: a disk session has the same boundary as
+    /// the in-memory session of a warm daemon (issue #188).
+    static let restoredSessionTrustWindow: TimeInterval = 600
+
     private func currentEndpoint() throws -> Session {
         lock.lock()
         defer { lock.unlock() }
         if let session { return session }
+        return try establishEndpoint(startupTimeout: nil)
+    }
 
-        // Serialize cold discovery and forward creation, never HTTP transport.
-        let discovered = try AuthTokenFetcher.fetchEndpoint(adb: adb, serial: serial)
+    /// The disk session for this connection. It is read at each use, not
+    /// kept from `init`, because another sim-use process can replace it.
+    private func diskSession() -> BridgeSession? {
+        guard let stored = BridgeSessionStore.read(udid: serial, home: sessionHome),
+              stored.connection == connection.identity else { return nil }
+        return stored
+    }
+
+    private func ownsForward(localPort: Int, remotePort: Int) throws -> Bool {
+        try adb.forwards().contains(Adb.Forward(
+            serial: serial, localPort: localPort, remote: "tcp:\(remotePort)"
+        ))
+    }
+
+    /// Create the session for a cold client. The caller holds `lock`, which
+    /// serializes discovery and forward creation, never HTTP transport.
+    /// A non-nil `startupTimeout` forces provider discovery.
+    private func establishEndpoint(startupTimeout: TimeInterval?) throws -> Session {
+        let restored = diskSession()
+        // A failed list keeps the disk session for the next call to check.
+        let ownsRestored = try restored.map {
+            try ownsForward(localPort: $0.localPort, remotePort: $0.remotePort)
+        } ?? false
+
+        if startupTimeout == nil, ownsRestored, let restored,
+           let discoveredAt = restored.discoveredAt,
+           (0..<Self.restoredSessionTrustWindow).contains(Date().timeIntervalSince(discoveredAt)) {
+            // The disk session stays as written: reuse must not move its discovery time.
+            return adopt(token: restored.token, localPort: restored.localPort, remotePort: restored.remotePort)
+        }
+
+        let discovered = try AuthTokenFetcher.fetchEndpoint(
+            adb: adb, serial: serial, timeout: startupTimeout ?? 0
+        )
         var localPort: Int?
-        if let restored = restoredSession {
-            let owned = try adb.forwards().contains(Adb.Forward(
-                serial: serial, localPort: restored.localPort, remote: "tcp:\(restored.remotePort)"
-            ))
-            if owned && restored.remotePort == discovered.remotePort {
+        if ownsRestored, let restored {
+            if restored.remotePort == discovered.remotePort {
                 localPort = restored.localPort
-            } else if owned {
+            } else {
                 try adb.forwardRemove(serial: serial, localPort: restored.localPort)
             }
-            restoredSession = nil
         }
         let port = try localPort ?? adb.forward(serial: serial, remotePort: discovered.remotePort)
+        let endpoint = adopt(token: discovered.token, localPort: port, remotePort: discovered.remotePort)
+        BridgeSessionStore.write(BridgeSession(
+            token: endpoint.token, localPort: endpoint.localPort, remotePort: endpoint.remotePort,
+            connection: connection.identity, adbServer: connection.adbServer, discoveredAt: Date()
+        ), udid: serial, home: sessionHome)
+        return endpoint
+    }
+
+    private func adopt(token: String, localPort: Int, remotePort: Int) -> Session {
         generation &+= 1
-        let endpoint = Session(
-            generation: generation, token: discovered.token,
-            localPort: port, remotePort: discovered.remotePort
-        )
+        let endpoint = Session(generation: generation, token: token, localPort: localPort, remotePort: remotePort)
         session = endpoint
         verifiedPing = nil
         cachedDisplay = nil
-        BridgeSessionStore.write(BridgeSession(
-            token: endpoint.token, localPort: endpoint.localPort, remotePort: endpoint.remotePort,
-            connection: connection.identity, adbServer: connection.adbServer
-        ), udid: serial, home: sessionHome)
         return endpoint
     }
 
@@ -382,25 +434,31 @@ public final class BridgeClient: @unchecked Sendable {
         defer { lock.unlock() }
         // A delayed failure belongs to its original session, not a replacement.
         if let failedGeneration, session?.generation != failedGeneration { return }
-        if let port = session?.localPort ?? restoredSession?.localPort,
-           let remotePort = session?.remotePort ?? restoredSession?.remotePort {
-            let owned = try adb.forwards().contains(Adb.Forward(
-                serial: serial, localPort: port, remote: "tcp:\(remotePort)"
-            ))
-            if owned { try adb.forwardRemove(serial: serial, localPort: port) }
+        let stored = diskSession()
+        // A client that has not connected owns the forward of its disk session.
+        let ports = session.map { ($0.localPort, $0.remotePort) }
+            ?? stored.map { ($0.localPort, $0.remotePort) }
+        if let (localPort, remotePort) = ports,
+           try ownsForward(localPort: localPort, remotePort: remotePort) {
+            try adb.forwardRemove(serial: serial, localPort: localPort)
         }
         session = nil
-        restoredSession = nil
         verifiedPing = nil
         cachedDisplay = nil
-        BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
+        // Another process can have replaced the disk session. That record is
+        // the only reference to its forward, so it must stay.
+        if let (localPort, remotePort) = ports, let stored,
+           stored.localPort == localPort, stored.remotePort == remotePort {
+            BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
+        }
     }
 
+    /// Discard the failed endpoint. If the ownership check fails, the session
+    /// stays for the next call to check, and the caller gets `failure`.
     private func cleanupEndpoint(_ endpoint: Session, preserving failure: Error) throws {
         do {
             try discardEndpoint(generation: endpoint.generation)
         } catch {
-            FileHandle.standardError.write(Data("Bridge endpoint cleanup failed; preserving the original request error.\n".utf8))
             throw failure
         }
     }
@@ -476,25 +534,57 @@ public final class BridgeClient: @unchecked Sendable {
             }
             throw failure
         }
-        try validateResponse(data: data, response: response)
-        return RawResponse(data: data, generation: endpoint.generation)
+        switch classify(data: data, response: response) {
+        case .success:
+            return RawResponse(data: data, generation: endpoint.generation)
+        case .bridgeFailure(let failure):
+            throw failure
+        case .otherListener(let failure):
+            // The cached port no longer reaches the bridge. Drop the endpoint so
+            // the next request discovers again. Only a GET is repeated: a POST
+            // is reported, because this classification is an inference and a
+            // repeated action is worse than a reported failure.
+            try cleanupEndpoint(endpoint, preserving: failure)
+            if allowReconnect && request.method == "GET" {
+                return try sendRaw(request: request, expectAuth: expectAuth, allowReconnect: false)
+            }
+            throw failure
+        }
+    }
+
+    private enum ResponseClass {
+        case success
+        /// A failure that the bridge reported. The endpoint is still valid.
+        case bridgeFailure(BridgeError)
+        /// Not a bridge response. The bridge reports every error as a JSON
+        /// envelope (`HttpServer.kt`, `ActionRouter.errorJson`), so another
+        /// shape comes from another listener on the cached port.
+        case otherListener(BridgeError)
+    }
+
+    private func classify(data: Data, response: URLResponse) -> ResponseClass {
+        guard let http = response as? HTTPURLResponse else {
+            return .otherListener(.transport(underlying: "Non-HTTP response from bridge", serial: serial))
+        }
+        guard http.statusCode != 200 else { return .success }
+        let status = BridgeError.httpStatus(code: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
+        struct Empty: Decodable {}
+        guard let envelope = try? JSONDecoder().decode(BridgeEnvelope<Empty>.self, from: data) else {
+            return .otherListener(status)
+        }
+        if http.statusCode != 401, !envelope.isSuccess {
+            return .bridgeFailure(.applicationError(
+                status: envelope.status, code: envelope.code, message: envelope.error
+            ))
+        }
+        return .bridgeFailure(status)
     }
 
     private func validateResponse(data: Data, response: URLResponse) throws {
-        guard let http = response as? HTTPURLResponse else {
-            throw BridgeError.transport(underlying: "Non-HTTP response from bridge", serial: serial)
+        switch classify(data: data, response: response) {
+        case .success: return
+        case .bridgeFailure(let failure), .otherListener(let failure): throw failure
         }
-        guard http.statusCode != 200 else { return }
-        if http.statusCode != 401 {
-            struct Empty: Decodable {}
-            if let envelope = try? JSONDecoder().decode(BridgeEnvelope<Empty>.self, from: data),
-               !envelope.isSuccess {
-                throw BridgeError.applicationError(
-                    status: envelope.status, code: envelope.code, message: envelope.error
-                )
-            }
-        }
-        throw BridgeError.httpStatus(code: http.statusCode, body: String(data: data, encoding: .utf8) ?? "")
     }
 
     /// Map a connection-level URLSession failure to the most actionable
