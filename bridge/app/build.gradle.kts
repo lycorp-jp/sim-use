@@ -11,8 +11,8 @@ android {
         applicationId = "com.linecorp.simuse.devicebridge"
         minSdk = 30
         targetSdk = 35
-        versionCode = 23
-        versionName = "0.16.0"
+        versionCode = 24
+        versionName = "0.16.1"
 
         // Must match `BridgeClient.expectedProtocolVersion` on the
         // Swift side — bump both together on breaking wire changes

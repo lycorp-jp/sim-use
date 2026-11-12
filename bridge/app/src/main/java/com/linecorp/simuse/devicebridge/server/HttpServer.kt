@@ -46,23 +46,16 @@ class HttpServer(
     val isRunning: Boolean get() = running.get()
 
     fun start() {
-        if (running.getAndSet(true)) return
-
+        if (running.get()) return
+        // Bind before reporting success so provider discovery never advertises
+        // a listener that failed to start.
+        val ss = bindAvailablePort(port)
+        serverSocket = ss
+        running.set(true)
         val pool = Executors.newFixedThreadPool(HANDLER_POOL_SIZE)
         executor = pool
-
         acceptThread = Thread({
             try {
-                val ss = ServerSocket()
-                ss.reuseAddress = true
-                // Bind to loopback only. `adb forward tcp:LOCAL tcp:REMOTE`
-                // reaches us through 127.0.0.1, so wildcard binding only
-                // adds an attack surface: a Wi-Fi-connected device would
-                // otherwise expose the bridge to any LAN peer that knows
-                // the auth token.
-                ss.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port))
-                serverSocket = ss
-                Log.i(TAG, "HTTP server listening on 127.0.0.1:$port")
                 while (running.get()) {
                     try {
                         val socket = ss.accept()
@@ -77,6 +70,8 @@ class HttpServer(
             }
         }, "SimuseHttpServer-accept").also { it.start() }
     }
+
+    val boundPort: Int? get() = serverSocket?.takeIf { isRunning }?.localPort
 
     fun stop() {
         if (!running.getAndSet(false)) return
@@ -300,6 +295,29 @@ class HttpServer(
     )
 
     companion object {
+        internal fun bindAvailablePort(preferredPort: Int): ServerSocket {
+            return try {
+                bindLoopback(preferredPort)
+            } catch (e: java.net.BindException) {
+                if (preferredPort == 0) throw e
+                bindLoopback(0)
+            }
+        }
+
+        private fun bindLoopback(port: Int): ServerSocket {
+            val socket = ServerSocket()
+            try {
+                socket.reuseAddress = true
+                // adb forward reaches loopback; never expose the bearer
+                // API to peers on the device's Wi-Fi network.
+                socket.bind(InetSocketAddress(InetAddress.getByName("127.0.0.1"), port))
+                return socket
+            } catch (e: Exception) {
+                socket.close()
+                throw e
+            }
+        }
+
         private const val TAG = "SimuseHttpServer"
         private const val SOCKET_TIMEOUT_MS = 8_000
         private const val HANDLER_POOL_SIZE = 4

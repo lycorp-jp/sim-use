@@ -22,8 +22,8 @@ import org.json.JSONObject
  *
  * Same shape and same query-cursor encoding as csat's
  * `CsatContentProvider`. The returned token row format
- * (`result={"status":"success","result":"<uuid>"}`) is what the Swift
- * `AuthTokenFetcher` already expects, so no client change is needed.
+ * keeps the token in `result` and adds optional `port` / `server_error`
+ * fields so clients can discover a listener before creating a forward.
  *
  * Access is gated to `adb shell` / root only by [assertShellCaller]. The
  * provider is `exported="true"` in the manifest because adb-shell calls
@@ -50,6 +50,11 @@ class SimuseContentProvider : ContentProvider() {
         val json = JSONObject().apply {
             put("status", "success")
             put("result", token)
+            val endpoint = SimuseAccessibilityService.instance?.endpointSnapshot()
+                ?: SimuseAccessibilityService.EndpointSnapshot(null, null, "stopped")
+            put("server_state", endpoint.state)
+            endpoint.port?.let { put("port", it) }
+            endpoint.error?.let { put("server_error", it) }
         }.toString()
         return MatrixCursor(arrayOf(COLUMN_RESULT)).apply {
             addRow(arrayOf(json))

@@ -2,6 +2,16 @@
 package com.linecorp.simuse.devicebridge
 
 import android.net.Uri
+import android.database.MatrixCursor
+import com.linecorp.simuse.devicebridge.config.AuthManager
+import com.linecorp.simuse.devicebridge.service.SimuseAccessibilityService
+import io.mockk.mockkConstructor
+import io.mockk.just
+import io.mockk.Runs
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import android.os.Binder
 import com.linecorp.simuse.devicebridge.service.SimuseContentProvider
 import io.mockk.every
@@ -40,6 +50,28 @@ class SimuseContentProviderTest {
     @After
     fun tearDown() {
         unmockkAll()
+    }
+
+    @Test
+    fun absentServicePublishesExplicitStoppedState() {
+        every { Binder.getCallingUid() } returns 2000
+        assertNull(SimuseAccessibilityService.instance)
+        mockkConstructor(AuthManager::class)
+        mockkConstructor(MatrixCursor::class)
+        every { anyConstructed<AuthManager>().getOrCreateToken() } returns "test-token"
+        val rows = mutableListOf<Array<String>>()
+        every { anyConstructed<MatrixCursor>().addRow(capture(rows)) } just Runs
+        mockkConstructor(SimuseContentProvider::class)
+        every { anyConstructed<SimuseContentProvider>().context } returns mockk(relaxed = true)
+        val provider = SimuseContentProvider()
+
+        provider.query(authTokenUri, null, null, null, null)
+
+        val json = JSONObject(rows.single().single())
+        assertEquals("test-token", json.getString("result"))
+        assertEquals("stopped", json.getString("server_state"))
+        assertFalse(json.has("port"))
+        assertFalse(json.has("server_error"))
     }
 
     @Test(expected = SecurityException::class)

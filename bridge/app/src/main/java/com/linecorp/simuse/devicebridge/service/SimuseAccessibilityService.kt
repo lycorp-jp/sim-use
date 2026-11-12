@@ -66,6 +66,7 @@ class SimuseAccessibilityService : AccessibilityService() {
         super.onDestroy()
     }
 
+    @Synchronized
     fun startServer() {
         if (httpServer?.isRunning == true) return
         val authManager = AuthManager(this)
@@ -74,11 +75,21 @@ class SimuseAccessibilityService : AccessibilityService() {
             authManager = authManager,
         )
         router = newRouter
-        httpServer = HttpServer(SERVER_PORT, newRouter).also { it.start() }
-        Log.i(TAG, "HTTP server started on port $SERVER_PORT")
+        startupError = null
+        try {
+            httpServer = HttpServer(SERVER_PORT, newRouter).also { it.start() }
+            Log.i(TAG, "HTTP server started on port $serverPort")
+        } catch (e: Exception) {
+            newRouter.close()
+            router = null
+            startupError = e.message ?: "Bridge server could not start"
+            Log.e(TAG, startupError, e)
+        }
     }
 
+    @Synchronized
     fun stopServer() {
+        startupError = null
         httpServer?.stop()
         httpServer = null
         // Shut down the router's `rootWindowExecutor` (cached
@@ -89,6 +100,25 @@ class SimuseAccessibilityService : AccessibilityService() {
         router?.close()
         router = null
         Log.i(TAG, "HTTP server stopped")
+    }
+
+    @Volatile
+    var startupError: String? = null
+        private set
+    val serverPort: Int? get() = endpointSnapshot().port
+
+    data class EndpointSnapshot(val port: Int?, val error: String?, val state: String)
+
+    // Use the start/stop monitor: discovery waits until a transition completes.
+    @Synchronized
+    fun endpointSnapshot(): EndpointSnapshot {
+        val port = httpServer?.boundPort
+        val error = startupError
+        return EndpointSnapshot(port, error, when {
+            port != null -> "running"
+            error != null -> "failed"
+            else -> "stopped"
+        })
     }
 
     val isServerRunning: Boolean get() = httpServer?.isRunning == true
