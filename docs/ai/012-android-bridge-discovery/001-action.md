@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | 2026-11-12 | Retained the contributor's endpoint discovery and action retry commit without changes. | #185, `ff966c0e1821042191b9c1c21845d8fb400c00a0` |
 | 2026-11-12 | Added cold/failure discovery, session generations, and HTTP outside the state lock. | `fix/bridge-port-fallback-takeover` |
-| 2026-11-12 | Replaced the fixed fallback range with a loopback port 0 bind. Verified unit tests and live Android behavior. | This continuation |
+| 2026-11-12 | Replaced the fixed fallback range with a loopback port 0 bind. Verified unit tests and live Android behavior. | #189 |
 | 2026-11-12 | Recorded the remaining warm endpoint identity boundary. | #188 |
 
 ## Outcome (as of 2026-11-12)

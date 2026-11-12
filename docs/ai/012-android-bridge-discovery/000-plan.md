@@ -4,7 +4,7 @@
 | --- | --- |
 | **Status** | Implemented on continuation branch; merge pending |
 | **Anchor date** | 2026-11-12 |
-| **Primary PRs** | #185 (original contribution; continuation pending) |
+| **Primary PRs** | #185 (original contribution), #189 (continuation; merge pending) |
 | **Related** | #188, [008-linux-android-build](../008-linux-android-build/000-design.md) |
 
 ## Background
