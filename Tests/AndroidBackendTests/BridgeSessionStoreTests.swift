@@ -22,6 +22,34 @@ final class BridgeSessionStoreTests: XCTestCase {
         }
     }
 
+    // MARK: - Exclusive access
+
+    func testExclusiveAccessTimeoutDoesNotChangeTheSession() throws {
+        let serial = "emulator-5554"
+        let session = BridgeSession(token: "secret", localPort: 12345, remotePort: 8080)
+        BridgeSessionStore.write(session, udid: serial, home: tempHome)
+
+        try BridgeSessionStore.withExclusiveAccess(udid: serial, home: tempHome) {
+            XCTAssertThrowsError(try BridgeSessionStore.withExclusiveAccess(
+                udid: serial, home: tempHome, timeout: 0
+            ) {
+                BridgeSessionStore.invalidate(udid: serial, home: tempHome)
+            })
+        }
+        XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: tempHome)?.token, session.token)
+    }
+
+    func testExclusiveAccessIsReleasedAfterFailure() throws {
+        enum Failure: Error { case expected }
+        let serial = "emulator-5554"
+        XCTAssertThrowsError(try BridgeSessionStore.withExclusiveAccess(udid: serial, home: tempHome) {
+            throw Failure.expected
+        })
+
+        let result = try BridgeSessionStore.withExclusiveAccess(udid: serial, home: tempHome, timeout: 0) { true }
+        XCTAssertTrue(result)
+    }
+
     // MARK: - File permissions
 
     /// The persisted session file holds the bearer token used to talk

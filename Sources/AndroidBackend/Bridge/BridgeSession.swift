@@ -1,5 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 import Foundation
+#if canImport(Darwin)
+import Darwin
+#else
+import Glibc
+#endif
 
 /// Persistent per-UDID bridge connection state. Lets the stateless CLI
 /// reuse an `adb forward` registration across invocations, and for a short
@@ -46,6 +51,43 @@ public struct BridgeSession: Codable, Equatable, Sendable {
 }
 
 public enum BridgeSessionStore {
+
+    /// Coordinate the complete disk/forward transition, not just a file write.
+    /// Keep this file in place so all waiters continue to lock the same inode.
+    static func withExclusiveAccess<Result>(
+        udid: String, home: URL = homeDirectory, timeout: TimeInterval = 30,
+        _ body: () throws -> Result
+    ) throws -> Result {
+        guard isValidUDID(udid) else {
+            throw BridgeError.transport(underlying: "Invalid bridge session device serial", serial: udid)
+        }
+        let dir = directory(for: udid, home: home)
+        try FileManager.default.createDirectory(
+            at: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+        )
+        let fd = open(dir.appendingPathComponent("bridge.lock").path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else {
+            throw BridgeError.transport(underlying: "Could not open the shared bridge session lock", serial: udid)
+        }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_uid == getuid(),
+              info.st_mode & S_IFMT == S_IFREG, info.st_mode & 0o077 == 0,
+              info.st_nlink == 1 else {
+            throw BridgeError.transport(underlying: "The bridge session lock is not a private regular file", serial: udid)
+        }
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EINTR else {
+                throw BridgeError.transport(underlying: "Could not acquire the shared bridge session lock", serial: udid)
+            }
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                throw BridgeError.transport(underlying: "Timed out waiting for another bridge session transition", serial: udid)
+            }
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        return try body()
+    }
 
     public static func directory(for udid: String, home: URL = homeDirectory) -> URL {
         home

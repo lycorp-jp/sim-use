@@ -1,5 +1,9 @@
 # 012.002 — Review hardening
 
+> Updated 2026-11-12: The shared disk ownership checks below also need to be
+> serialized across clients and processes. See
+> [003-shared-session-lock.md](003-shared-session-lock.md) for R189-06.
+
 ## Context
 
 A review of #189 at `11b352ad` measured the continuation on a headless Android

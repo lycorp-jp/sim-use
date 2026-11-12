@@ -681,6 +681,73 @@ final class BridgeConnectionScopingTests: XCTestCase {
 
     // MARK: - Shared disk session
 
+    func testConcurrentCleanupPreservesAnotherClientsReplacement() async throws {
+        let first = try makeClient(environment: [:])
+        try first.pressKey(3)
+        persistSession(token: "token-B", localPort: 18081, environment: [:])
+        let second = try makeClient(environment: [:])
+        RecordingBridgeProtocol.reset()
+        remotePort = 49153
+        try writeAdbFixture()
+        let gate = try installAdbGate(matching: "forward --list")
+        defer { try? Data().write(to: gate.release) }
+
+        let cleanup = Task.detached { first.invalidate() }
+        try waitForAdbGate(gate.waiting)
+        let started = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        let replacement = Task.detached {
+            started.signal()
+            defer { finished.signal() }
+            try second.pressKey(3)
+        }
+        XCTAssertEqual(started.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(finished.wait(timeout: .now() + 0.3), .timedOut,
+                       "replacement must wait for the shared transition")
+        try Data().write(to: gate.release)
+        await cleanup.value
+        try await replacement.value
+
+        XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: home)?.localPort, 18082)
+        let forwards = try String(contentsOf: forwardList, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(forwards, ["\(serial) tcp:18082 tcp:49153"])
+        XCTAssertEqual(RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }.count, 1)
+    }
+
+    func testConcurrentMigrationsShareOneReplacementForward() async throws {
+        persistSession(token: "token-A", localPort: 18080, environment: [:])
+        try "\(serial) tcp:18080 tcp:8080\n".write(to: forwardList, atomically: true, encoding: .utf8)
+        let first = try makeClient(environment: [:])
+        let second = try makeClient(environment: [:])
+        remotePort = 49153
+        try writeAdbFixture()
+        let gate = try installAdbGate(matching: "content query")
+        defer { try? Data().write(to: gate.release) }
+
+        let migration = Task.detached { try first.pressKey(3) }
+        try waitForAdbGate(gate.waiting)
+        let started = DispatchSemaphore(value: 0)
+        let finished = DispatchSemaphore(value: 0)
+        let replacement = Task.detached {
+            started.signal()
+            defer { finished.signal() }
+            try second.pressKey(3)
+        }
+        XCTAssertEqual(started.wait(timeout: .now() + 5), .success)
+        XCTAssertEqual(finished.wait(timeout: .now() + 0.3), .timedOut,
+                       "migration must wait for the shared transition")
+        try Data().write(to: gate.release)
+        try await replacement.value
+        try await migration.value
+
+        XCTAssertEqual(BridgeSessionStore.read(udid: serial, home: home)?.localPort, 18082)
+        let forwards = try String(contentsOf: forwardList, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(forwards, ["\(serial) tcp:18082 tcp:49153"])
+        XCTAssertEqual(adbCalls().filter { $0.contains("forward --remove") }.count, 1)
+        XCTAssertEqual(adbCalls().filter { $0.contains("forward tcp:0") }.count, 1)
+        XCTAssertEqual(RecordingBridgeProtocol.requests().filter { $0.path == "/keyboard/key" }.count, 2)
+    }
+
     /// Another process replaced the forward and the disk session after a
     /// port change. This client must use that forward, not strand it.
     func testReplacedDiskSessionIsAdoptedInsteadOfLeakingAForward() throws {
@@ -815,6 +882,42 @@ final class BridgeConnectionScopingTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    private func installAdbGate(matching command: String) throws -> (waiting: URL, release: URL) {
+        let waiting = root.appendingPathComponent("gate-waiting")
+        let release = root.appendingPathComponent("gate-release")
+        let script = root.appendingPathComponent("adb")
+        let body = try String(contentsOf: script, encoding: .utf8)
+        let gate = """
+            case "$*" in
+              *"\(command)"*)
+                if mkdir '\(root.path)/gate-claimed' 2>/dev/null; then
+                  touch '\(waiting.path)'
+                  count=0
+                  while [ ! -f '\(release.path)' ]; do
+                    count=$((count + 1))
+                    [ "$count" -lt 400 ] || exit 1
+                    sleep 0.01
+                  done
+                fi ;;
+            esac
+
+            """
+        try body.replacingOccurrences(of: "#!/bin/sh\n", with: "#!/bin/sh\n" + gate)
+            .write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        return (waiting, release)
+    }
+
+    private func waitForAdbGate(_ marker: URL) throws {
+        let deadline = Date().addingTimeInterval(5)
+        while !FileManager.default.fileExists(atPath: marker.path) {
+            guard Date() < deadline else {
+                throw NSError(domain: "AdbGateTimeout", code: 1)
+            }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+    }
+
     /// `discoveredAt: nil` is the shape that older releases wrote.
     private func persistSession(
         token: String, localPort: Int, environment: [String: String], discoveredAt: Date? = nil
@@ -839,6 +942,7 @@ final class BridgeConnectionScopingTests: XCTestCase {
               *"forward --remove"*)
                 # Real adb with several devices refuses this without -s.
                 [ "$1" = "-s" ] || { echo "adb: error: more than one device/emulator" >&2; exit 1; }
+                awk -v local="$5" '$2 == local { found=1 } END { exit !found }' '\(forwardList.path)' || { echo "adb: error: listener not found" >&2; exit 1; }
                 awk -v local="$5" '$2 != local' '\(forwardList.path)' > '\(forwardList.path).next'
                 mv '\(forwardList.path).next' '\(forwardList.path)' ;;
               *"forward --list"*) \(failForwardList ? "echo 'error: cannot connect to daemon' >&2; exit 1" : "cat '\(forwardList.path)' 2>/dev/null") ;;

@@ -103,3 +103,4 @@ Reproduction steps: [reproduction.md](reproduction.md). Results:
 ## Amendments
 
 - Updated 2026-11-12: Trust window for discovered disk sessions, recovery after a response from another listener, shared disk session ownership, one discovery in `init` — see [002-review-hardening.md](002-review-hardening.md).
+- Updated 2026-11-12: Coordinate disk and forward transitions across clients and processes — see [003-shared-session-lock.md](003-shared-session-lock.md).

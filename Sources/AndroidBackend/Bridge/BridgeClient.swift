@@ -24,7 +24,8 @@ import SimUseCore
 /// concurrent callers across daemon worker threads. The mutable cached
 /// state is guarded by `lock`. HTTP uses immutable session snapshots outside
 /// the lock. Session generations prevent old responses and failures from
-/// changing a newer connection. See docs/ai/012-android-bridge-discovery/.
+/// changing a newer connection. A per-device file lock coordinates disk and
+/// forward transitions across clients. See docs/ai/012-android-bridge-discovery/.
 public final class BridgeClient: @unchecked Sendable {
     public static let expectedProtocolVersion = 2
     public static let defaultRemotePort = 8080
@@ -97,18 +98,6 @@ public final class BridgeClient: @unchecked Sendable {
         self.urlSession = urlSession ?? URLSession(configuration: config)
         self.connectionTimeout = connectionTimeout
         self.readTimeout = readTimeout
-
-        // A session for this connection stays on disk until the first request
-        // checks it (`establishEndpoint`). After a host-only change the old
-        // forward is on this adb server but points at another bridge host.
-        if let cached = BridgeSessionStore.read(udid: serial, home: sessionHome),
-           cached.connection != connection.identity, cached.adbServer == connection.adbServer,
-           let forwards = try? adb.forwards() {
-            if forwards.contains(Adb.Forward(serial: serial, localPort: cached.localPort, remote: "tcp:\(cached.remotePort)")) {
-                _ = try? adb.forwardRemove(serial: serial, localPort: cached.localPort)
-            }
-            BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
-        }
     }
 
     // MARK: - Public entry points
@@ -387,6 +376,21 @@ public final class BridgeClient: @unchecked Sendable {
     /// serializes discovery and forward creation, never HTTP transport.
     /// A non-nil `startupTimeout` forces provider discovery.
     private func establishEndpoint(startupTimeout: TimeInterval?) throws -> Session {
+        try BridgeSessionStore.withExclusiveAccess(udid: serial, home: sessionHome) {
+            try establishLockedEndpoint(startupTimeout: startupTimeout)
+        }
+    }
+
+    /// Both the instance lock and shared file lock are held here. A host-only
+    /// change leaves an old forward on this adb server; remove it before reuse.
+    private func establishLockedEndpoint(startupTimeout: TimeInterval?) throws -> Session {
+        if let cached = BridgeSessionStore.read(udid: serial, home: sessionHome),
+           cached.connection != connection.identity, cached.adbServer == connection.adbServer {
+            if try ownsForward(localPort: cached.localPort, remotePort: cached.remotePort) {
+                try adb.forwardRemove(serial: serial, localPort: cached.localPort)
+            }
+            BridgeSessionStore.invalidate(udid: serial, home: sessionHome)
+        }
         let restored = diskSession()
         // A failed list keeps the disk session for the next call to check.
         let ownsRestored = try restored.map {
@@ -434,6 +438,13 @@ public final class BridgeClient: @unchecked Sendable {
         defer { lock.unlock() }
         // A delayed failure belongs to its original session, not a replacement.
         if let failedGeneration, session?.generation != failedGeneration { return }
+        try BridgeSessionStore.withExclusiveAccess(udid: serial, home: sessionHome) {
+            try discardLockedEndpoint()
+        }
+    }
+
+    /// The shared lock protects the disk snapshot until deletion is complete.
+    private func discardLockedEndpoint() throws {
         let stored = diskSession()
         // A client that has not connected owns the forward of its disk session.
         let ports = session.map { ($0.localPort, $0.remotePort) }
