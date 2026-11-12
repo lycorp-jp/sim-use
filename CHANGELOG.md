@@ -11,7 +11,7 @@ Android connections now work when another app occupies the bridge's default port
 
 ### Fixed
 
-- Android: the bridge selects a fallback when 8080 is occupied and reports bind exhaustion clearly. The CLI validates endpoints and refreshes screen dimensions after bridge restarts. Init polls for service startup; actions reconnect after connection refusal and retain original errors if cleanup fails, without replaying uncertain outcomes.
+- Android: connections work when another app occupies device port 8080. The bridge discovers an available port and the CLI reconnects after failure, without repeating actions whose outcome is unknown. Running daemons keep their fast connection cache. Thanks to @iopass4 for the original fix in #185.
 - Homebrew: preserve the upstream signature for notarized releases instead of replacing it with an ad-hoc signature. Release installation checks now use the same formula generator and verify that Homebrew leaves the signed binary unchanged.
 
 ## [0.16.0] - 2026-10-21
