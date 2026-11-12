@@ -58,6 +58,29 @@ medians of ten calls after two warm-up calls.
   forward. The warm daemon then ran `ui` and `button home` through that
   forward. `adb forward --list` showed one forward at each step.
 
+### Device suites on the final code
+
+`make e2e-android` ran on `5623fe8` (CLI `v0.16.0-8-g5623fe8`) against the
+same headless AVD, serial `emulator-5554`. The runner ran the suites in
+sequence. All ten suites passed: 29 tests, exit code 0.
+
+| Suite | Tests |
+| --- | --- |
+| AndroidTapTests | 3 |
+| AndroidStreamVideoTests | 5 |
+| AndroidRecordVideoTests | 4 |
+| AndroidScreenshotTests | 3 |
+| AndroidSwipeScrollTests | 3 |
+| AndroidTypeTests | 3 |
+| AndroidKeyboardStateTests | 1 |
+| AndroidMultiTouchTests | 1 |
+| AndroidButtonTests | 2 |
+| AndroidDescribeUITests | 4 |
+
+After the run, `adb forward --list` showed one forward for the device, to
+device port 8080. The run at `11b352ad` in [001-action.md](001-action.md)
+covered four of these suites (13 tests).
+
 ## Open questions
 
 - The listener in R189-02 still receives the bearer token of the first
