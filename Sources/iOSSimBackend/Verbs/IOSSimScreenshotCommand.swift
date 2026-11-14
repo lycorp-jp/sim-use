@@ -84,15 +84,20 @@ public struct IOSSimScreenshotCommand: SimUseExecutableCommand {
 
         let outputURL = try Self.prepareOutputURL(output: output, simulatorName: targetSimulator.name)
 
-        // The main framebuffer — the only one the pinned idb exposes — is
-        // not where the app is during a Resize Mode session (wallpaper
-        // only, issue #143) or while a secondary integrated display is
-        // active (dark; the unfolded iPhone Duo). Capture the routing
-        // display through simctl instead. Work record:
-        // docs/ai/010-display-routing/000-plan.md.
+        // Multi-display screenshots must address a display explicitly: idb's
+        // default framebuffer can select the inactive inner panel even when
+        // CoreDevice identifies the cover as primary.
+        // Work record: docs/ai/010-display-routing/005-cover-screenshot.md.
         switch await RoutingDisplayResolver.current(udid: trimmedUDID) {
         case .main:
-            break
+            let topology = await SimulatorDisplayTopologyMonitor.shared.state(for: trimmedUDID).topology
+            if let topology, topology.isMultiDisplay,
+               let display = topology.primary, display.kind == .integrated {
+                _ = try DisplayScreenshot.capture(
+                    udid: trimmedUDID, displayUniqueID: display.uniqueID, displayName: display.name, to: outputURL
+                )
+                return ExecutionResult(path: outputURL.path)
+            }
         case .resizable(let session, _):
             logger.info().log("Resizable app session active; capturing display \(session.displayUniqueID) via simctl")
             let pixelSize = try DisplayScreenshot.capture(
