@@ -19,7 +19,10 @@ public struct AndroidTypeCommand: SimUseExecutableCommand {
     @OptionGroup public var device: AndroidDeviceOptions
 
     @Argument(help: "Text to send.")
-    public var text: String
+    public var text: String?
+
+    @Flag(name: .customLong("stdin"), help: "Read exact UTF-8 text from standard input.")
+    public var useStdin: Bool = false
 
     @Flag(name: .customLong("clear"), help: "Clear the existing text before typing (replace mode). Default appends at the caret — same shape as iOS HID's `sim-use type`.")
     public var clear: Bool = false
@@ -35,12 +38,36 @@ public struct AndroidTypeCommand: SimUseExecutableCommand {
 
     public var simulatorUDIDForDaemon: String? { device.resolved }
 
+    public func validate() throws {
+        if useStdin && text != nil {
+            throw ValidationError("Specify only one input source: text or --stdin.")
+        }
+        if !useStdin && text == nil {
+            throw ValidationError("Provide text or use --stdin.")
+        }
+    }
+
     public mutating func resolveDeferredArguments() throws {
         try device.resolve()
+        if useStdin && text == nil {
+            text = try StandardInputText.read()
+        }
+    }
+
+    public func daemonArguments(from arguments: [String]) throws -> [String] {
+        guard useStdin else { return arguments }
+        return DaemonInlineInput.inliningText(try resolvedText(), into: arguments)
+    }
+
+    private func resolvedText() throws -> String {
+        guard let text else {
+            throw CLIError(errorDescription: "Text input has not been resolved.")
+        }
+        return text
     }
 
     public func execute() async throws -> ExecutionResult {
-        try Self.performType(udid: device.resolved, text: text, clear: clear)
+        try Self.performType(udid: device.resolved, text: resolvedText(), clear: clear)
         return ExecutionResult()
     }
 
@@ -51,7 +78,7 @@ public struct AndroidTypeCommand: SimUseExecutableCommand {
         // == grapheme cluster, but the colloquial meaning often
         // diverges — e.g. an emoji ZWJ sequence is 1 grapheme but
         // several scalars).
-        CommandOutput(stderr: "type ok (graphemes=\(text.count), clear=\(clear))\n")
+        CommandOutput(stderr: "type ok (graphemes=\(text?.count ?? 0), clear=\(clear))\n")
     }
 
     /// Reusable Android type entry point. Top-level cross-platform

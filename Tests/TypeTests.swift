@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import Testing
 import Foundation
+import SimUseCore
 
 @Suite("Type Command Tests", .serialized, .enabled(if: isE2EEnabled))
 struct TypeTests {
@@ -186,16 +187,30 @@ struct TypeTests {
     func typingFromStdin() async throws {
         // Arrange
         try await TestHelpers.launchPlaygroundApp(to: "text-input")
-        let textToType = "Text from stdin"
-        
-        // Act - Use echo to pipe text to stdin
+        let textToType = "Stdin" + UUID().uuidString.prefix(8)
+
         guard let udid = defaultSimulatorUDID else {
             throw TestError.commandError("No simulator UDID specified in SIMULATOR_UDID environment variable")
         }
         let simUsePath = try TestHelpers.getSimUsePath()
-        let command = "echo '\(textToType)' | \(simUsePath) type --stdin --udid \(udid)"
-        let result = try await CommandRunner.run(command)
-        #expect(result.exitCode == 0, "Command should succeed")
+        let command = "'\(simUsePath)' type --stdin --udid '\(udid)'"
+        let logURL = DaemonPaths(udid: udid).logfileURL
+        let log = try FileHandle(forReadingFrom: logURL)
+        defer { try? log.close() }
+        try log.seekToEnd()
+
+        let success = try await CommandRunner.run("printf '%s' '\(textToType)' | \(command)")
+        #expect(!success.output.contains(textToType))
+        let failure = try await CommandRunner.run(
+            "printf '%s' '\(textToType)猫' | \(command)", allowFailure: true
+        )
+        #expect(failure.exitCode != 0)
+        #expect(failure.output.contains("keyboard"))
+        #expect(!failure.output.contains(textToType))
+        #expect(!failure.output.contains("猫"))
+        let diagnostics = String(decoding: try log.readToEnd() ?? Data(), as: UTF8.self)
+        #expect(!diagnostics.contains(textToType))
+        #expect(!diagnostics.contains("猫"))
         try await Task.sleep(nanoseconds: 1_000_000_000)
         
         // Assert

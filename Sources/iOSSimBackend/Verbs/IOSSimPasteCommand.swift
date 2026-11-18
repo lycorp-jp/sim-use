@@ -461,11 +461,7 @@ public struct IOSSimPasteCommand: SimUseExecutableCommand {
             return positional
         case (nil, true, nil):
             logger?.info().log("Reading text from standard input...")
-            var input = ""
-            while let line = readLine(strippingNewline: false) {
-                input += line
-            }
-            return input
+            return try StandardInputText.read()
         case (nil, false, let file?):
             logger?.info().log("Reading text from file: \(file)")
             do {

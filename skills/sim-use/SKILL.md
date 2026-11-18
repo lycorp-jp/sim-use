@@ -75,6 +75,7 @@ Every byte of command output you read costs context. Defaults that keep the loop
 | Task | Command |
 |---|---|
 | Scroll down | `sim-use gesture scroll-up --device <UDID>` (scroll-up = content moves up = page down) |
+| Type from a pipe | For Android replacement, check `sim-use android type --help` for `--stdin` before using `android type --stdin --clear`. Have the source emit exact UTF-8 without an extra newline. Keep credentials out of shell commands. |
 | Type text | `sim-use type 'hello' --device <UDID>` |
 | Paste Unicode | Focus the field, then `sim-use paste 'こんにちは 🎉' --device <UDID>`; iOS works with Simulator.app or Device Hub, in either keyboard mode |
 | Hardware button | `sim-use button home --device <UDID>` |

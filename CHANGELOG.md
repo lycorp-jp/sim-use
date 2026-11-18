@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-iPhone Duo screenshots now capture the cover display correctly. Android connections now work when another app occupies the bridge's default port. Notarized Homebrew packages retain their original Developer ID signature after installation.
+Android can now type from stdin, and iOS type diagnostics keep the input private. Scripts using `echo` with `type --stdin` should use `printf '%s'` to omit the final newline. This release also fixes iPhone Duo cover screenshots, Android bridge port conflicts, and Homebrew signature preservation.
+
+### Added
+
+- Android: pipe UTF-8 text into `android type --stdin`, including with `--clear` to replace the field. Thanks to @diamondfive for #176.
 
 ### Fixed
+
+- iOS Simulator: `type` no longer prints input text or unsupported characters in its diagnostics.
 
 - iOS: screenshots of the folded iPhone Duo capture the cover display instead of a black or stale inner-display image.
 - Android: connections work when another app occupies device port 8080. The bridge discovers an available port and the CLI reconnects after failure, without repeating actions whose outcome is unknown. Running daemons keep their fast connection cache. Thanks to @iopass4 for the original fix in #185.
