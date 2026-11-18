@@ -127,6 +127,27 @@ struct FoldTests {
         }
     }
 
+    @Test("screenshots follow the active panel through closed, open, closed transitions")
+    func screenshotFoldTransitions() async throws {
+        guard let udid = try await Self.duoUDID() else { return }
+        try await Self.preservingPosture(udid: udid) {
+            let path = NSTemporaryDirectory() + "duo-capture-\(UUID().uuidString).png"
+            defer { try? FileManager.default.removeItem(atPath: path) }
+            for posture in ["closed", "open", "closed"] {
+                _ = try await Self.fold(posture, udid: udid)
+                _ = try await TestHelpers.runSimUseCommand("screenshot --output \(path)", simulatorUDID: udid)
+                let (size, _) = try await CommandRunner.run("sips -g pixelWidth -g pixelHeight \(path)")
+                // Orientation can change, but each panel has a distinct pixel size.
+                let dimensions = size.split(separator: "\n").compactMap { line -> Int? in
+                    guard line.contains("pixelWidth:") || line.contains("pixelHeight:") else { return nil }
+                    return Int(line.split(separator: ":").last?.trimmingCharacters(in: .whitespaces) ?? "")
+                }.sorted()
+                #expect(dimensions == (posture == "closed" ? [1398, 2034] : [2007, 2853]),
+                        "\(posture) must capture its active panel: \(size)")
+            }
+        }
+    }
+
     @Test("unfolded: describe-ui names the inner display and its interface size; screenshot captures it")
     func innerDisplayReadPaths() async throws {
         guard let udid = try await Self.duoUDID() else { return }

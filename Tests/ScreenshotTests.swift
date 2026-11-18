@@ -29,7 +29,8 @@ struct ScreenshotTests {
             .appendingPathComponent("sim-use-screenshot-json-\(UUID().uuidString).png")
         defer { try? FileManager.default.removeItem(at: output) }
 
-        let (stdout, _) = try await CommandRunner.run("\(simUsePath) screenshot --udid \(udid) --output \(output.path) --json")
+        // CommandRunner combines both streams; only stdout is the JSON envelope.
+        let (stdout, _) = try await CommandRunner.run("\(simUsePath) screenshot --udid \(udid) --output \(output.path) --json 2>/dev/null")
 
         let json = try #require(
             try JSONSerialization.jsonObject(with: Data(stdout.utf8)) as? [String: Any],
