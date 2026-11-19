@@ -11,7 +11,7 @@ android {
         applicationId = "com.linecorp.simuse.devicebridge"
         minSdk = 30
         targetSdk = 35
-        versionCode = 24
+        versionCode = 25
         versionName = "0.16.1"
 
         // Must match `BridgeClient.expectedProtocolVersion` on the

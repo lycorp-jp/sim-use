@@ -7,22 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-11-19
+
 Android can now type from stdin, and iOS type diagnostics keep the input private. Scripts using `echo` with `type --stdin` should use `printf '%s'` to omit the final newline. This release also fixes iPhone Duo cover screenshots, Android bridge port conflicts, and Homebrew signature preservation.
 
 ### Added
 
-- Android: pipe UTF-8 text into `android type --stdin`, including with `--clear` to replace the field. Thanks to @diamondfive for #176.
+- Android: pipe UTF-8 text into `android type --stdin`, including with `--clear` to replace the field. (#176, #193 — thanks @diamondfive!)
 
 ### Changed
 
-- `type --stdin` preserves line endings. A trailing LF sends Return on iOS and is included in the text sent to Android fields. Convert CRLF to LF before typing on iOS. Both `type --stdin` and `paste --stdin` reject invalid UTF-8.
+- `type --stdin` preserves line endings. A trailing LF sends Return on iOS and is included in the text sent to Android fields. Convert CRLF to LF before typing on iOS. Both `type --stdin` and `paste --stdin` reject invalid UTF-8. (#193)
 
 ### Fixed
 
-- iOS Simulator: `type` no longer prints input text or unsupported characters in its diagnostics.
-- iOS: screenshots of the folded iPhone Duo capture the cover display instead of a black or stale inner-display image.
-- Android: connections work when another app occupies device port 8080. The bridge discovers an available port and the CLI reconnects after failure, without repeating actions whose outcome is unknown. Running daemons keep their fast connection cache. Thanks to @iopass4 for the original fix in #185.
-- Homebrew: preserve the upstream signature for notarized releases instead of replacing it with an ad-hoc signature. Release installation checks now use the same formula generator and verify that Homebrew leaves the signed binary unchanged.
+- iOS Simulator: `type` no longer prints input text or unsupported characters in its diagnostics. (#193)
+- iOS: screenshots of the folded iPhone Duo capture the cover display instead of a black or stale inner-display image. (#191)
+- Android: connections work when another app occupies device port 8080. The CLI reconnects after bridge port changes without repeating actions whose outcome is unknown, and running daemons keep their fast connection cache. (#185, #189 — thanks @iopass4!)
+- Homebrew: notarized releases keep their Developer ID signature after installation, so Gatekeeper can verify the published binary. ([c02295e](https://github.com/lycorp-jp/sim-use/commit/c02295e))
 
 ## [0.16.0] - 2026-10-21
 
