@@ -29,6 +29,26 @@ struct AndroidTypeTests {
         #expect(AndroidE2E.trailingInt(ui.label(resourceId: "char_count")) == 5)
     }
 
+    @Test("Invalid stdin cannot clear a field after a successful replacement")
+    func invalidStdinPreservesField() async throws {
+        try await AndroidE2E.launch(screen: "text-input")
+        try await AndroidE2E.run("tap '#text_area_field'")
+        let binary = try TestHelpers.getSimUsePath()
+        let serial = try AndroidE2E.requireSerial()
+        let command = "'\(binary)' android type --stdin --clear --json --device '\(serial)'"
+        let seed = "--field-猫"
+        let success = try await CommandRunner.run("printf '%s' '\(seed)' | \(command)")
+        #expect(success.output.contains(#""data":{}"#))
+        _ = try await AndroidE2E.waitForOutline(timeout: 10) {
+            $0.entry(resourceId: "text_area_field")?.states.contains("value=\"\(seed)\"") == true
+        }
+        let failure = try await CommandRunner.run("printf '\\377' | \(command)", allowFailure: true)
+        #expect(failure.exitCode != 0)
+        #expect(failure.output.contains("UTF-8"))
+        let ui = try await AndroidE2E.describeUI()
+        #expect(ui.entry(resourceId: "text_area_field")?.states.contains("value=\"\(seed)\"") == true)
+    }
+
     @Test("typed text surfaces as value= on a labeled multiline field")
     func multilineFieldOutlineValue() async throws {
         try await AndroidE2E.launch(screen: "text-input")

@@ -12,8 +12,8 @@ public struct TextToHIDEvents {
         
         public var errorDescription: String? {
             switch self {
-            case .unsupportedCharacter(let char):
-                return "No keycode found for character: '\(char)'"
+            case .unsupportedCharacter:
+                return "Input contains a character that the US keyboard cannot type."
             }
         }
     }

@@ -22,7 +22,7 @@ struct Type: SimUseExecutableCommand {
         discussion: """
         Input Methods:
         1. Direct text: sim-use type "Hello World" --udid UDID
-        2. From stdin: echo "Hello World!" | sim-use type --stdin --udid UDID
+        2. From stdin: printf '%s' "Hello World!" | sim-use type --stdin --udid UDID
         3. From file: sim-use type --file text.txt --udid UDID
 
         Examples:
@@ -48,7 +48,7 @@ struct Type: SimUseExecutableCommand {
     @Argument(help: "The text to type. Use quotes for text with spaces or special characters.")
     var text: String?
 
-    @Flag(name: .customLong("stdin"), help: "Read text from standard input.")
+    @Flag(name: .customLong("stdin"), help: "Read exact UTF-8 text from standard input.")
     var useStdin: Bool = false
 
     @Option(name: .customLong("file"), help: "Read text from the specified file.")
@@ -116,7 +116,7 @@ struct Type: SimUseExecutableCommand {
         case (let positional?, false, nil):
             inputText = positional
         case (nil, true, nil):
-            inputText = IOSSimTypeCommand.readFromStdin()
+            inputText = try StandardInputText.read()
         case (nil, false, let file?):
             inputText = try IOSSimTypeCommand.readFromFile(file)
         case (nil, false, nil):

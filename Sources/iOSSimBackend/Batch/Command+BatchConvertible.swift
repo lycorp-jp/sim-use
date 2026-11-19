@@ -338,19 +338,11 @@ extension IOSSimTypeCommand: BatchConvertible {
         case (let positionalText?, false, nil):
             inputText = positionalText
         case (nil, true, nil):
-            inputText = IOSSimTypeCommand.readFromStdin()
+            inputText = try StandardInputText.read()
         case (nil, false, let file?):
             inputText = try IOSSimTypeCommand.readFromFile(file)
         default:
             throw CLIError(errorDescription: "Invalid input configuration.")
-        }
-
-        guard TextToHIDEvents.validateText(inputText) else {
-            let unsupportedChars = inputText.compactMap { char -> Character? in
-                let keyEvent = KeyEvent.keyCodeForString(String(char))
-                return keyEvent.keyCode == 0 ? char : nil
-            }
-            throw TextToHIDEvents.TextConversionError.unsupportedCharacter(unsupportedChars.first ?? " ")
         }
 
         let hidEvents = try TextToHIDEvents.convertTextToHIDEvents(inputText)

@@ -48,7 +48,7 @@ sim-use tap --label 'OK' --frame 'minX=200,maxX=400,minY=600,maxY=700'
 
 ```bash
 sim-use type 'Hello World!'                    # HID keyboard (ASCII)
-echo "complex text" | sim-use type --stdin     # stdin for special chars
+printf '%s' "complex text" | sim-use type --stdin     # stdin for special chars
 sim-use paste 'こんにちは 🎉'                    # focused caret/selection; either iOS host
 sim-use paste 'text' --replace                  # Select All then native Paste
 sim-use paste 'text' --via-menu --target-id <id>  # explicit iOS target

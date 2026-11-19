@@ -270,9 +270,15 @@ Single-finger presets (`scroll-*`, `swipe-from-*-edge`) name **visual** directio
 
 ```bash
 sim-use type 'Hello World!' --device $UDID
-echo "complex text" | sim-use type --stdin --device $UDID
+printf '%s' "complex text" | sim-use type --stdin --device $UDID
 sim-use type --file input.txt --device $UDID
 ```
+
+To fill a password, pipe UTF-8 text from its source into `type --stdin`. Keep the password itself out of the shell command. The reader preserves whitespace and rejects invalid UTF-8 before typing. Use `printf '%s'` for text already in a shell variable.
+
+A trailing LF sends Return on iOS and becomes part of the text sent to an Android field. For iOS `type`, convert Windows CRLF line endings to LF before piping the text. The simulated keyboard rejects CRLF before sending any keys.
+
+On Android, `sim-use android type --stdin --clear --device "$UDID"` replaces the focused field. An empty stream clears it.
 
 ### Paste (IME-safe Unicode)
 

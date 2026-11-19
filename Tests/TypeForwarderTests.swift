@@ -13,6 +13,31 @@ import Testing
 @MainActor
 struct TypeForwarderTests {
 
+    @Test("An unsupported HID character stays out of the diagnostic")
+    func privateHIDError() {
+        do {
+            _ = try TextToHIDEvents.convertTextToHIDEvents("TestMarker猫")
+            Issue.record("Expected unsupported text to fail")
+        } catch {
+            #expect(!error.localizedDescription.contains("猫"))
+            #expect(error.localizedDescription.contains("keyboard"))
+        }
+    }
+
+    @Test("Debug output and JSON errors keep stdin text private")
+    func debugOutputOmitsInput() async throws {
+        let binary = try TestHelpers.getSimUsePath()
+        let marker = "PrivateMarker猫"
+        let result = try await CommandRunner.run(
+            "printf '%s' '\(marker)' | SIM_USE_DEBUG=1 SIM_USE_NO_DAEMON=1 '\(binary)' ios type --stdin --json --device 00000000-DEAD-BEEF-0000-000000000000",
+            allowFailure: true
+        )
+        #expect(result.exitCode != 0)
+        #expect(result.output.contains("keyboard"))
+        #expect(!result.output.contains("PrivateMarker"))
+        #expect(!result.output.contains("猫"))
+    }
+
     // MARK: - Validation parity
 
     @Test("Multiple input sources are rejected")

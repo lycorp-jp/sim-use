@@ -20,7 +20,7 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
         discussion: """
         Input Methods:
         1. Direct text: sim-use type "Hello World" --udid UDID
-        2. From stdin: echo "Hello World!" | sim-use type --stdin --udid UDID
+        2. From stdin: printf '%s' "Hello World!" | sim-use type --stdin --udid UDID
         3. From file: sim-use type --file text.txt --udid UDID
 
         Examples:
@@ -46,7 +46,7 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
     @Argument(help: "The text to type. Use quotes for text with spaces or special characters.")
     public var text: String?
 
-    @Flag(name: .customLong("stdin"), help: "Read text from standard input.")
+    @Flag(name: .customLong("stdin"), help: "Read exact UTF-8 text from standard input.")
     public var useStdin: Bool = false
 
     @Option(name: .customLong("file"), help: "Read text from the specified file.")
@@ -78,7 +78,7 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
     /// top-level forwarder inlines the text the same way.
     public static func daemonArguments(from arguments: [String], useStdin: Bool, inputFile: String?) throws -> [String] {
         if useStdin {
-            return DaemonInlineInput.inliningText(readFromStdin(), into: arguments)
+            return DaemonInlineInput.inliningText(try StandardInputText.read(), into: arguments)
         }
         if let inputFile {
             return DaemonInlineInput.inliningText(try readFromFile(inputFile), into: arguments)
@@ -115,15 +115,10 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
         switch (text, useStdin, inputFile) {
         case (let positional?, false, nil):
             inputText = positional
-            logger.info().log("Using positional text input: '\(inputText)'")
         case (nil, true, nil):
-            logger.info().log("Reading text from standard input...")
-            inputText = Self.readFromStdin()
-            logger.info().log("Read from stdin: '\(inputText)'")
+            inputText = try StandardInputText.read()
         case (nil, false, let file?):
-            logger.info().log("Reading text from file: \(file)")
             inputText = try Self.readFromFile(file)
-            logger.info().log("Read from file: '\(inputText)'")
         case (nil, false, nil):
             // CLIError on the execute() path — validate() catches the
             // same condition with ValidationError (ArgumentParser
@@ -136,32 +131,7 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
             throw CLIError(errorDescription: "Invalid input configuration.")
         }
 
-        guard TextToHIDEvents.validateText(inputText) else {
-            let unsupportedChars = inputText.compactMap { char -> Character? in
-                let keyEvent = KeyEvent.keyCodeForString(String(char))
-                return keyEvent.keyCode == 0 ? char : nil
-            }
-            let errorMessage = """
-                Unsupported characters found: \(unsupportedChars.map { "'\($0)'" }.joined(separator: ", "))
-
-                Only US keyboard characters are supported via HID keycodes.
-                Supported: A-Z, a-z, 0-9, and symbols: !@#$%^&*()_+-={}[]|\\:";'<>?,./`~
-                """
-            logger.error().log(errorMessage)
-            throw TextToHIDEvents.TextConversionError.unsupportedCharacter(unsupportedChars.first!)
-        }
-
-        let hidEvents: [FBSimulatorHIDEvent]
-        do {
-            hidEvents = try TextToHIDEvents.convertTextToHIDEvents(inputText)
-            logger.info().log("Successfully converted text to \(hidEvents.count) HID events")
-        } catch let error as TextToHIDEvents.TextConversionError {
-            logger.error().log("Text conversion failed: \(error.localizedDescription)")
-            throw error
-        } catch {
-            logger.error().log("Unexpected error during text conversion: \(error.localizedDescription)")
-            throw error
-        }
+        let hidEvents = try TextToHIDEvents.convertTextToHIDEvents(inputText)
 
         // Empty input yields zero HID events. Return before the framework
         // preflight below so `type ""` stays a strict no-op — it must not
@@ -195,19 +165,6 @@ public struct IOSSimTypeCommand: SimUseExecutableCommand {
 
         logger.info().log("Text typing completed successfully")
         return ExecutionResult()
-    }
-
-    /// Shared stdin reader. Public so the top-level forwarder can
-    /// collect text the same way before routing to either backend.
-    public static func readFromStdin() -> String {
-        var input = ""
-        while let line = readLine() {
-            if !input.isEmpty {
-                input += "\n"
-            }
-            input += line
-        }
-        return input
     }
 
     /// Shared file reader. Public so the top-level forwarder shares
