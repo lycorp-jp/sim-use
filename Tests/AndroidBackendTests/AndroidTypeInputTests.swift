@@ -13,4 +13,19 @@ struct AndroidTypeInputTests {
         let data = try JSONEncoder().encode(AndroidTypeCommand.ExecutionResult())
         #expect(String(decoding: data, as: UTF8.self) == "{}")
     }
+
+    @Test(arguments: ["--clear", "-", "--", "", "\n--x 🐈\r\n", "--device=other", "a b"])
+    func forwardsResolvedStdinAsOnePositional(_ text: String) throws {
+        for terminator in [[], ["--"]] {
+            let arguments = ["--device", "emulator-5554", "--stdin", "--clear"] + terminator
+            var client = try AndroidTypeCommand.parse(arguments)
+            client.text = text  // State after client-side stdin resolution.
+            let forwarded = try client.daemonArguments(from: ["android", "type"] + arguments)
+            #expect(forwarded == ["android", "type", "--device", "emulator-5554", "--clear", "--", text])
+            let daemon = try AndroidTypeCommand.parse(Array(forwarded.dropFirst(2)))
+            #expect(daemon.text == text)
+            #expect(daemon.clear)
+            #expect(!daemon.useStdin)
+        }
+    }
 }

@@ -48,7 +48,7 @@ struct Type: SimUseExecutableCommand {
     @Argument(help: "The text to type. Use quotes for text with spaces or special characters.")
     var text: String?
 
-    @Flag(name: .customLong("stdin"), help: "Read text from standard input.")
+    @Flag(name: .customLong("stdin"), help: "Read exact UTF-8 text from standard input.")
     var useStdin: Bool = false
 
     @Option(name: .customLong("file"), help: "Read text from the specified file.")

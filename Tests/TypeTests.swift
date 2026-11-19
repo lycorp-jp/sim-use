@@ -194,6 +194,14 @@ struct TypeTests {
         }
         let simUsePath = try TestHelpers.getSimUsePath()
         let command = "'\(simUsePath)' type --stdin --udid '\(udid)'"
+        // Debug output is selected when the daemon starts. Reusing a quiet
+        // daemon would let the privacy assertions pass without exercising it.
+        let stopDaemon = "'\(simUsePath)' daemon stop --udid '\(udid)'"
+        _ = try await CommandRunner.run(stopDaemon)
+        _ = try await CommandRunner.run(
+            "'\(simUsePath)' keyboard-state --udid '\(udid)'",
+            environment: ["SIM_USE_DEBUG": "1"]
+        )
         let logURL = DaemonPaths(udid: udid).logfileURL
         let log = try FileHandle(forReadingFrom: logURL)
         defer { try? log.close() }
@@ -209,6 +217,8 @@ struct TypeTests {
         #expect(!failure.output.contains(textToType))
         #expect(!failure.output.contains("猫"))
         let diagnostics = String(decoding: try log.readToEnd() ?? Data(), as: UTF8.self)
+        _ = try await CommandRunner.run(stopDaemon)
+        #expect(diagnostics.contains("Text typing completed successfully"))
         #expect(!diagnostics.contains(textToType))
         #expect(!diagnostics.contains("猫"))
         try await Task.sleep(nanoseconds: 1_000_000_000)

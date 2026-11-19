@@ -13,10 +13,13 @@ Android can now type from stdin, and iOS type diagnostics keep the input private
 
 - Android: pipe UTF-8 text into `android type --stdin`, including with `--clear` to replace the field. Thanks to @diamondfive for #176.
 
+### Changed
+
+- `type --stdin` preserves line endings. A trailing LF sends Return on iOS and is included in the text sent to Android fields. Convert CRLF to LF before typing on iOS. Both `type --stdin` and `paste --stdin` reject invalid UTF-8.
+
 ### Fixed
 
 - iOS Simulator: `type` no longer prints input text or unsupported characters in its diagnostics.
-
 - iOS: screenshots of the folded iPhone Duo capture the cover display instead of a black or stale inner-display image.
 - Android: connections work when another app occupies device port 8080. The bridge discovers an available port and the CLI reconnects after failure, without repeating actions whose outcome is unknown. Running daemons keep their fast connection cache. Thanks to @iopass4 for the original fix in #185.
 - Homebrew: preserve the upstream signature for notarized releases instead of replacing it with an ad-hoc signature. Release installation checks now use the same formula generator and verify that Homebrew leaves the signed binary unchanged.
