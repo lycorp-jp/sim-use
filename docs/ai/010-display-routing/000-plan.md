@@ -448,3 +448,4 @@ Result: works (E48–E52). dtuhidd can be started on demand; Indigo cannot route
 - Updated 2026-10-20: readable Duo display names — see [003-readable-display-names.md](003-readable-display-names.md).
 - Updated 2026-10-20: remove the single-wide-node side-bar gate — see [004-remove-wide-content-gate.md](004-remove-wide-content-gate.md).
 - Updated 2026-11-14: explicitly capture the Duo cover display — see [005-cover-screenshot.md](005-cover-screenshot.md).
+- Updated 2026-11-19: record transient Duo black screens and fold-confirmation failures, with manual recovery and deferred mitigation — see [006-transient-fold-black-screen.md](006-transient-fold-black-screen.md).
