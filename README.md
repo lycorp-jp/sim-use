@@ -544,6 +544,8 @@ sim-use daemon stop --all
 SIM_USE_NO_DAEMON=1 sim-use ui --device $UDID
 ```
 
+With `SIM_USE_NO_DAEMON=1`, `ui` and other non-HID commands run in-process. Input on DTUHID (Device Hub, or touch on any non-main display) fails until you unset the variable.
+
 Daemons self-exit after 600 s of idle and log to `/tmp/sim-use-<uid>/<UDID>.log`. Streaming commands (`screenshot`, `record-video`, `stream-video`) always run in-process regardless.
 
 

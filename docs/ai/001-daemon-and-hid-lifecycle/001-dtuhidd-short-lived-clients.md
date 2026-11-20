@@ -1,5 +1,7 @@
 # 001.001 — HID from short-lived processes is lost on the dtuhidd transport
 
+> Updated 2026-11-20. Explicit no-daemon input now fails before a DTUHID send. See [002](002-no-daemon-dtuhid-refusal.md).
+
 | | |
 | --- | --- |
 | **Date** | 2026-10-14 |

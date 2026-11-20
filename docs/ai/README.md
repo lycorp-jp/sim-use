@@ -37,7 +37,7 @@ docs/ai/NNN-<slug>/
 
 | # | Entry | Anchor | Topic |
 | --- | --- | --- | --- |
-| 001 | [daemon-and-hid-lifecycle](001-daemon-and-hid-lifecycle/000-design.md) | 2026-06-05 | Per-device daemon: no double delivery, idle timer, boot-identity and transport-window gates on HID reuse, version and connection-identity gates. Amendment: [HID from short-lived processes on dtuhidd](001-daemon-and-hid-lifecycle/001-dtuhidd-short-lived-clients.md) (#154), [batch retry policy](011-device-hub-paste/005-batch-retry-policy.md) (#172) |
+| 001 | [daemon-and-hid-lifecycle](001-daemon-and-hid-lifecycle/000-design.md) | 2026-06-05 | Per-device daemon: no double delivery, idle timer, boot-identity and transport-window gates on HID reuse, version and connection-identity gates. Amendment: [HID from short-lived processes on dtuhidd](001-daemon-and-hid-lifecycle/001-dtuhidd-short-lived-clients.md) (#154), [batch retry policy](011-device-hub-paste/005-batch-retry-policy.md) (#172), [no-daemon DTUHID refusal](001-daemon-and-hid-lifecycle/002-no-daemon-dtuhid-refusal.md) (#175) |
 | 002 | [ios-orientation-self-calibration](002-ios-orientation-self-calibration/000-design.md) | 2026-07-08 | AX-to-HID coordinate calibration for rotated simulators (#34, #38; downscaled devices #90, #92). Amendment: [gesture presets and `--coordinate-space`](002-ios-orientation-self-calibration/001-gesture-presets-and-coordinate-space.md) (#73, #74, #144) |
 | 003 | [e2e-confidence-suite](003-e2e-confidence-suite/000-design.md) | 2026-07-11 | Layered E2E and agent-eval suites, gating model, pre-release checklist |
 | 004 | [tap-optiongroup-consolidation](004-tap-optiongroup-consolidation/000-plan.md) | 2026-07-13 | Shared OptionGroups for the tap family; no more field-by-field forwarder copies |

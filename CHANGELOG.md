@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+iOS input now reports when reliable delivery requires the per-device daemon.
+
+### Fixed
+
+- With `SIM_USE_NO_DAEMON=1`, iOS input on DTUHID fails before sending instead of reporting success when the app may never receive the event. (#175)
+
 ## [0.16.1] - 2026-11-19
 
 Android can now type from stdin, and iOS type diagnostics keep the input private. Scripts using `echo` with `type --stdin` should use `printf '%s'` to omit the final newline. This release also fixes iPhone Duo cover screenshots, Android bridge port conflicts, and Homebrew signature preservation.
