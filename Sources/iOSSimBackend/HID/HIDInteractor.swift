@@ -134,6 +134,7 @@ public struct HIDInteractor {
     }
 
     public static func performHIDEvent(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
+        try await checkInputDelivery(event, in: session)
         if event.containsTouch {
             try await reachRoute(with: session, logger: logger)
         }
@@ -164,7 +165,24 @@ public struct HIDInteractor {
         }
     }
 
+    nonisolated static func refusesShortLivedDTUHIDInput(
+        inDaemon: Bool, transport: FBSimulatorHIDTransportType?, touchRoute: FBSimulatorHIDDisplayRoute?
+    ) -> Bool {
+        !inDaemon && (transport == .dtuhid || touchRoute != nil)
+    }
+
+    private static func checkInputDelivery(_ event: FBSimulatorHIDEvent, in session: Session) async throws {
+        let inDaemon = ProcessInfo.processInfo.environment["SIM_USE_IN_DAEMON"] == "1"
+        let route = !inDaemon && event.containsTouch
+            ? try await RoutingDisplayResolver.current(udid: session.simulatorUDID).hidRoute()
+            : nil
+        guard refusesShortLivedDTUHIDInput(inDaemon: inDaemon, transport: session.transport, touchRoute: route) else { return }
+        let display = route == nil ? "" : "This display needs DTUHID and the no-daemon process will not open it. "
+        throw CLIError(errorDescription: display + "The per-device daemon holds the DTUHID connection. Run the command without SIM_USE_NO_DAEMON=1.")
+    }
+
     private static func performHIDEventOnce(_ event: FBSimulatorHIDEvent, in session: Session, logger: SimUseLogger) async throws {
+        try await checkInputDelivery(event, in: session)
         logger.info().log("Performing HID event...")
         try await routeTouches(of: event, in: session, logger: logger)
         let timeoutMs = sendTimeoutMs
