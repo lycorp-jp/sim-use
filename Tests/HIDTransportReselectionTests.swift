@@ -46,6 +46,17 @@ struct HIDTransportReselectionTests {
         #expect(HIDInteractor.selectedTransport(override: .indigo, dtuhiddPresent: true) == .indigo)
     }
 
+    @Test("short-lived input is refused when the connection or touch route needs DTUHID")
+    func shortLivedInput() {
+        let route = FBSimulatorHIDDisplayRoute(digitizerTarget: 3, screenSize: CGSize(width: 2007, height: 2853), screenScale: 3)
+        #expect(HIDInteractor.refusesShortLivedDTUHIDInput(inDaemon: false, transport: .dtuhid, touchRoute: nil))
+        #expect(HIDInteractor.refusesShortLivedDTUHIDInput(inDaemon: false, transport: .indigo, touchRoute: route))
+        #expect(HIDInteractor.refusesShortLivedDTUHIDInput(inDaemon: false, transport: .dtuhid, touchRoute: route))
+        #expect(!HIDInteractor.refusesShortLivedDTUHIDInput(inDaemon: true, transport: .dtuhid, touchRoute: route))
+        #expect(!HIDInteractor.refusesShortLivedDTUHIDInput(inDaemon: false, transport: .indigo, touchRoute: nil))
+        #expect(!HIDInteractor.refusesShortLivedDTUHIDInput(inDaemon: false, transport: nil, touchRoute: nil))
+    }
+
     @Test("routed touch input needs DTUHID")
     func routeNeedsDTUHID() {
         let route = FBSimulatorHIDDisplayRoute(digitizerTarget: 3, screenSize: CGSize(width: 2007, height: 2853), screenScale: 3)

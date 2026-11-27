@@ -124,3 +124,4 @@ transport was auto-selected within `HIDBootIdentity.transportTrustWindow`
 
 - Updated 2026-10-14: HID from short-lived processes is lost on the dtuhidd transport; all input verbs go through the daemon (#154) — see [001-dtuhidd-short-lived-clients.md](001-dtuhidd-short-lived-clients.md)
 - Updated 2026-10-20: Add a command-level transient-retry policy; batches cannot be replayed after partial execution — see [011.005](../011-device-hub-paste/005-batch-retry-policy.md).
+- Updated 2026-11-20: Refuse short-lived DTUHID input before sending (#175). See [002](002-no-daemon-dtuhid-refusal.md).
