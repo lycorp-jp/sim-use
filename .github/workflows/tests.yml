@@ -55,10 +55,11 @@ jobs:
 
       # Gradle 8.7 rejects JDK 22+; pin 17 (project floor).
       - name: Set up JDK 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
-          java-version: '17'
+          # November 2026 CSPU fixes CVE-2026-114938 (Java4Shell).
+          java-version: '17.0.21.1+2'
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
