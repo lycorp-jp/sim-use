@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The bundled skill now explains the Duo cover screenshot fix and stdin behavior by CLI version.
+
+### Changed
+
+- The bundled skill tells agents when to upgrade for Duo cover screenshots, and explains how UTF-8 stdin, trailing newlines and iOS type diagnostics behave from 0.16.1.
+
 ## [0.16.1] - 2026-11-19
 
 Android can now type from stdin, and iOS type diagnostics keep the input private. Scripts using `echo` with `type --stdin` should use `printf '%s'` to omit the final newline. This release also fixes iPhone Duo cover screenshots, Android bridge port conflicts, and Homebrew signature preservation.
