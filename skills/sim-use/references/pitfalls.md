@@ -59,6 +59,7 @@ Detailed solutions for common sim-use issues. The symptom index in SKILL.md poin
 3. An iOS 27.1 SDK app puts its back button, trailing toolbar items, tab bar and status bar in a **vertical bar** on the cover display (and on the inner display in landscape). The outline lists it last, as `[Trailing  x>=N]` — `[Leading  x<=N]` when the cover is in landscape-right; its `@N` aliases tap as usual. The back button there has **no label**: tap it with `#BackButton`, not by the previous screen's title.
 4. Explicit `-x/-y` take the numbers `ui` prints on either display; `--coordinate-space native` means the inner panel's unrotated points.
 5. `record-video` and `stream-video --format h264|bgra` capture the inner display in its native portrait orientation (2008x2854), like the main display. A fold during a recording keeps the display the recording started on and prints `[i] The app moved to … while \`record-video\` ran` at the end — start a new recording after a fold.
+6. In 0.16.0, `screenshot` can return a black or stale inner-display image even when the cover visibly shows normal content. This capture-selection bug is fixed in 0.16.1. Check `sim-use --version` and upgrade an affected CLI before using cover captures as visual evidence.
 
 ## System layer detection
 

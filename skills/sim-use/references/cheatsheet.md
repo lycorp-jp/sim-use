@@ -48,12 +48,16 @@ sim-use tap --label 'OK' --frame 'minX=200,maxX=400,minY=600,maxY=700'
 
 ```bash
 sim-use type 'Hello World!'                    # HID keyboard (ASCII)
-printf '%s' "complex text" | sim-use type --stdin     # stdin for special chars
+printf '%s' "complex text" | sim-use type --stdin     # stdin for shell-sensitive text
 sim-use paste 'こんにちは 🎉'                    # focused caret/selection; either iOS host
 sim-use paste 'text' --replace                  # Select All then native Paste
 sim-use paste 'text' --via-menu --target-id <id>  # explicit iOS target
 sim-use paste --file body.txt                   # UTF-8, including multiline text
 ```
+
+With 0.16.1 and later, `type --stdin` and `paste --stdin` reject invalid UTF-8 and preserve line endings. A final LF sends Return with iOS `type` and is part of the text sent to Android fields; use `printf '%s'` instead of `echo` to omit it. Normalize CRLF to LF before iOS typing. Stdin does not extend the iOS keyboard's character set.
+
+iOS `type` diagnostics omit input text in 0.16.1 and later; older builds can print it. Keep secrets out of command arguments and diagnostic output.
 
 - iOS: both modes work with software or hardware keyboards. Default paste preserves the focused field's caret and selection; explicit targeting can move them. Native editing rules apply. Verify the field and avoid concurrent shared-clipboard writers.
 - Android: `paste` uses native `ACTION_PASTE`; `type` works for all unicode.
