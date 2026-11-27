@@ -11,7 +11,7 @@ The bundled skill now explains the Duo cover screenshot fix and stdin behavior b
 
 ### Changed
 
-- The bundled skill tells agents when to upgrade for Duo cover screenshots, and explains how UTF-8 stdin, trailing newlines and iOS type diagnostics behave from 0.16.1.
+- The bundled skill tells agents when to upgrade for Duo cover screenshots, and explains how UTF-8 stdin, trailing newlines and iOS type diagnostics behave from 0.16.1. (#196)
 
 ## [0.16.1] - 2026-11-19
 
